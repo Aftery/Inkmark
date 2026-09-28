@@ -1,0 +1,27 @@
+# ============ 构建产物 ============
+# 打包出的可执行文件（注意：build/ 下的图标资源 build/appicon.png、
+# build/darwin/ 是构建必需的，要提交，只忽略 bin 目录）
+build/bin/
+
+# 前端构建产物，由 wails build 生成
+frontend/dist/*
+# 但保留占位文件：main.go 用 //go:embed all:frontend/dist 内嵌产物，
+# 目录不存在会导致 Go 编译报 "no matching files found"
+!frontend/dist/.gitkeep
+
+# ============ 依赖 ============
+node_modules/
+
+# ============ 系统 / 编辑器 ============
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+
+# ============ 日志与临时文件 ============
+*.log
+*.tmp
+
+# Wails 生成的依赖变更缓存（用于判断是否要重跑 npm install）
+frontend/package.json.md5

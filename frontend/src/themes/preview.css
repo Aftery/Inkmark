@@ -1,0 +1,70 @@
+/* ============ 预览区排版 + 代码高亮配色 ============ */
+/* 代码高亮用 highlight.js 的 github / github-dark，和明暗主题联动 */
+
+.preview-body {
+  padding: 24px 32px 80px;
+  line-height: 1.7;
+  font-size: 15px;
+  overflow-wrap: break-word;
+}
+
+.preview-body h1 { font-size: 1.8em; border-bottom: 1px solid var(--border); padding-bottom: .3em; margin: 1em 0 .6em; }
+.preview-body h2 { font-size: 1.45em; border-bottom: 1px solid var(--border); padding-bottom: .3em; margin: 1em 0 .5em; }
+.preview-body h3 { font-size: 1.2em; margin: .8em 0 .4em; }
+.preview-body h4, .preview-body h5, .preview-body h6 { font-size: 1em; margin: .8em 0 .3em; }
+.preview-body p  { margin: .6em 0; }
+
+.preview-body a { color: var(--accent); text-decoration: none; }
+.preview-body a:hover { text-decoration: underline; }
+
+.preview-body code {
+  background: var(--code-bg);
+  border-radius: 4px;
+  padding: .15em .4em;
+  font-family: 'SF Mono', Menlo, Consolas, monospace;
+  font-size: .88em;
+}
+
+.preview-body pre {
+  background: var(--code-bg);
+  border-radius: 8px;
+  padding: 14px 16px;
+  overflow-x: auto;
+  margin: .8em 0;
+}
+.preview-body pre code { background: none; padding: 0; }
+
+.preview-body blockquote {
+  border-left: 3px solid var(--accent);
+  color: var(--text-secondary);
+  padding: 2px 0 2px 14px;
+  margin: .8em 0;
+}
+
+.preview-body ul, .preview-body ol { padding-left: 1.6em; margin: .5em 0; }
+.preview-body li + li { margin-top: .2em; }
+
+.preview-body table { border-collapse: collapse; margin: .8em 0; width: 100%; }
+.preview-body th, .preview-body td { border: 1px solid var(--border); padding: 6px 12px; }
+.preview-body th { background: var(--bg-secondary); }
+
+.preview-body img { max-width: 100%; }
+.preview-body hr { border: none; border-top: 1px solid var(--border); margin: 1.4em 0; }
+
+.preview-body input[type='checkbox'] { margin-right: 6px; }
+
+/* 任务列表里的删除线 */
+.preview-body li:has(> input[type='checkbox']:checked) {
+  color: var(--text-secondary);
+  text-decoration: line-through;
+}
+
+/* ============ highlight.js token 配色（跟随主题变量） ============ */
+.hljs-comment, .hljs-quote { color: var(--hl-comment); font-style: italic; }
+.hljs-keyword, .hljs-selector-tag, .hljs-tag, .hljs-doctag { color: var(--hl-keyword); }
+.hljs-string, .hljs-regexp, .hljs-addition { color: var(--hl-string); }
+.hljs-number, .hljs-literal { color: var(--hl-number); }
+.hljs-title, .hljs-title.function_, .hljs-name { color: var(--hl-title); }
+.hljs-attr, .hljs-attribute, .hljs-variable, .hljs-template-variable { color: var(--hl-attr); }
+.hljs-built_in, .hljs-type, .hljs-class .hljs-title { color: var(--hl-title); }
+.hljs-deletion { color: var(--hl-keyword); }
