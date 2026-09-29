@@ -1,5 +1,5 @@
 <script setup>
-import { ref, onMounted, onBeforeUnmount, computed } from 'vue'
+import { ref, onMounted, onBeforeUnmount, computed, nextTick } from 'vue'
 import { createEditor } from './editor/createEditor'
 import { createRenderer, render } from './preview/markdown'
 import { buildHtmlDocument } from './export/exporters'
@@ -72,29 +72,116 @@ let syncingScroll = false
 function onDocChange(doc) {
   markdown.value = doc
   dirty.value = true
+  // 预览 DOM 要到 nextTick 才更新完，那时才能重建标题锚点
+  nextTick(() => invalidateAnchors())
 }
 
-// 滚动联动（双向）：按比例映射 + 互斥锁防循环。
-// 两个前提必须守住，否则会静默失效：
+// 滚动联动（双向）：标题锚点映射 + 互斥锁防循环。
+// 原理：收集两栏中每个标题的「文档坐标 y」（首尾补上 0 和最大滚动位），
+// 得到两条一一对应的锚点序列；滚动时先定位当前所处的标题区间，
+// 再把区间内的偏移线性插值到对侧 —— 标题对标题对齐，比整体比例映射准确得多。
+// 回退：两边锚点数不等（setext 下划线标题扫不到、渲染时差）时退回整体比例映射。
+// 静默失效的两个前提仍须守住：
 //   1) 监听必须挂在真正滚动的元素上 —— 编辑区是 editor.scrollDOM，
 //      预览区是 .preview-pane（.preview-body 不滚动，且 scroll 事件不冒泡）
-//   2) 两边内容区的上下留白必须一致（见 createEditor.js 的 .cm-content padding），
-//      否则可滚动高度不同，比例映射会偏
-function onEditorScroll(top, maxScroll) {
-  if (syncingScroll || !previewEl.value || maxScroll <= 0) return
+//   2) 锚点必须在文档/布局变化后重建（anchorsDirty），否则映射错位：
+//      文档变化 → onDocChange 的 nextTick；分栏拖动 → onDividerMove；
+//      窗口尺寸 → resize 监听
+let anchorsCache = null
+let anchorsDirty = true
+const HEADING_SEL = '.preview-body h1,.preview-body h2,.preview-body h3,.preview-body h4,.preview-body h5,.preview-body h6'
+
+function invalidateAnchors() {
+  anchorsDirty = true
+}
+
+// 编辑器侧锚点：扫描标题行的行首位置并转成文档坐标 y。
+// 围栏代码块（``` / ~~~）内的 # 不算标题，用简单的开关状态机跳过。
+function collectEditorAnchors() {
+  const doc = editor.state.doc
+  const scroll = editor.scrollDOM
+  const base = scroll.getBoundingClientRect().top - scroll.scrollTop
+  const ys = [0]
+  let inCode = false
+  for (let i = 1; i <= doc.lines; i++) {
+    const line = doc.line(i)
+    const text = line.text.trim()
+    if (text.startsWith('```') || text.startsWith('~~~')) inCode = !inCode
+    if (!inCode && /^#{1,6}\s/.test(line.text)) {
+      const c = editor.coordsAtPos(line.from)
+      if (c) ys.push(c.top - base)
+    }
+  }
+  // 尾锚点必须 >= 最后一个标题 y，否则序列可能非递增（末尾标题贴底时）
+  ys.push(Math.max(ys[ys.length - 1], scroll.scrollHeight - scroll.clientHeight))
+  return ys
+}
+
+// 预览侧锚点：querySelectorAll 天然按 DOM 顺序返回，与编辑器侧行序一致
+function collectPreviewAnchors() {
+  const pane = previewEl.value
+  if (!pane) return null
+  const base = pane.getBoundingClientRect().top - pane.scrollTop
+  const ys = [0]
+  for (const h of pane.querySelectorAll(HEADING_SEL)) {
+    ys.push(h.getBoundingClientRect().top - base)
+  }
+  ys.push(Math.max(ys[ys.length - 1], pane.scrollHeight - pane.clientHeight))
+  return ys
+}
+
+// 惰性重建：首次滚动/锚点失效后的第一次滚动事件才收集（一次性 layout 开销）
+function getAnchors() {
+  if (anchorsDirty || !anchorsCache) {
+    anchorsDirty = false
+    anchorsCache = null
+    if (editor && previewEl.value) {
+      const ed = collectEditorAnchors()
+      const pv = collectPreviewAnchors()
+      if (pv && ed.length === pv.length) anchorsCache = { ed, pv }
+    }
+  }
+  return anchorsCache
+}
+
+// 在 src 锚点序列中定位 srcTop 所处区间，线性插值到 dst 对应区间
+function mapByAnchors(srcTop, src, dst) {
+  const last = src.length - 1
+  const t = Math.min(Math.max(srcTop, 0), src[last])
+  let i = 1
+  while (i < last && src[i] < t) i++
+  const s0 = src[i - 1], s1 = src[i]
+  if (s1 <= s0) return dst[i]
+  return dst[i - 1] + ((t - s0) / (s1 - s0)) * (dst[i] - dst[i - 1])
+}
+
+function onEditorScroll(top) {
+  if (syncingScroll || !editor || !previewEl.value) return
   syncingScroll = true
-  const el = previewEl.value
-  el.scrollTop = (top / maxScroll) * (el.scrollHeight - el.clientHeight)
+  const pane = previewEl.value
+  const a = getAnchors()
+  if (a) {
+    pane.scrollTop = mapByAnchors(top, a.ed, a.pv)
+  } else {
+    const cm = editor.scrollDOM
+    const ratio = top / Math.max(1, cm.scrollHeight - cm.clientHeight)
+    pane.scrollTop = ratio * (pane.scrollHeight - pane.clientHeight)
+  }
   requestAnimationFrame(() => (syncingScroll = false))
 }
 
 function onPreviewScroll() {
   if (syncingScroll || !editor || !previewEl.value) return
   syncingScroll = true
-  const el = previewEl.value
-  const ratio = el.scrollTop / Math.max(1, el.scrollHeight - el.clientHeight)
+  const pane = previewEl.value
   const cm = editor.scrollDOM
-  cm.scrollTop = ratio * (cm.scrollHeight - cm.clientHeight)
+  const a = getAnchors()
+  if (a) {
+    cm.scrollTop = mapByAnchors(pane.scrollTop, a.pv, a.ed)
+  } else {
+    const ratio = pane.scrollTop / Math.max(1, pane.scrollHeight - pane.clientHeight)
+    cm.scrollTop = ratio * (cm.scrollHeight - cm.clientHeight)
+  }
   requestAnimationFrame(() => (syncingScroll = false))
 }
 
@@ -107,7 +194,12 @@ onMounted(() => {
   markdown.value = DEFAULT_DOC
 })
 
-onBeforeUnmount(() => editor?.destroy())
+// 窗口尺寸变化会重排两栏，锚点 y 全部失效
+window.addEventListener('resize', invalidateAnchors)
+onBeforeUnmount(() => {
+  window.removeEventListener('resize', invalidateAnchors)
+  editor?.destroy()
+})
 
 // ---------- 文件操作 ----------
 
@@ -202,6 +294,7 @@ function onDividerDown(e) {
 
 function onDividerMove(e) {
   if (!splitting.value || !mainEl.value) return
+  anchorsDirty = true // 宽度变化会重排两栏，标题锚点 y 全部失效
   const rect = mainEl.value.getBoundingClientRect()
   // 百分比按「去掉侧栏后的可用宽度」算，侧栏出现/消失都不会让比例失真
   const sidebarW = sidebarEl.value ? sidebarEl.value.offsetWidth : 0
