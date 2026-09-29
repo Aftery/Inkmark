@@ -1,4 +1,4 @@
-module mdesk
+module inkmark
 
 go 1.25.0
 
