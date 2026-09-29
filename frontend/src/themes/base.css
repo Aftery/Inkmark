@@ -1,6 +1,7 @@
 /* ============ 全局重置与基础排版 ============ */
 /* 颜色 / 尺度 Token 见 ./tokens/design-tokens.css（运行时唯一真源，单文件） */
-/* 本文件不再定义颜色变量；旧变量名由 design-tokens.css 的兼容别名层提供。 */
+/* 本文件不再定义颜色变量；全部变量来自 tokens/design-tokens.css
+ * （兼容别名层已按 ADR-002 M3 删除，旧变量名消费已迁移完毕）。 */
 
 * { box-sizing: border-box; margin: 0; padding: 0; }
 

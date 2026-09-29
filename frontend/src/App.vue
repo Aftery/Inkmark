@@ -323,7 +323,9 @@ function getOutlineYs() {
     outlineYsCache = null
     if (mode === 'preview') {
       const pv = collectPreviewAnchors() // 预览态预览区可见，度量有效
-      if (pv) outlineYsCache = { mode, ys: pv }
+      // setext 下划线标题（标题\n===）预览 DOM 会渲染、doc 扫描不到，
+      // 数量不符时高亮下标与大纲列表错位——放弃高亮（列表自身不受影响）
+      if (pv && pv.length - 2 === outline.value.length) outlineYsCache = { mode, ys: pv }
     } else if (editor) {
       // 编辑/双栏态编辑器可见，coordsAtPos 有效（预览隐藏不影响编辑器侧）
       outlineYsCache = { mode, ys: collectEditorAnchors() }
@@ -525,6 +527,16 @@ function resetSplit() {
   editorWidth.value = 50
   localStorage.setItem('inkmark-split', '50')
 }
+
+// 分割条键盘可达（可聚焦 separator 的 aria 规范）：左右方向键 ±2% 调宽
+function onDividerKeydown(e) {
+  if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return
+  e.preventDefault()
+  const step = e.key === 'ArrowLeft' ? -2 : 2
+  editorWidth.value = Math.min(SPLIT_MAX, Math.max(SPLIT_MIN, editorWidth.value + step))
+  localStorage.setItem('inkmark-split', String(Math.round(editorWidth.value)))
+  invalidateAnchors() // 宽度变化重排两栏，锚点失效
+}
 </script>
 
 <template>
@@ -599,12 +611,18 @@ function resetSplit() {
         :class="{ active: splitting }"
         role="separator"
         aria-orientation="vertical"
-        title="拖动调整宽度，双击复位"
+        aria-label="编辑区宽度"
+        :aria-valuenow="Math.round(editorWidth)"
+        aria-valuemin="20"
+        aria-valuemax="80"
+        tabindex="0"
+        title="拖动调整宽度，双击复位，方向键微调"
         @pointerdown="onDividerDown"
         @pointermove="onDividerMove"
         @pointerup="onDividerUp"
         @pointercancel="onDividerUp"
         @dblclick="resetSplit"
+        @keydown="onDividerKeydown"
       ></div>
 
       <!-- 预览区：滚动事件必须绑在真正滚动的元素上（.preview-body 不滚动）。

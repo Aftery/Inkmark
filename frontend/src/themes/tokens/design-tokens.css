@@ -225,19 +225,6 @@
   }
 }
 
-/* ======================= 五、兼容别名层（B-slot · ADR-002） =======================
- * 保留现有变量名，组件零改动，渐进迁移：
- *   ① 本层已生效 → ② 组件逐文件改用新 Token 名 → ③ 全部迁移完成后再删除本层。
- * （base.css 中的旧变量定义已移除，由本层统一提供。）
- * ========================================================================== */
-:root {
-  --bg-primary:      var(--bg);           /* 画布 */
-  --bg-secondary:    var(--surface);      /* 外壳 */
-  --bg-tertiary:     var(--surface-2);    /* 外壳悬停 */
-  --text-primary:    var(--fg);
-  --text-secondary:  var(--fg-2);
-  --shadow:          var(--elev-raised);
-  --editor-bg:       var(--bg);
-  --editor-text:     var(--fg);
-  /* --accent / --border / --code-bg / --hl-* 已在新 Token 中同名，无需别名 */
-}
+/* 兼容别名层（B-slot）已删除（ADR-002 M3，2026-09-29）：
+ * src 内对 --bg-primary/--text-primary 等 8 个旧变量名的消费已全部迁移完毕，
+ * 删除前 grep 复核为零引用。base.css 头部的旧注释同时作废（由迁移完成取代）。 */
