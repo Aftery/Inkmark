@@ -81,6 +81,13 @@ func buildMenu(app *App) *menu.Menu {
 
 	// ④ 视图
 	viewMenu := appMenu.AddSubmenu("视图")
+	viewMenu.AddText("编辑模式", keys.CmdOrCtrl("1"), emit("menu:view-edit"))
+	viewMenu.AddText("预览模式", keys.CmdOrCtrl("2"), emit("menu:view-preview"))
+	viewMenu.AddText("双栏模式", keys.CmdOrCtrl("3"), emit("menu:view-split"))
+	viewMenu.AddSeparator()
+	viewMenu.AddText("专注模式", keys.Combo("f", keys.CmdOrCtrlKey, keys.ShiftKey), emit("menu:toggle-focus"))
+	viewMenu.AddSeparator()
+	viewMenu.AddText("显示/隐藏大纲", keys.CmdOrCtrl("b"), emit("menu:toggle-outline"))
 	viewMenu.AddText("切换主题", keys.Combo("l", keys.CmdOrCtrlKey, keys.ShiftKey), emit("menu:toggle-theme"))
 
 	// ⑤ 窗口（最小化/缩放）

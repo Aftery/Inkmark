@@ -5,8 +5,8 @@
 // 3) 语法着色全部引用 CSS 变量，明暗切换无需重建编辑器
 // 4) Markdown 结构字号与预览区标题阶梯一致（30/24/20/17/16/15 @ 15px 基准），
 //    围栏代码与预览区 highlight.js 共用同一套 --hl-* 变量（单一色板）
-import { EditorView, keymap, highlightSpecialChars } from '@codemirror/view'
-import { EditorState } from '@codemirror/state'
+import { EditorView, keymap, highlightSpecialChars, ViewPlugin, Decoration } from '@codemirror/view'
+import { EditorState, StateField, StateEffect, RangeSetBuilder } from '@codemirror/state'
 import { defaultKeymap, history, historyKeymap, indentWithTab } from '@codemirror/commands'
 import { syntaxHighlighting, HighlightStyle } from '@codemirror/language'
 import { markdown, markdownLanguage } from '@codemirror/lang-markdown'
@@ -51,6 +51,69 @@ const mdHighlight = HighlightStyle.define([
   { tag: t.invalid, color: 'var(--danger)' },
 ])
 
+// ---------- 专注模式：淡化光标外段落 ----------
+// 开关经 StateEffect 从外部 dispatch（App.vue 只发命令，不感知 Decoration 细节）。
+// 淡化本体是 line Decoration：光标所在段落块（连续非空行）全亮，其余视口内行加
+// cm-focus-dim。只遍历 visibleRanges（视口内行）是性能关键；opacity 不改布局，
+// 对滚动锚点映射零影响。样式与现有 updateListener（上方）并列，互不共享状态。
+export const setFocusMode = StateEffect.define()
+
+// 段落块 = 以空行/文档边界分隔的连续非空行（与 CommonMark 段落直觉一致）
+function paragraphRange(doc, pos) {
+  const line = doc.lineAt(pos)
+  if (!line.text.trim()) return [line.from, line.to] // 光标在空行上：块即本行
+  let from = line.from
+  let to = line.to
+  for (let n = line.number - 1; n >= 1 && doc.line(n).text.trim(); n--) from = doc.line(n).from
+  for (let n = line.number + 1; n <= doc.lines && doc.line(n).text.trim(); n++) to = doc.line(n).to
+  return [from, to]
+}
+
+const focusField = StateField.define({
+  create: () => false,
+  update(value, tr) {
+    for (const e of tr.effects) if (e.is(setFocusMode)) return e.value
+    return value
+  },
+})
+
+const focusPlugin = ViewPlugin.fromClass(
+  class {
+    constructor(view) {
+      this.decorations = this.build(view)
+    }
+    update(update) {
+      if (
+        update.docChanged ||
+        update.selectionSet ||
+        update.viewportChanged ||
+        update.startState.field(focusField) !== update.state.field(focusField)
+      ) {
+        this.decorations = this.build(update.view)
+      }
+    }
+    build(view) {
+      if (!view.state.field(focusField)) return Decoration.none
+      const [pFrom, pTo] = paragraphRange(view.state.doc, view.state.selection.main.head)
+      const builder = new RangeSetBuilder()
+      for (const { from, to } of view.visibleRanges) {
+        for (let pos = from; pos <= to; ) {
+          const line = view.state.doc.lineAt(pos)
+          const active = line.from >= pFrom && line.to <= pTo
+          builder.add(
+            line.from,
+            line.to,
+            Decoration.line({ class: active ? 'cm-focus-active' : 'cm-focus-dim' }),
+          )
+          pos = line.to + 1
+        }
+      }
+      return builder.finish()
+    }
+  },
+  { decorations: (v) => v.decorations },
+)
+
 export function createEditor(parent, { doc = '', onDocChange, onScroll }) {
   // 只监听文档变化。滚动不要在这里监听 —— CM6 的 ViewUpdate 根本没有 scrollChanged
   // 这个属性（真实属性只有 docChanged/selectionSet/focusChanged/viewportChanged/
@@ -87,7 +150,12 @@ export function createEditor(parent, { doc = '', onDocChange, onScroll }) {
           caretColor: 'var(--accent)',
           padding: 'var(--preview-padding-y) 0 var(--space-16)',  /* 与预览区上下留白一致，比例映射才准 */
         },
-        '.cm-line': { padding: '0 var(--space-6)' },
+        '.cm-line': {
+          padding: '0 var(--space-6)',
+          transition: 'opacity var(--motion-base) var(--ease-standard)',
+        },
+        '.cm-focus-dim': { opacity: '0.4' },
+        '.cm-focus-active': { opacity: '1' },
         '&.cm-focused': { outline: 'none' },
         '.cm-cursor, .cm-dropCursor': {
           borderLeftColor: 'var(--accent)',
@@ -103,6 +171,8 @@ export function createEditor(parent, { doc = '', onDocChange, onScroll }) {
         },
       }),
       updateListener,
+      focusField,
+      focusPlugin,
     ],
   })
 
