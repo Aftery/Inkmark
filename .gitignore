@@ -28,3 +28,6 @@ frontend/package.json.md5
 
 # Wails 开发期生成的 plist（构建产物，Info.plist 才是需要入库的）
 build/darwin/Info.dev.plist
+
+# Go 构建产物（go build 直接输出到项目根目录的可执行文件）
+inkmark
