@@ -1,0 +1,15 @@
+/* ============================================================================
+ * Inkmark · 样式入口（唯一样式入口）
+ * frontend/src/themes/index.css
+ * ----------------------------------------------------------------------------
+ * 统一加载顺序（不可调换）：
+ *   1) tokens/design-tokens.css —— A1/A2/B/C 四层 Token + 兼容别名层（单文件）
+ *   2) base.css                —— 全局重置与 body 基础排版
+ *   3) preview.css             —— 预览区排版 + highlight.js token 配色
+ *
+ * 使用：App.vue 顶部 `import './themes/index.css'`（main.js 不再单独引 base.css）。
+ * ========================================================================== */
+
+@import './tokens/design-tokens.css';
+@import './base.css';
+@import './preview.css';

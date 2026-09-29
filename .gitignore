@@ -25,3 +25,6 @@ Thumbs.db
 
 # Wails 生成的依赖变更缓存（用于判断是否要重跑 npm install）
 frontend/package.json.md5
+
+# Wails 开发期生成的 plist（构建产物，Info.plist 才是需要入库的）
+build/darwin/Info.dev.plist

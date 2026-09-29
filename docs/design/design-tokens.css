@@ -1,0 +1,248 @@
+/* ============================================================================
+ * Inkmark Design Tokens  v1.0.1
+ * 生成：颜好看 (UI/UX Designer) · 2026-09-29
+ *
+ * 注意：本文件为「设计交付快照」，供设计评审与留档使用。
+ *    运行时唯一真源已落到前端源码树（单文件）：
+ *      frontend/src/themes/tokens/design-tokens.css   （A1/A2/B/C 四层 + 别名层）
+ *      frontend/src/themes/index.css                  （统一样式入口）
+ *    两者内容一致；如有出入，以 frontend/src/themes/ 为准。
+ *
+ * 设计语言：赭石墨 —— 中性与留白为底，单一暖调强调色，文字即主角。
+ * 三轴刻度：Variance=3 / Motion=2 / Density=3
+ *
+ * 分层（四层 Token 架构）：
+ *   A1 identity  —— 品牌核心，不可省略（--bg / --fg / --accent / --font-*）
+ *   A2 structure —— 有默认值的结构项（间距 / 圆角 / 动效 / 语义色）
+ *   B  slot      —— 组件别名（--fg-2 / --surface-warm / --meta / --border-soft）
+ *   C  extension —— 项目专属扩展（--hl-* / --code-* / --preview-*）
+ *
+ * 使用约定：
+ *   1) 组件样式一律引用语义 token，禁止写裸 hex（#fff / #000 除外）。
+ *   2) 每屏可见的 --accent 使用 ≤ 2 处（链接、光标/选中/激活三者只挑必要项）。
+ *   3) 亮/暗切换只需改 <html data-theme="dark">，无需重建编辑器。
+ * ========================================================================== */
+
+/* ------------------------------------------------------------------ *
+ * 亮色主题（默认）—— 纸面为白，外壳沉灰，墨黑文字，赭石强调色
+ * ------------------------------------------------------------------ */
+:root,
+:root[data-theme='light'] {
+  color-scheme: light;
+
+  /* ---- A1 identity ---- */
+  --bg:            #FFFFFF;   /* 文档画布（纸面） */
+  --surface:       #F7F7F6;   /* 界面外壳：工具栏 / 侧栏 */
+  --fg:            #1E1D1B;   /* 主文字（暖墨黑） */
+  --muted:         #8B877F;   /* 弱化文字 */
+  --accent:        #B45309;   /* 赭石墨 */
+  --border:        #E6E4E0;   /* 默认边框 */
+  --font-display: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", "PingFang SC", "Noto Sans SC", "Microsoft YaHei", sans-serif;
+  --font-body:    -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", "PingFang SC", "Noto Sans SC", "Microsoft YaHei", sans-serif;
+  --font-mono:    "SF Mono", "JetBrains Mono", "Fira Code", Menlo, Consolas, "Courier New", monospace;
+
+  /* ---- B slot ---- */
+  --fg-2:          #4A4844;   /* 次级文字 */
+  --surface-warm:  #F6F5F3;   /* 引用块 / 次级容器 */
+  --meta:          #A8A49C;   /* 元数据 / 三级前景 */
+  --border-soft:   #F0EEEB;   /* 内部行分隔 */
+
+  /* ---- A2 structure ---- */
+  --surface-2:     #EFEEEC;   /* 外壳悬停 / 激活 */
+  --overlay:       rgba(30, 29, 27, 0.32);
+
+  --border-strong: #D3D0CA;
+
+  --accent-hover:  #98450A;
+  --accent-active: #7E3807;
+  --accent-soft:   #FAF0E4;
+  --accent-on:     #FFFFFF;
+
+  --success: #3E7D55;  --success-soft: #E8F2EB;
+  --warn:    #AD7B15;  --warn-soft:    #F7EFDD;
+  --danger:  #B23B31;  --danger-soft:  #F8E9E7;
+  --info:    #35699B;  --info-soft:    #E8F0F7;
+
+  /* ---- C extension：代码 ---- */
+  --code-bg:        #F6F5F3;
+  --code-inline-bg: #F1EFEC;
+  --code-border:    #E6E4E0;
+
+  /* ---- C extension：语法高亮六色 ---- */
+  --hl-keyword: #A6392A;
+  --hl-string:  #4C7A44;
+  --hl-number:  #23608F;
+  --hl-title:   #8A5A24;
+  --hl-comment: #8E8A82;
+  --hl-attr:    #6E5A1E;
+}
+
+/* ------------------------------------------------------------------ *
+ * 暗色主题 —— 柔黑画布（非纯黑）+ 暖白文字，强调色提亮
+ * ------------------------------------------------------------------ */
+:root[data-theme='dark'] {
+  color-scheme: dark;
+
+  /* ---- A1 identity ---- */
+  --bg:            #1F1F1E;
+  --surface:       #191918;
+  --fg:            #E7E4DF;
+  --muted:         #857F76;
+  --accent:        #D98B4A;
+  --border:        #35332F;
+
+  /* ---- B slot ---- */
+  --fg-2:          #B3AFA8;
+  --surface-warm:  #262523;
+  --meta:          #6B655C;
+  --border-soft:   #2A2926;
+
+  /* ---- A2 structure ---- */
+  --surface-2:     #292826;
+  --overlay:       rgba(0, 0, 0, 0.55);
+
+  --border-strong: #47443E;
+
+  --accent-hover:  #E39B5F;
+  --accent-active: #EFAF77;
+  --accent-soft:   #33261A;
+  --accent-on:     #1F1F1E;
+
+  --success: #5FAE7E;  --success-soft: #1E2A22;
+  --warn:    #D3A94E;  --warn-soft:    #2E2618;
+  --danger:  #DF7268;  --danger-soft:  #2E1E1C;
+  --info:    #7BA8D6;  --info-soft:    #1C2530;
+
+  /* ---- C extension：代码 ---- */
+  --code-bg:        #262523;
+  --code-inline-bg: #2B2A27;
+  --code-border:    #35332F;
+
+  /* ---- C extension：语法高亮六色 ---- */
+  --hl-keyword: #E08C7C;
+  --hl-string:  #A8C68C;
+  --hl-number:  #84B4DB;
+  --hl-title:   #D8B173;
+  --hl-comment: #8A857C;
+  --hl-attr:    #C7A86A;
+}
+
+/* ------------------------------------------------------------------ *
+ * 与主题无关的 Token（字体尺度 / 间距 / 圆角 / 阴影 / 动效 / 布局）
+ * ------------------------------------------------------------------ */
+:root {
+  /* ---- 字号阶梯（基准 16px root）—— 编辑区与预览区正文统一 15px ---- */
+  --text-xs:   0.75rem;    /* 12px 行号 / 徽标 */
+  --text-sm:   0.8125rem;  /* 13px 工具栏 / 树节点 / 状态 */
+  --text-base: 0.9375rem;  /* 15px 编辑区正文（基准） */
+  --text-md:   0.9375rem;  /* 15px 预览区正文（与编辑区一致，保证左右对齐） */
+  --text-lg:   1.125rem;   /* 18px */
+  --text-xl:   1.25rem;    /* 20px 预览 h3 */
+  --text-2xl:  1.5rem;     /* 24px 预览 h2 */
+  --text-3xl:  1.875rem;   /* 30px 预览 h1 */
+
+  /* ---- 预览区标题（无 border-bottom，靠字号 / 留白分层） ---- */
+  --preview-h1-size: 1.875rem;   --preview-h1-weight: 600;
+  --preview-h2-size: 1.5rem;     --preview-h2-weight: 600;
+  --preview-h3-size: 1.25rem;    --preview-h3-weight: 600;
+  --preview-h4-size: 1.0625rem;  --preview-h4-weight: 600;
+  --preview-h5-size: 1rem;       --preview-h5-weight: 600;
+  --preview-h6-size: 0.9375rem;  --preview-h6-weight: 600;
+
+  /* ---- 字重三级 ---- */
+  --weight-read:     400;
+  --weight-emphasize:510;
+  --weight-announce: 590;
+
+  /* ---- 行高 —— 正文统一 1.7，保证左右两栏文字基线对齐 ---- */
+  --leading-body:    1.7;    /* 编辑区正文 */
+  --leading-reading: 1.7;    /* 预览区正文（与编辑区一致） */
+  --leading-tight:   1.3;    /* 标题 */
+  --leading-ui:      1.4;    /* 控件 */
+
+  /* ---- 字距 ---- */
+  --tracking-display: -0.01em;
+  --tracking-body:     0;
+  --tracking-small:    0.01em;
+  --tracking-caps:     0.06em;
+
+  /* ---- 间距栅格（4px 基准） ---- */
+  --space-1:  4px;
+  --space-2:  8px;
+  --space-3:  12px;
+  --space-4:  16px;
+  --space-5:  20px;
+  --space-6:  24px;
+  --space-8:  32px;
+  --space-10: 40px;
+  --space-12: 48px;
+  --space-16: 64px;
+
+  /* ---- 圆角（上限 12px，避免过度圆滑） ---- */
+  --radius-sm:   6px;
+  --radius-md:   8px;
+  --radius-lg:   12px;
+  --radius-pill: 9999px;
+
+  /* ---- 层级（写作工具以留白 + 发丝边框分层，慎用阴影） ---- */
+  --elev-flat:   none;
+  --elev-ring:   0 0 0 1px var(--border);
+  --elev-raised: 0 1px 2px rgba(30, 29, 27, 0.05), 0 4px 12px rgba(30, 29, 27, 0.07);
+
+  /* ---- 焦点 ---- */
+  --focus-ring: 0 0 0 3px color-mix(in srgb, var(--accent) 32%, transparent);
+
+  /* ---- 动效（收敛于 120–240ms，无弹跳） ---- */
+  --motion-fast:   120ms;
+  --motion-base:   180ms;
+  --motion-slow:   240ms;
+  --ease-standard: cubic-bezier(0.2, 0, 0, 1);
+  --ease-out:      cubic-bezier(0.16, 1, 0.3, 1);
+
+  /* ---- 布局 ---- */
+  --toolbar-height:      44px;
+  --sidebar-width:       232px;
+  --preview-measure:     46rem;
+  --preview-padding-y:   40px;
+  --editor-gutter-width: 44px;
+
+  /* ---- 图标（内联 SVG：AppIcon.vue + paths.js，全项目一套，零新增依赖） ---- */
+  --icon-size-inline: 16px;
+  --icon-size-button: 20px;
+  --icon-stroke:      1.75;
+}
+
+/* 暗色下阴影减弱，改用亮度递进表达层级 */
+:root[data-theme='dark'] {
+  --elev-raised: 0 1px 2px rgba(0, 0, 0, 0.35), 0 6px 18px rgba(0, 0, 0, 0.45);
+}
+
+/* ------------------------------------------------------------------ *
+ * 无障碍：尊重系统的减少动效偏好
+ * ------------------------------------------------------------------ */
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --motion-fast: 1ms;
+    --motion-base: 1ms;
+    --motion-slow: 1ms;
+  }
+}
+
+/* ============================================================================
+ * 兼容别名层（B-slot）
+ * ----------------------------------------------------------------------------
+ * 现有代码（App.vue / base.css / createEditor.js / preview.css）仍引用旧变量名。
+ * 本层把旧名映射到新 token，使前端可逐步迁移、无需一次性改全部引用。
+ * 迁移完成后删除本层即可。
+ * ========================================================================== */
+:root {
+  --bg-primary:      var(--bg);           /* 画布 */
+  --bg-secondary:    var(--surface);      /* 外壳 */
+  --bg-tertiary:     var(--surface-2);    /* 外壳悬停 */
+  --text-primary:    var(--fg);
+  --text-secondary:  var(--fg-2);
+  --shadow:          var(--elev-raised);
+  --editor-bg:       var(--bg);
+  --editor-text:     var(--fg);
+  /* --accent / --border / --code-bg / --hl-* 已在新 token 中同名，无需别名 */
+}

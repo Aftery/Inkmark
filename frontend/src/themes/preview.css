@@ -1,65 +1,130 @@
-/* ============ 预览区排版 + 代码高亮配色 ============ */
-/* 代码高亮用 highlight.js 的 github / github-dark，和明暗主题联动 */
+/* ============================================================================
+ * Inkmark · 预览区排版 + 代码高亮配色
+ * ----------------------------------------------------------------------------
+ * 与编辑区共用同一套 Token：正文 15px / 行高 1.7 —— 这是左右两栏文字基线对齐的前提。
+ * 标题只靠字号与留白分层（无 border-bottom）；引用块无彩色竖线，靠底色 + 缩进分层。
+ * 代码高亮与编辑器（editor/createEditor.js）共用同一套 --hl-* 变量，单一色板。
+ * ========================================================================== */
 
+/* ---- 正文列：限宽居中，长文阅读舒适行宽 ---- */
 .preview-body {
-  padding: 24px 32px 80px;
-  line-height: 1.7;
-  font-size: 15px;
+  max-width: var(--preview-measure);
+  margin: 0 auto;
+  padding: var(--preview-padding-y) var(--space-6) var(--space-16);
+  font-family: var(--font-body);
+  font-size: var(--text-md);
+  line-height: var(--leading-reading);
+  color: var(--fg);
   overflow-wrap: break-word;
 }
 
-.preview-body h1 { font-size: 1.8em; border-bottom: 1px solid var(--border); padding-bottom: .3em; margin: 1em 0 .6em; }
-.preview-body h2 { font-size: 1.45em; border-bottom: 1px solid var(--border); padding-bottom: .3em; margin: 1em 0 .5em; }
-.preview-body h3 { font-size: 1.2em; margin: .8em 0 .4em; }
-.preview-body h4, .preview-body h5, .preview-body h6 { font-size: 1em; margin: .8em 0 .3em; }
-.preview-body p  { margin: .6em 0; }
+/* ---- 标题：仅靠字号 + 字重 + 留白分层，无装饰线 ---- */
+.preview-body h1,
+.preview-body h2,
+.preview-body h3,
+.preview-body h4,
+.preview-body h5,
+.preview-body h6 {
+  font-weight: var(--weight-announce);
+  line-height: var(--leading-tight);
+  letter-spacing: var(--tracking-display);
+  color: var(--fg);
+}
+.preview-body h1 { font-size: var(--preview-h1-size); margin: var(--space-10) 0 var(--space-4); }
+.preview-body h2 { font-size: var(--preview-h2-size); margin: var(--space-8) 0 var(--space-3); }
+.preview-body h3 { font-size: var(--preview-h3-size); margin: var(--space-6) 0 var(--space-2); }
+.preview-body h4 { font-size: var(--preview-h4-size); margin: var(--space-5) 0 var(--space-2); }
+.preview-body h5 { font-size: var(--preview-h5-size); margin: var(--space-4) 0 var(--space-2); }
+.preview-body h6 { font-size: var(--preview-h6-size); color: var(--muted); margin: var(--space-4) 0 var(--space-2); }
 
+.preview-body p { margin: var(--space-3) 0; }
+
+/* ---- 行内元素 ---- */
 .preview-body a { color: var(--accent); text-decoration: none; }
-.preview-body a:hover { text-decoration: underline; }
+.preview-body a:hover { text-decoration: underline; text-underline-offset: 2px; }
+
+.preview-body strong { font-weight: var(--weight-emphasize); color: var(--fg); }
 
 .preview-body code {
-  background: var(--code-bg);
-  border-radius: 4px;
-  padding: .15em .4em;
-  font-family: 'SF Mono', Menlo, Consolas, monospace;
-  font-size: .88em;
+  font-family: var(--font-mono);
+  font-size: 0.875em;
+  background: var(--code-inline-bg);
+  border: 1px solid var(--code-border);
+  border-radius: var(--radius-sm);
+  padding: 0.1em 0.35em;
 }
 
+/* ---- 代码块 ---- */
 .preview-body pre {
   background: var(--code-bg);
-  border-radius: 8px;
-  padding: 14px 16px;
+  border: 1px solid var(--code-border);
+  border-radius: var(--radius-md);
+  padding: var(--space-3) var(--space-4);
   overflow-x: auto;
-  margin: .8em 0;
+  margin: var(--space-4) 0;
+  line-height: var(--leading-ui);
 }
-.preview-body pre code { background: none; padding: 0; }
+.preview-body pre code {
+  background: none;
+  border: none;
+  border-radius: 0;
+  padding: 0;
+  font-size: 0.875em;
+  color: var(--fg);
+}
 
+/* ---- 引用块：无彩色竖线 ---- */
 .preview-body blockquote {
-  border-left: 3px solid var(--accent);
-  color: var(--text-secondary);
-  padding: 2px 0 2px 14px;
-  margin: .8em 0;
+  margin: var(--space-4) 0;
+  padding: var(--space-2) var(--space-4);
+  background: var(--surface-warm);
+  border-radius: var(--radius-sm);
+  color: var(--fg-2);
+}
+.preview-body blockquote p { margin: var(--space-1) 0; }
+
+/* ---- 列表 ---- */
+.preview-body ul, .preview-body ol { padding-left: 1.5em; margin: var(--space-3) 0; }
+.preview-body li { margin: var(--space-1) 0; }
+.preview-body li::marker { color: var(--muted); }
+
+/* ---- 表格：发丝边框，表头只靠字重 + 底色区分 ---- */
+.preview-body table {
+  border-collapse: collapse;
+  width: 100%;
+  margin: var(--space-4) 0;
+  font-size: 0.9375em;
+}
+.preview-body th, .preview-body td {
+  border: 1px solid var(--border);
+  padding: var(--space-2) var(--space-3);
+  text-align: left;
+}
+.preview-body th {
+  font-weight: var(--weight-emphasize);
+  background: var(--surface-warm);
 }
 
-.preview-body ul, .preview-body ol { padding-left: 1.6em; margin: .5em 0; }
-.preview-body li + li { margin-top: .2em; }
+/* ---- 其它 ---- */
+.preview-body hr {
+  border: none;
+  border-top: 1px solid var(--border);
+  margin: var(--space-8) 0;
+}
+.preview-body img { max-width: 100%; border-radius: var(--radius-sm); }
 
-.preview-body table { border-collapse: collapse; margin: .8em 0; width: 100%; }
-.preview-body th, .preview-body td { border: 1px solid var(--border); padding: 6px 12px; }
-.preview-body th { background: var(--bg-secondary); }
+.preview-body input[type='checkbox'] {
+  margin-right: var(--space-2);
+  accent-color: var(--accent);
+}
 
-.preview-body img { max-width: 100%; }
-.preview-body hr { border: none; border-top: 1px solid var(--border); margin: 1.4em 0; }
-
-.preview-body input[type='checkbox'] { margin-right: 6px; }
-
-/* 任务列表里的删除线 */
+/* 任务列表勾选后弱化 */
 .preview-body li:has(> input[type='checkbox']:checked) {
-  color: var(--text-secondary);
+  color: var(--muted);
   text-decoration: line-through;
 }
 
-/* ============ highlight.js token 配色（跟随主题变量） ============ */
+/* ============ highlight.js token 配色（与编辑器共用同一套 --hl-* 变量） ============ */
 .hljs-comment, .hljs-quote { color: var(--hl-comment); font-style: italic; }
 .hljs-keyword, .hljs-selector-tag, .hljs-tag, .hljs-doctag { color: var(--hl-keyword); }
 .hljs-string, .hljs-regexp, .hljs-addition { color: var(--hl-string); }
@@ -68,3 +133,4 @@
 .hljs-attr, .hljs-attribute, .hljs-variable, .hljs-template-variable { color: var(--hl-attr); }
 .hljs-built_in, .hljs-type, .hljs-class .hljs-title { color: var(--hl-title); }
 .hljs-deletion { color: var(--hl-keyword); }
+.hljs-meta, .hljs-meta .hljs-keyword { color: var(--muted); }

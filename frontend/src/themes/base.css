@@ -1,50 +1,6 @@
-/* ============ 主题系统：一套变量，明暗两套值 ============ */
-/* 切换方式：document.documentElement.dataset.theme = 'dark' */
-
-:root,
-:root[data-theme='light'] {
-  --bg-primary: #ffffff;
-  --bg-secondary: #f5f6f8;
-  --bg-tertiary: #eceef1;
-  --text-primary: #1f2329;
-  --text-secondary: #646a73;
-  --accent: #3370ff;
-  --border: #dee0e3;
-  --editor-bg: #ffffff;
-  --editor-text: #1f2329;
-  --code-bg: #f2f3f5;
-  --shadow: rgba(31, 35, 41, 0.08);
-  /* 代码高亮 token（github-light 风格） */
-  --hl-keyword: #cf222e;
-  --hl-string: #116329;
-  --hl-number: #0550ae;
-  --hl-title: #8250df;
-  --hl-comment: #6e7781;
-  --hl-attr: #953800;
-  color-scheme: light;
-}
-
-:root[data-theme='dark'] {
-  --bg-primary: #1a1b1e;
-  --bg-secondary: #232427;
-  --bg-tertiary: #2d2e32;
-  --text-primary: #e8e9eb;
-  --text-secondary: #9ca0a6;
-  --accent: #4d7fff;
-  --border: #3a3b3f;
-  --editor-bg: #1e1f22;
-  --editor-text: #d6d8dc;
-  --code-bg: #2a2b2e;
-  --shadow: rgba(0, 0, 0, 0.4);
-  /* 代码高亮 token（github-dark 风格） */
-  --hl-keyword: #ff7b72;
-  --hl-string: #a5d6ff;
-  --hl-number: #79c0ff;
-  --hl-title: #d2a8ff;
-  --hl-comment: #8b949e;
-  --hl-attr: #ffa657;
-  color-scheme: dark;
-}
+/* ============ 全局重置与基础排版 ============ */
+/* 颜色 / 尺度 Token 见 ./tokens/design-tokens.css（运行时唯一真源，单文件） */
+/* 本文件不再定义颜色变量；旧变量名由 design-tokens.css 的兼容别名层提供。 */
 
 * { box-sizing: border-box; margin: 0; padding: 0; }
 
@@ -54,10 +10,11 @@ html, body, #app {
 }
 
 body {
-  font-family: -apple-system, 'PingFang SC', 'Helvetica Neue', sans-serif;
-  font-size: 14px;
-  background: var(--bg-primary);
-  color: var(--text-primary);
+  font-family: var(--font-body);
+  font-size: var(--text-base);   /* 15px，与预览区正文一致 */
+  line-height: var(--leading-body);
+  background: var(--bg);
+  color: var(--fg);
   /* 隐藏式标题栏下让内容可以被拖动（但输入区域不可拖） */
   user-select: none;
 }

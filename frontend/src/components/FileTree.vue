@@ -34,6 +34,10 @@ const MD_EXTS = new Set(['md', 'markdown', 'mdown', 'txt'])
 </template>
 
 <style scoped>
-.file-tree { overflow-y: auto; padding: 8px 4px; }
-.tree-empty { padding: 4px 10px; color: var(--text-secondary); font-size: 12px; }
+.file-tree { overflow-y: auto; padding: var(--space-2) var(--space-1); }
+.tree-empty {
+  padding: var(--space-1) var(--space-3);
+  color: var(--muted);
+  font-size: var(--text-xs);
+}
 </style>
