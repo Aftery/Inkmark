@@ -105,14 +105,19 @@ function build(view) {
     lastReplacedTo = to
   }
 
-  // 行级样式（引用底色 / 代码块底色）：Decoration.line 允许经插件提供
+  // 行级样式（引用底色 / 代码块底色）：Decoration.line 允许经插件提供。
+  // 注意 range 必须是**点区间**（from == to == line.from）——line 装饰的语义是
+  // 「给该行加样式」，CM6 只读 from。若写成 {from: line.from, to: line.to} 的
+  // 非点区间，tile 构建会把行装饰当作跨整行的区间处理，导致根节点 length 与
+  // 子节点总长失配，随后首次 measure 的 docView.update 就会在
+  // TilePointer.advance 抛 "Cannot destructure property 'tile' of 'parents.pop(...)'"。
   const lineClass = (node, cls, visFrom, visTo) => {
     const from = Math.max(node.from, visFrom)
     const to = Math.min(node.to, visTo)
     if (from >= to) return
     for (let pos = from; pos <= to; ) {
       const line = doc.lineAt(pos)
-      decoRanges.push({ from: line.from, to: line.to, value: Decoration.line({ class: cls }) })
+      decoRanges.push({ from: line.from, to: line.from, value: Decoration.line({ class: cls }) })
       pos = line.to + 1
     }
   }

@@ -101,9 +101,10 @@ const focusPlugin = ViewPlugin.fromClass(
         for (let pos = from; pos <= to; ) {
           const line = view.state.doc.lineAt(pos)
           const active = line.from >= pFrom && line.to <= pTo
+          // Decoration.line 必须是点区间（from == to == line.from），见 wysiwyg.js lineClass
           builder.add(
             line.from,
-            line.to,
+            line.from,
             Decoration.line({ class: active ? 'cm-focus-active' : 'cm-focus-dim' }),
           )
           pos = line.to + 1
@@ -124,6 +125,28 @@ export function setEditorZoom(view, scale) {
       EditorView.theme({ '&': { fontSize: `calc(var(--text-base) * ${scale})` } }),
     ),
   })
+}
+
+// ---------- 整体替换文档（打开文件 / 切换文件 / 恢复快照） ----------
+// 用 setState 而非 dispatch 承载「整份替换」，两个理由：
+// 1) 语义正确：CM6 对 setState 的说明正是本场景——「新状态并非派生自旧状态」
+//    （打开/切换到另一个文件），此时应当整棵重绘，而非走增量复用。
+// 2) 规避 tile 复用路径：@codemirror/view 6.43.x 的 tile 增量更新在「整体替换 +
+//    行内/行级装饰」下会损坏并抛
+//      TypeError: Cannot destructure property 'tile' of 'parents.pop(...)' as it is undefined
+//    （上游 changelog 6.43.3 / 6.43.4 / 6.43.6 连续修 tile 树损坏，该路径风险未收敛）。
+//    实测：在 line 装饰写法修正前，dispatch 整份替换必崩，且崩溃后 state 已提交而
+//    DOM 不刷新、updateListener 不执行 —— 即「编辑器还停在旧文件、预览已是新文件」。
+// state 由 view.state.update 派生 → history / focusField（专注）/ zoomCompartment
+// （缩放）等字段状态全部保留；但 setState 不是事务、不触发 updateListener，
+// 调用方须自行同步依赖文档内容的外部状态（预览、大纲、状态栏行列）。
+export function replaceDocument(view, content) {
+  if (!view) return
+  const tr = view.state.update({
+    changes: { from: 0, to: view.state.doc.length, insert: content },
+    selection: { anchor: 0 },
+  })
+  view.setState(tr.state)
 }
 
 export function createEditor(parent, { doc = '', onDocChange, onScroll, onUpdate }) {

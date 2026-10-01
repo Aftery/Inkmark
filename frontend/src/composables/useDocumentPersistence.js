@@ -16,6 +16,7 @@
 import { ref } from 'vue'
 import { SaveFileDialog, WriteFile } from '../../wailsjs/go/main/App'
 import { buildHtmlDocument } from '../export/exporters'
+import { replaceDocument } from '../editor/createEditor'
 
 // ---------- 快照元数据展示格式化（历史面板 / 恢复提示共用） ----------
 
@@ -42,8 +43,10 @@ function errText(err) {
  * @param {import('vue').Ref<string>} deps.previewHtml 渲染好的预览 HTML（导出用）
  * @param {import('vue').Ref<string>} deps.theme     当前已解析主题（theme.js 真源）
  * @param {Function} deps.notify      (msg, isErr?) => void 轻提示（UI 归 App.vue）
+ * @param {Function} deps.onDocReplaced (content) => void 整份替换文档后的外部状态同步
+ *                   （replaceDocument 走 setState，不触发 updateListener）
  */
-export function useDocumentPersistence({ getEditor, filePath, title, previewHtml, theme, notify }) {
+export function useDocumentPersistence({ getEditor, filePath, title, previewHtml, theme, notify, onDocReplaced }) {
   // 状态机：unsaved（有改动未落盘）→ saving（写入中）→ saved；写入失败 → error。
   // 四态在状态栏用「图标形状 + 文案 + 颜色」三重表达（AC-20）。
   const saveState = ref('unsaved')
@@ -246,7 +249,10 @@ export function useDocumentPersistence({ getEditor, filePath, title, previewHtml
     if (!api?.SnapshotRead || !filePath.value) return
     try {
       const content = await api.SnapshotRead(filePath.value, s.name)
-      getEditor()?.dispatch({ changes: { from: 0, to: getEditor().state.doc.length, insert: content } })
+      // 与打开文件同源：整份替换必须走 replaceDocument（setState），
+      // dispatch 会命中 CM6 tile 增量崩溃，现象是编辑器停在旧内容不刷新。
+      replaceDocument(getEditor(), content)
+      onDocReplaced?.(content) // setState 不触发 updateListener，派生状态须手工同步
       getEditor()?.focus()
       showHistory.value = false
       notify?.(`已恢复到 ${formatSnapTime(s.createdAt)}，可 ⌘Z 撤销`)

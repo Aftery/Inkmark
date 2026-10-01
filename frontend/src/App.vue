@@ -1,6 +1,6 @@
 <script setup>
 import { ref, onMounted, onBeforeUnmount, computed, nextTick, triggerRef } from 'vue'
-import { createEditor, setEditorZoom } from './editor/createEditor'
+import { createEditor, setEditorZoom, replaceDocument } from './editor/createEditor'
 import { extractOutline } from './editor/outline'
 import {
   toggleBold, toggleItalic, toggleStrike, toggleInlineCode,
@@ -127,6 +127,8 @@ const persistence = useDocumentPersistence({
   previewHtml,
   theme,
   notify: showToast,
+  // 恢复快照同样是「整份替换文档」，走 replaceDocument + 该回调同步派生状态
+  onDocReplaced: syncAfterDocReplace,
 })
 const { saveState, dirty, showHistory, snapshots, historyLoading } = persistence
 
@@ -161,6 +163,22 @@ function onDocChange(doc) {
   })
 }
 
+// 整份替换文档后的外部状态同步。
+// replaceDocument 走 setState 绕开 CM6 tile 增量崩溃（见 createEditor.js），
+// 而 setState 不是事务更新、不会触发 updateListener，所以这里手工补上 onDocChange
+// 中除「脏标记 / 快照」以外的全部派生状态（预览、行列、格式态、大纲锚点）。
+function syncAfterDocReplace(content) {
+  markdown.value = content
+  triggerRef(markdown)
+  caret.value = { line: 1, col: 1 }
+  activeFmt.value = {}
+  nextTick(() => {
+    sync.invalidateAnchors()
+    outline.value = extractOutline(editor.state.doc)
+    sync.scheduleOutlineSync()
+  })
+}
+
 onMounted(() => {
   editor = createEditor(editorEl.value, {
     doc: DEFAULT_DOC,
@@ -178,6 +196,20 @@ onMounted(() => {
     requestAnimationFrame(() => setViewMode(savedMode, { persist: false }))
   }
 })
+
+// 开发期调试钩子：浏览器（vite dev）下没有 wails 绑定，无法走真实「打开文件」路径，
+// 借此在控制台/自动化里直接驱动编辑器与文件切换。import.meta.env.DEV 为静态常量，
+// 生产构建整块被剔除，不增加产物体积。
+if (import.meta.env.DEV) {
+  window.__inkmark = {
+    get editor() { return editor },
+    get markdown() { return markdown.value },
+    get previewHtml() { return previewHtml.value },
+    get filePath() { return filePath.value },
+    openFile,
+    openTreeFile,
+  }
+}
 
 // 窗口尺寸变化会重排两栏，锚点 y 全部失效
 window.addEventListener('resize', sync.invalidateAnchors)
@@ -278,14 +310,22 @@ function toggleOutline() {
 
 // ---------- 文件操作 ----------
 
+// 打开 / 切换文件的唯一落点：整份替换文档 + 同步全部派生状态。
+// 必须走 replaceDocument（setState 全量重绘）而非 dispatch —— 原因见 createEditor.js
+// 中对 CM6 tile 增量崩溃的说明，那正是「编辑器还停在旧文件、预览已是新文件」的成因。
+function loadDocument(content, path) {
+  replaceDocument(editor, content)
+  syncAfterDocReplace(content)
+  filePath.value = path
+  persistence.resetSession()
+}
+
 async function openFile() {
   const path = await OpenFileDialog()
   if (!path) return
   await persistence.snapshotBoundary() // 破坏性边界前先留一份快照
   const content = await ReadFile(path)
-  editor.dispatch({ changes: { from: 0, to: editor.state.doc.length, insert: content } })
-  filePath.value = path
-  persistence.resetSession()
+  loadDocument(content, path)
 }
 
 async function openFolder() {
@@ -301,9 +341,7 @@ async function openTreeFile(path) {
   if (path === filePath.value) return
   await persistence.snapshotBoundary()
   const content = await ReadFile(path)
-  editor.dispatch({ changes: { from: 0, to: editor.state.doc.length, insert: content } })
-  filePath.value = path
-  persistence.resetSession()
+  loadDocument(content, path)
 }
 
 // ---------- 格式化命令（菜单事件 / 工具条共用） ----------
