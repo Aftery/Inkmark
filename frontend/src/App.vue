@@ -1,5 +1,5 @@
 <script setup>
-import { ref, onMounted, onBeforeUnmount, computed, nextTick } from 'vue'
+import { ref, onMounted, onBeforeUnmount, computed, nextTick, triggerRef } from 'vue'
 import { createEditor, setEditorZoom } from './editor/createEditor'
 import { extractOutline } from './editor/outline'
 import {
@@ -147,7 +147,10 @@ const sync = useOutlineSync({ getEditor: () => editor, previewEl, viewMode, side
 const { outlineActive } = sync
 
 function onDocChange(doc) {
+  // 诊断（预览不同步排查）：确认链路是否触发、值是否变化。定位后移除。
+  console.log('[onDocChange] len=', doc.length, 'changed=', doc !== markdown.value)
   markdown.value = doc
+  triggerRef(markdown) // 防御性：强制依赖 markdown 的 computed（previewHtml）重算
   persistence.markDirty()
   persistence.maybeSnapshot() // 「有效编辑会话」节流快照（≥3 分钟，AC-14 与自动保存解耦）
   // 预览 DOM 要到 nextTick 才更新完，那时才能重建标题锚点；大纲同机更新
@@ -306,8 +309,14 @@ async function openTreeFile(path) {
 // ---------- 格式化命令（菜单事件 / 工具条共用） ----------
 
 function execCmd(cmd) {
+  // 诊断（格式菜单排查）：区分「没调到」「editor 为空」「命令报错」。定位后移除。
+  console.log('[execCmd] editor=', !!editor)
   if (!editor) return
-  cmd(editor)
+  try {
+    cmd(editor)
+  } catch (e) {
+    console.error('[execCmd] command failed:', e)
+  }
   editor.focus()
 }
 
@@ -355,7 +364,13 @@ function cycleZoom() {
 // 注意：menu:toggle-theme 由 main.js 经 themes/theme.js 接管（三主题循环 + 持久化），
 // 此处不得重复订阅（Wails 事件多订阅会导致点一次改两次）。
 function safeEventsOn(name, handler) {
-  if (window.runtime?.EventsOnMultiple) EventsOn(name, handler)
+  // 诊断（格式菜单排查）：确认桌面端事件是否真的注册上。定位后移除。
+  if (window.runtime?.EventsOnMultiple) {
+    EventsOn(name, handler)
+    console.log('[menu] bound:', name)
+  } else {
+    console.warn('[menu] SKIP (no runtime):', name)
+  }
 }
 safeEventsOn('menu:open-file', openFile)
 safeEventsOn('menu:open-folder', openFolder)

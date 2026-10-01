@@ -65,12 +65,15 @@ const taskDeco = (checked) => Decoration.replace({ widget: new TaskCheckboxWidge
 const emptyHintDeco = Decoration.mark({ class: 'cm-md-empty' })
 const listmarkDeco = Decoration.mark({ class: 'cm-md-listmark' })
 
-// ---------- 活跃行集合（§3.2）：与任一选区相交的行号 ----------
+// ---------- 活跃行集合（§3.2）：与任一选区相交的行号，扩展上下各 1 行 ----------
+// 扩展原因（真机反馈）：只含选区行时，光标移到相邻行瞬间该行标记从「隐藏+原子」
+// 突变为可见，atomicRanges 动态变化导致方向键跳跃感明显。扩展后相邻行标记
+// 已处于可见态（非原子），跨行移动平滑；隔行以上才遇原子区，频率大幅降低。
 function activeLineSet(doc, selection) {
   const active = new Set()
   for (const r of selection.ranges) {
-    const from = doc.lineAt(r.from).number
-    const to = doc.lineAt(r.to).number
+    const from = Math.max(1, doc.lineAt(r.from).number - 1)
+    const to = Math.min(doc.lines, doc.lineAt(r.to).number + 1)
     for (let n = from; n <= to; n++) active.add(n)
   }
   return active

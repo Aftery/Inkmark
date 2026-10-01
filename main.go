@@ -93,7 +93,7 @@ func buildMenu(app *App) *menu.Menu {
 	formatMenu.AddText("加粗", keys.Combo("b", keys.CmdOrCtrlKey, keys.ShiftKey), emit("menu:format-bold"))
 	formatMenu.AddText("斜体", keys.CmdOrCtrl("i"), emit("menu:format-italic"))
 	formatMenu.AddText("删除线", keys.Combo("x", keys.CmdOrCtrlKey, keys.ShiftKey), emit("menu:format-strike"))
-	formatMenu.AddText("行内代码", keys.CmdOrCtrl("e"), emit("menu:format-inline-code"))
+	formatMenu.AddText("行内代码", keys.CmdOrCtrl("`"), emit("menu:format-inline-code"))
 	formatMenu.AddText("链接", keys.CmdOrCtrl("k"), emit("menu:format-link"))
 	formatMenu.AddSeparator()
 	formatMenu.AddText("标题一", keys.Combo("1", keys.CmdOrCtrlKey, keys.OptionOrAltKey), emit("menu:format-h1"))
