@@ -20,7 +20,7 @@
  * ============================================================================
  */
 
-/** 图标几何库（13 个唯一几何；白名单，未登记的键不允许渲染） */
+/** 图标几何库（37 个唯一几何；白名单，未登记的键不允许渲染） */
 export const ICONS = {
   'file-text':
     '<path d="M6 22a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h8a2.4 2.4 0 0 1 1.704.706l3.588 3.588A2.4 2.4 0 0 1 20 8v12a2 2 0 0 1-2 2z" /> <path d="M14 2v5a1 1 0 0 0 1 1h5" /> <path d="M10 9H8" /> <path d="M16 13H8" /> <path d="M16 17H8" />',
@@ -45,10 +45,67 @@ export const ICONS = {
   'chevron-right': '<path d="m9 18 6-6-6-6" />',
   'chevron-down':  '<path d="m6 9 6 6 6-6" />',
   x: '<path d="M18 6 6 18" /> <path d="m6 6 12 12" />',
+
+  // ---- Phase C 新增 24 个（来源 docs/design/phaseC-visual-spec.md 附录 A，逐字摘录）----
+
+  // 顶栏
+  'pen-line':
+    '<path d="M13 21h8" /> <path d="M21.174 6.812a1 1 0 0 0-3.986-3.987L3.842 16.174a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.622l4.353-1.32a2 2 0 0 0 .83-.497z" />',
+  'sun-moon':
+    '<path d="M12 2v2" /> <path d="M14.837 16.385a6 6 0 1 1-7.223-7.222c.624-.147.97.66.715 1.248a4 4 0 0 0 5.26 5.259c.589-.255 1.396.09 1.248.715" /> <path d="M16 12a4 4 0 0 0-4-4" /> <path d="m19 5-1.256 1.256" /> <path d="M20 12h2" />',
+  monitor:
+    '<rect width="20" height="14" x="2" y="3" rx="2" /> <line x1="8" x2="16" y1="21" y2="21" /> <line x1="12" x2="12" y1="17" y2="21" />',
+  newspaper:
+    '<path d="M15 18h-5" /> <path d="M18 14h-8" /> <path d="M4 22h16a2 2 0 0 0 2-2V4a2 2 0 0 0-2-2H8a2 2 0 0 0-2 2v16a2 2 0 0 1-4 0v-9a2 2 0 0 1 2-2h2" /> <rect width="8" height="4" x="10" y="6" rx="1" />',
+
+  // 工具条 G1 历史
+  'undo-2':
+    '<path d="M9 14 4 9l5-5" /> <path d="M4 9h10.5a5.5 5.5 0 0 1 5.5 5.5a5.5 5.5 0 0 1-5.5 5.5H11" />',
+  'redo-2':
+    '<path d="m15 14 5-5-5-5" /> <path d="M20 9H9.5A5.5 5.5 0 0 0 4 14.5A5.5 5.5 0 0 0 9.5 20H13" />',
+
+  // 工具条 G2 行内
+  bold: '<path d="M6 12h9a4 4 0 0 1 0 8H7a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1h7a4 4 0 0 1 0 8" />',
+  italic:
+    '<line x1="19" x2="10" y1="4" y2="4" /> <line x1="14" x2="5" y1="20" y2="20" /> <line x1="15" x2="9" y1="4" y2="20" />',
+  strikethrough:
+    '<path d="M16 4H9a3 3 0 0 0-2.83 4" /> <path d="M14 12a4 4 0 0 1 0 8H6" /> <line x1="4" x2="20" y1="12" y2="12" />',
+  code: '<path d="m16 18 6-6-6-6" /> <path d="m8 6-6 6 6 6" />',
+
+  // 工具条 G3 块级 / 列表
+  heading: '<path d="M6 12h12" /> <path d="M6 20V4" /> <path d="M18 20V4" />',
+  quote:
+    '<path d="M16 3a2 2 0 0 0-2 2v6a2 2 0 0 0 2 2 1 1 0 0 1 1 1v1a2 2 0 0 1-2 2 1 1 0 0 0-1 1v2a1 1 0 0 0 1 1 6 6 0 0 0 6-6V5a2 2 0 0 0-2-2z" /> <path d="M5 3a2 2 0 0 0-2 2v6a2 2 0 0 0 2 2 1 1 0 0 1 1 1v1a2 2 0 0 1-2 2 1 1 0 0 0-1 1v2a1 1 0 0 0 1 1 6 6 0 0 0 6-6V5a2 2 0 0 0-2-2z" />',
+  list:
+    '<path d="M3 5h.01" /> <path d="M3 12h.01" /> <path d="M3 19h.01" /> <path d="M8 5h13" /> <path d="M8 12h13" /> <path d="M8 19h13" />',
+  'list-ordered':
+    '<path d="M11 5h10" /> <path d="M11 12h10" /> <path d="M11 19h10" /> <path d="M4 4h1v5" /> <path d="M4 9h2" /> <path d="M6.5 20H3.4c0-1 2.6-1.925 2.6-3.5a1.5 1.5 0 0 0-2.6-1.02" />',
+  'list-todo':
+    '<path d="M13 5h8" /> <path d="M13 12h8" /> <path d="M13 19h8" /> <path d="m3 17 2 2 4-4" /> <rect x="3" y="4" width="6" height="6" rx="1" />',
+
+  // 工具条 G4 插入
+  link:
+    '<path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" /> <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" />',
+  image:
+    '<rect width="18" height="18" x="3" y="3" rx="2" ry="2" /> <circle cx="9" cy="9" r="2" /> <path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21" />',
+  'square-code':
+    '<path d="m10 9-3 3 3 3" /> <path d="m14 15 3-3-3-3" /> <rect x="3" y="3" width="18" height="18" rx="2" />',
+  table:
+    '<path d="M12 3v18" /> <rect width="18" height="18" x="3" y="3" rx="2" /> <path d="M3 9h18" /> <path d="M3 15h18" />',
+  minus: '<path d="M5 12h14" />',
+
+  // 工具条 G5 溢出
+  ellipsis: '<circle cx="12" cy="12" r="1" /> <circle cx="19" cy="12" r="1" /> <circle cx="5" cy="12" r="1" />',
+
+  // 状态栏保存态
+  'circle-check': '<circle cx="12" cy="12" r="10" /> <path d="m16 9-5.5 5.5L8 12" />',
+  loader:
+    '<path d="M12 2v4" /> <path d="m16.2 7.8 2.9-2.9" /> <path d="M18 12h4" /> <path d="m16.2 16.2 2.9 2.9" /> <path d="M12 18v4" /> <path d="m4.9 19.1 2.9-2.9" /> <path d="M2 12h4" /> <path d="m4.9 4.9 2.9 2.9" />',
+  'circle-dot': '<circle cx="12" cy="12" r="1" /> <circle cx="12" cy="12" r="10" />',
 }
 
 /**
- * 语义名 → 几何名 白名单（15 个语义 / 13 个唯一几何）
+ * 语义名 → 几何名 白名单（39 个语义 / 37 个唯一几何）
  * 业务侧只允许使用这里的键；AppIcon resolve 失败时渲染空并告警。
  * 注：`chevron` 按方向拆为两个语义，避免「一个语义对应两种图形」的歧义。
  */
@@ -68,6 +125,35 @@ export const SEMANTICS = {
   'chevron-right':    'chevron-right',    // 文件树 · 目录收起
   'chevron-down':     'chevron-down',     // 文件树 · 目录展开
   close:              'x',                // 浮层 · 关闭
+
+  // ---- Phase C 新增语义（名称取自 docs/design/phaseC-visual-spec.md §2.2/§2.5/§3.3）----
+
+  'brand-mark':    'pen-line',   // 顶栏左 · 品牌笔迹（非交互，aria-hidden）
+  'theme-toggle':  'sun-moon',   // 顶栏右 · 主题切换触发（下拉菜单）
+  'theme-system':  'monitor',    // 主题菜单项 · 跟随系统
+  'theme-paper':   'newspaper',  // 主题菜单项 · 纸感（theme-light/dark 复用既有 sun/moon）
+
+  'format-undo':   'undo-2',       // 工具条 G1 · 撤销
+  'format-redo':   'redo-2',       // 工具条 G1 · 重做
+  'format-bold':   'bold',         // 工具条 G2 · 加粗（⌘⇧B）
+  'format-italic': 'italic',       // 工具条 G2 · 斜体
+  'format-strike': 'strikethrough',// 工具条 G2 · 删除线
+  'format-code':   'code',         // 工具条 G2 · 行内码（与代码块图标不可混用）
+  'format-heading':'heading',      // 工具条 G3 · 标题（下拉）
+  'format-quote':  'quote',        // 工具条 G3 · 引用
+  'format-ul':     'list',         // 工具条 G3 · 无序列表
+  'format-ol':     'list-ordered', // 工具条 G3 · 有序列表
+  'format-task':   'list-todo',    // 工具条 G3 · 任务列表
+  'format-link':   'link',         // 工具条 G4 · 链接
+  'format-image':  'image',        // 工具条 G4 · 图片
+  'format-codeblock':'square-code',// 工具条 G4 · 围栏代码块（与行内码图标不可混用）
+  'format-table':  'table',        // 工具条 G4 · 表格
+  'format-hr':     'minus',        // 工具条 G4 · 分隔线
+  more:            'ellipsis',     // 工具条 G5 · 更多（溢出菜单触发）
+
+  'save-ok':       'circle-check', // 状态栏 · 已保存
+  'save-saving':   'loader',       // 状态栏 · 保存中（CSS 旋转）
+  'save-dirty':    'circle-dot',   // 状态栏 · 未保存
 }
 
 /** 解析语义名或几何名 → 内层标记；未命中返回 ''（由 AppIcon 兜底） */

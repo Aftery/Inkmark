@@ -2,27 +2,30 @@
  * Inkmark · Design Tokens（运行时唯一真源 · 单文件）
  * frontend/src/themes/tokens/design-tokens.css
  * ----------------------------------------------------------------------------
- * 生成：颜好看 (UI/UX Designer) · 2026-09-29 · v1.0.2
- * 设计语言：赭石墨 —— 中性与留白为底，单一暖调强调色，文字即主角。
+ * 生成：颜好看 (UI/UX Designer) · 2026-10-01 · v1.1.0（Phase C 三主题扩展）
+ * 设计语言：三主题一套 Token —— 浅 Indigo / 深 Indigo / 纸感赭石（D-1）。
+ *   中性与留白为底，单一强调色，文字即主角；纸感主题走系统衬线 + 更宽行距。
  * 三轴刻度：Variance=3 / Motion=2 / Density=3
  *
  * 四层 Token 架构（用注释分节，不拆文件，避免多份文件漂移）：
- *   § 亮色主题   : A1-identity / B-slot / A2-semantic / C-extension
- *   § 暗色主题   : 同上
- *   § 结构尺度   : A1-structure（字号 / 字重 / 行高 / 字距 / 间距 / 圆角 / 层级 / 动效 / 布局 / 图标）
- *   § 预览尺度   : C-extension（预览标题阶梯 / 阅读行宽）
- *   § 兼容别名层 : B-slot（旧变量名 → 新 Token，渐进迁移用）
+ *   § 亮色主题   : A1-identity / B-slot / A2-semantic / C-extension（浅 Indigo #4F46E5）
+ *   § 暗色主题   : 同上（深 Indigo #6E76F0）
+ *   § 纸感主题   : 同上（赭石 #9D5A2F + 系统衬线，覆写行距/阅读行宽）
+ *   § 结构尺度   : A1-structure（字号 / 字重 / 行高 / 字距 / 间距 / 圆角 / 层级 / 动效 / 布局 / 图标 / 高度）
+ *   § 预览尺度   : C-extension（预览标题阶梯 / 阅读行宽 / 阅读模式）
  *
  * 设计交付快照见 docs/design/design-tokens.css；运行时以本文件为准。
  *
  * 使用约定：
  *   1) 组件样式一律引用语义 Token，禁止写裸 hex（#fff / #000 除外）。
  *   2) 每屏可见的 --accent 使用 ≤ 2 处（链接、光标/选中/激活三者只挑必要项）。
- *   3) 亮/暗切换只需改 <html data-theme="dark">，无需重建编辑器。
+ *   3) 主题切换只改 <html data-theme="light|dark|paper">，无需重建编辑器。
+ *      data-theme 始终存「已解析」的具体主题；“跟随系统”由 JS 解析后写入
+ *      （见 docs/design/phaseC-visual-spec.md §1.6），CSS 侧无需 prefers-color-scheme 分支。
  * ========================================================================== */
 
-/* ======================= 一、亮色主题（默认） =======================
- * 纸面为白，外壳沉灰，墨黑文字，赭石强调色
+/* ======================= 一、亮色主题（默认 · 浅 Indigo） =======================
+ * 纸面为白，外壳冷灰，冷中性墨黑文字，靛蓝强调色
  * ------------------------------------------------------------------ */
 :root,
 :root[data-theme='light'] {
@@ -30,79 +33,86 @@
 
   /* ---- A1-identity ---- */
   --bg:            #FFFFFF;   /* 文档画布（纸面） */
-  --surface:       #F7F7F6;   /* 界面外壳：工具栏 / 侧栏 */
-  --fg:            #1E1D1B;   /* 主文字（暖墨黑） */
-  --muted:         #8B877F;   /* 弱化文字 */
-  --accent:        #B45309;   /* 赭石墨 */
-  --border:        #E6E4E0;   /* 默认边框 */
+  --surface:       #F7F8FA;   /* 界面外壳：工具条 / 侧栏 / 状态栏 */
+  --fg:            #16171D;   /* 主文字（冷中性墨黑） */
+  --muted:         #6B6E7A;   /* 弱化文字 */
+  --accent:        #4F46E5;   /* 靛蓝（Indigo）—— D-1 浅色主题 */
+  --border:        #E5E6EC;   /* 默认边框 */
   --font-display: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", "PingFang SC", "Noto Sans SC", "Microsoft YaHei", sans-serif;
   --font-body:    -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", "PingFang SC", "Noto Sans SC", "Microsoft YaHei", sans-serif;
   --font-mono:    "SF Mono", "JetBrains Mono", "Fira Code", Menlo, Consolas, "Courier New", monospace;
 
   /* ---- B-slot ---- */
-  --fg-2:          #4A4844;   /* 次级文字 */
-  --surface-warm:  #F6F5F3;   /* 引用块 / 次级容器 */
-  --meta:          #A8A49C;   /* 元数据 / 三级前景 */
-  --border-soft:   #F0EEEB;   /* 内部行分隔 */
+  --fg-2:          #40434E;   /* 次级文字 */
+  --surface-warm:  #F3F4F8;   /* 引用块 / 次级容器（靛蓝主题取冷中性） */
+  --meta:          #8A8D99;   /* 元数据 / 三级前景（对白底 3.31:1） */
+  --border-soft:   #EEEFF4;   /* 内部行分隔 */
 
   /* ---- A2-semantic ---- */
-  --surface-2:     #EFEEEC;   /* 外壳悬停 / 激活 */
-  --overlay:       rgba(30, 29, 27, 0.32);
-  --border-strong: #D3D0CA;
+  --surface-2:     #EEF0F4;   /* 外壳悬停 / 激活 */
+  --overlay:       rgba(22, 23, 29, 0.32);
+  --border-strong: #D3D5DE;
 
-  --accent-hover:  #98450A;
-  --accent-active: #7E3807;
-  --accent-soft:   #FAF0E4;
-  --accent-on:     #FFFFFF;
+  --accent-hover:  #4338CA;   /* 白字对比 7.90:1 */
+  --accent-active: #3730A3;   /* 白字对比 9.93:1 */
+  --accent-soft:   #EEEDFB;
+  --accent-on:     #FFFFFF;   /* 白字 on #4F46E5 = 6.29:1 */
 
   --success: #3E7D55;  --success-soft: #E8F2EB;
   --warn:    #AD7B15;  --warn-soft:    #F7EFDD;
   --danger:  #B23B31;  --danger-soft:  #F8E9E7;
   --info:    #35699B;  --info-soft:    #E8F0F7;
 
-  /* ---- C-extension：代码 ---- */
-  --code-bg:        #F6F5F3;
-  --code-inline-bg: #F1EFEC;
-  --code-border:    #E6E4E0;
+  /* ---- C-extension：代码（--hl-* 为独立代码色板，三主题共用亮/暗两套） ---- */
+  --code-bg:        #F7F8FA;
+  --code-inline-bg: #F1F2F6;
+  --code-border:    #E5E6EC;
 
-  /* ---- C-extension：语法高亮六色（与 UI 同一暖调家族） ---- */
+  /* ---- C-extension：语法高亮六色（独立代码色板，三主题共用亮/暗两套） ---- */
   --hl-keyword: #A6392A;   /* 关键字 */
   --hl-string:  #4C7A44;   /* 字符串 */
   --hl-number:  #23608F;   /* 数字 / 字面量 */
   --hl-title:   #8A5A24;   /* 函数 / 标题 */
   --hl-comment: #8E8A82;   /* 注释（斜体） */
   --hl-attr:    #6E5A1E;   /* 属性 / 变量 */
+
+  /* ---- C-extension：编辑器 / 交互面（Phase C 新增） ---- */
+  --caret:                 var(--accent);                                      /* 光标 */
+  --selection-bg:          color-mix(in srgb, var(--accent) 20%, transparent); /* 选区底 */
+  --scrollbar-thumb:       var(--border-strong);
+  --scrollbar-thumb-hover: var(--muted);
+  --scrollbar-track:       transparent;
 }
 
-/* ======================= 二、暗色主题 =======================
- * 柔黑画布（非纯黑）+ 暖白文字，强调色提亮
+/* ======================= 二、暗色主题（深 Indigo） =======================
+ * 柔黑画布（非纯黑）+ 冷白文字，强调色提亮（accent-on 反转为墨字）
  * ------------------------------------------------------------------ */
 :root[data-theme='dark'] {
   color-scheme: dark;
 
   /* ---- A1-identity ---- */
-  --bg:            #1F1F1E;
-  --surface:       #191918;
-  --fg:            #E7E4DF;
-  --muted:         #857F76;
-  --accent:        #D98B4A;
-  --border:        #35332F;
+  --bg:            #14151A;   /* 柔黑（略偏冷，承托靛蓝） */
+  --surface:       #101116;
+  --fg:            #E7E8ED;
+  --muted:         #8A8D99;   /* 5.51:1 @ bg */
+  --accent:        #6E76F0;   /* 深色主题靛蓝 —— 文字/链接对比 4.79:1 */
+  --border:        #2A2C34;
 
   /* ---- B-slot ---- */
-  --fg-2:          #B3AFA8;
-  --surface-warm:  #262523;
-  --meta:          #6B655C;
-  --border-soft:   #2A2926;
+  --fg-2:          #B4B7C2;
+  --surface-warm:  #1C1E25;
+  --meta:          #6A6D78;   /* 3.53:1 @ bg */
+  --border-soft:   #20222A;
 
   /* ---- A2-semantic ---- */
-  --surface-2:     #292826;
+  --surface-2:     #21232B;
   --overlay:       rgba(0, 0, 0, 0.55);
-  --border-strong: #47443E;
+  --border-strong: #3A3D47;
 
-  --accent-hover:  #E39B5F;
-  --accent-active: #EFAF77;
-  --accent-soft:   #33261A;
-  --accent-on:     #1F1F1E;
+  --accent-hover:  #8A91F5;   /* 悬停提亮：墨字对比 6.93:1 */
+  --accent-active: #9AA0F7;   /* 按下再亮：墨字对比 8.14:1 */
+  --accent-soft:   #1E2040;
+  --accent-on:     #0B0C10;   /* 深底浅靛须用近黑墨字：白字仅 3.81，不达 AA */
 
   --success: #5FAE7E;  --success-soft: #1E2A22;
   --warn:    #D3A94E;  --warn-soft:    #2E2618;
@@ -110,9 +120,9 @@
   --info:    #7BA8D6;  --info-soft:    #1C2530;
 
   /* ---- C-extension：代码 ---- */
-  --code-bg:        #262523;
-  --code-inline-bg: #2B2A27;
-  --code-border:    #35332F;
+  --code-bg:        #1C1E25;
+  --code-inline-bg: #21232B;
+  --code-border:    #2A2C34;
 
   /* ---- C-extension：语法高亮六色 ---- */
   --hl-keyword: #E08C7C;
@@ -121,6 +131,79 @@
   --hl-title:   #D8B173;
   --hl-comment: #8A857C;
   --hl-attr:    #C7A86A;
+
+  /* ---- C-extension：编辑器 / 交互面（Phase C 新增） ---- */
+  --caret:                 var(--accent);
+  --selection-bg:          color-mix(in srgb, var(--accent) 30%, transparent);
+  --scrollbar-thumb:       var(--border-strong);
+  --scrollbar-thumb-hover: var(--muted);
+  --scrollbar-track:       transparent;
+}
+
+/* ======================= 二·B、纸感赭石主题（D-1 第三主题） =======================
+ * 高亮低彩纸张底 + 系统可读衬线（中文落到 Songti SC / Noto Serif SC 等系统衬线）。
+ * 暖意由衬线 + 留白 + 赭石强调色传达，背景保持接近白 —— 刻意避开「奶油/米色铺底」
+ * 反模式（见 DESIGN.md §7 第 7 条），不靠背景色制造纸感。
+ * 注意：本块对 --leading-* / --reading-measure 的覆写靠「属性选择器特异性」胜过
+ * 下方 :root 结构块（(0,2,0) > (0,1,0)），与源码顺序无关。
+ * ------------------------------------------------------------------ */
+:root[data-theme='paper'] {
+  color-scheme: light;
+
+  /* ---- A1-identity ---- */
+  --bg:            #FAF7F1;   /* 纸张底（L≈0.97 近白、低彩） */
+  --surface:       #F3EEE5;   /* 外壳：略深纸/封皮 */
+  --fg:            #2A2620;   /* 墨黑 */
+  --muted:         #6F675A;   /* 5.22:1 @ bg（原 #7C7466 仅 4.32 不达标） */
+  --accent:        #9D5A2F;   /* 赭石 */
+  --border:        #E5DED0;
+  --font-display:  Georgia, "Times New Roman", "Songti SC", "Noto Serif SC", "Source Han Serif SC", "STSong", SimSun, serif;
+  --font-body:     Georgia, "Times New Roman", "Songti SC", "Noto Serif SC", "Source Han Serif SC", "STSong", SimSun, serif;
+
+  /* ---- B-slot ---- */
+  --fg-2:          #4E4941;
+  --surface-warm:  #F1EADF;
+  --meta:          #908776;   /* 3.32:1 @ bg */
+  --border-soft:   #EDE7DB;
+
+  /* ---- A2-semantic ---- */
+  --surface-2:     #EFE8DC;
+  --overlay:       rgba(42, 38, 32, 0.32);
+  --border-strong: #DAD2C2;
+
+  --accent-hover:  #8A4D26;   /* 白字对比 6.62:1 */
+  --accent-active: #7C431F;   /* 白字对比 7.84:1 */
+  --accent-soft:   #F4E7D8;
+  --accent-on:     #FFFFFF;   /* 白字 on #9D5A2F = 5.33:1 */
+
+  --success: #3E6B3C;  --success-soft: #E9EFE5;
+  --warn:    #8A6210;  --warn-soft:    #F5EDDA;   /* 5.12:1 @ bg */
+  --danger:  #A5392F;  --danger-soft:  #F6E6E2;   /* 6.09:1 @ bg */
+  --info:    #33608F;  --info-soft:    #E7EEF5;   /* 6.12:1 @ bg */
+
+  /* ---- C-extension：代码（沿用亮色代码色板） ---- */
+  --code-bg:        #F3EEE5;
+  --code-inline-bg: #EFE9DD;
+  --code-border:    #E5DED0;
+
+  --hl-keyword: #A6392A;
+  --hl-string:  #4C7A44;
+  --hl-number:  #23608F;
+  --hl-title:   #8A5A24;
+  --hl-comment: #8E8A82;
+  --hl-attr:    #6E5A1E;
+
+  /* ---- C-extension：编辑器 / 交互面 ---- */
+  --caret:                 var(--accent);
+  --selection-bg:          color-mix(in srgb, var(--accent) 20%, transparent);
+  --scrollbar-thumb:       var(--border-strong);
+  --scrollbar-thumb-hover: var(--muted);
+  --scrollbar-track:       transparent;
+
+  /* ---- 纸感专属：留白 / 行距差异化（衬线需更大行距） ---- */
+  --leading-body:    1.8;
+  --leading-reading: 1.85;
+  --reading-measure: 48rem;   /* 纸面偏窄，减少长行疲劳 */
 }
 
 /* ======================= 三、与主题无关的结构尺度（A1-structure / A2） ======================= */
@@ -173,7 +256,7 @@
   /* ---- 层级（留白 + 发丝边框分层，慎用阴影） ---- */
   --elev-flat:   none;
   --elev-ring:   0 0 0 1px var(--border);
-  --elev-raised: 0 1px 2px rgba(30, 29, 27, 0.05), 0 4px 12px rgba(30, 29, 27, 0.07);
+  --elev-raised: 0 1px 2px rgba(16, 17, 22, 0.05), 0 4px 12px rgba(16, 17, 22, 0.07);
 
   /* ---- 焦点 ---- */
   --focus-ring: 0 0 0 3px color-mix(in srgb, var(--accent) 32%, transparent);
@@ -191,9 +274,17 @@
   --editor-gutter-width: 44px;
 
   /* ---- 图标（内联 SVG：AppIcon.vue + paths.js，全项目一套） ---- */
-  --icon-size-inline: 16px;
-  --icon-size-button: 20px;
-  --icon-stroke:      1.75;
+  --icon-size-inline:     16px;   /* 行内 / 文件树 */
+  --icon-size-button:     20px;   /* 按钮内 */
+  --icon-size-standalone: 24px;   /* 独立图标位 */
+  --icon-stroke:          1.75;
+
+  /* ---- 界面外壳字体（纸感主题下 chrome 仍用无衬线，仅正文走衬线） ---- */
+  --font-ui: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", "PingFang SC", "Noto Sans SC", "Microsoft YaHei", sans-serif;
+
+  /* ---- Phase C 新增 chrome 高度 ---- */
+  --editor-toolbar-height: 38px;  /* 编辑区顶部工具条（随编辑区滚动不动） */
+  --statusbar-height:      26px;  /* 底部状态栏 */
 }
 
 /* 暗色下阴影减弱，改用亮度递进表达层级 */
@@ -212,8 +303,13 @@
   --preview-h6-size: 0.9375rem;  --preview-h6-weight: 600;   /* 15px，用 --muted 弱化 */
 
   /* ---- 预览阅读行宽 / 内边距 ---- */
-  --preview-measure:   46rem;   /* ≈736px，长文舒适行宽 */
+  --preview-measure:   46rem;   /* ≈736px，长文舒适行宽（编辑/预览/阅读三态共用的常规行宽） */
   --preview-padding-y: 40px;
+
+  /* ---- 阅读模式（P0：隐藏 chrome + 正文加宽） ---- */
+  --reading-measure:   50rem;      /* ≈800px，比常规宽约 9%；CJK 约 47 字/行，为可读上限 */
+  --reading-font-size: 1.0625rem;  /* 17px，比常规正文 +2px */
+  --reading-leading:   1.8;
 }
 
 /* ---- 无障碍：尊重系统的减少动效偏好 ---- */

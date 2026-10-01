@@ -6,12 +6,13 @@
 // 4) Markdown 结构字号与预览区标题阶梯一致（30/24/20/17/16/15 @ 15px 基准），
 //    围栏代码与预览区 highlight.js 共用同一套 --hl-* 变量（单一色板）
 import { EditorView, keymap, highlightSpecialChars, ViewPlugin, Decoration } from '@codemirror/view'
-import { EditorState, StateField, StateEffect, RangeSetBuilder } from '@codemirror/state'
+import { EditorState, StateField, StateEffect, RangeSetBuilder, Compartment } from '@codemirror/state'
 import { defaultKeymap, history, historyKeymap, indentWithTab } from '@codemirror/commands'
 import { syntaxHighlighting, HighlightStyle } from '@codemirror/language'
 import { markdown, markdownLanguage } from '@codemirror/lang-markdown'
 import { tags as t } from '@lezer/highlight'
 import codeLanguages from './markdownHighlight'
+import { wysiwygField, wysiwygPlugin, wysiwygAtomicRanges } from './wysiwyg'
 
 // 语法着色：Markdown 结构 + 围栏代码
 const mdHighlight = HighlightStyle.define([
@@ -114,7 +115,18 @@ const focusPlugin = ViewPlugin.fromClass(
   { decorations: (v) => v.decorations },
 )
 
-export function createEditor(parent, { doc = '', onDocChange, onScroll }) {
+// ---------- 缩放：状态栏 90/100/110/125% 用（App.vue 调 setEditorZoom） ----------
+const zoomCompartment = new Compartment()
+
+export function setEditorZoom(view, scale) {
+  view.dispatch({
+    effects: zoomCompartment.reconfigure(
+      EditorView.theme({ '&': { fontSize: `calc(var(--text-base) * ${scale})` } }),
+    ),
+  })
+}
+
+export function createEditor(parent, { doc = '', onDocChange, onScroll, onUpdate }) {
   // 只监听文档变化。滚动不要在这里监听 —— CM6 的 ViewUpdate 根本没有 scrollChanged
   // 这个属性（真实属性只有 docChanged/selectionSet/focusChanged/viewportChanged/
   // heightChanged/geometryChanged 等），写了永远是 undefined，滚动联动会静默失效。
@@ -122,6 +134,13 @@ export function createEditor(parent, { doc = '', onDocChange, onScroll }) {
   const updateListener = EditorView.updateListener.of((update) => {
     if (update.docChanged && onDocChange) onDocChange(update.state.doc.toString())
   })
+  // 选区/光标变化（状态栏行列、工具条选中态）。与 onDocChange 分开，避免每个
+  // 光标移动都触发文档字符串拷贝。
+  const selectionListener = onUpdate
+    ? EditorView.updateListener.of((update) => {
+        if (update.docChanged || update.selectionSet) onUpdate(update)
+      })
+    : []
 
   const state = EditorState.create({
     doc,
@@ -169,10 +188,52 @@ export function createEditor(parent, { doc = '', onDocChange, onScroll }) {
           backgroundColor: 'var(--border-strong)',
           borderRadius: 'var(--radius-pill)',
         },
+
+        /* ---- WYSIWYG 装饰类（editor/wysiwyg.js 产出）----
+           唯一 theme 扩展内追加（§3.6：EditorView.theme 多次提供会同键覆盖，
+           禁止为装饰样式另开第二个 theme）。值全部引用语义 Token，无裸 hex。 */
+        '.cm-md-quote': { backgroundColor: 'var(--surface-warm)' },
+        '.cm-md-codeblock': { backgroundColor: 'var(--code-bg)' },
+        '.cm-md-bullet': { color: 'var(--muted)', padding: '0 1px' },
+        '.cm-md-listmark': { color: 'var(--muted)' },
+        '.cm-md-empty': { color: 'var(--meta)' }, // 空标记弱提示（**** []()）
+        '.cm-md-task-box': {
+          display: 'inline-block',
+          width: '13px',
+          height: '13px',
+          boxSizing: 'border-box',
+          border: '1px solid var(--border-strong)',
+          borderRadius: 'var(--radius-sm)',
+          verticalAlign: '-2px',
+          margin: '0 4px 0 2px',
+        },
+        '.cm-md-task-box.checked': {
+          backgroundColor: 'var(--accent)',
+          borderColor: 'var(--accent)',
+        },
+        '.cm-md-task-box.checked::after': {
+          content: '""',
+          display: 'block',
+          width: '7px',
+          height: '3px',
+          margin: '2px auto 0',
+          borderLeft: '2px solid var(--accent-on)',
+          borderBottom: '2px solid var(--accent-on)',
+          transform: 'rotate(-45deg)',
+        },
+        '.cm-md-task-done': { color: 'var(--muted)', textDecoration: 'line-through' },
       }),
       updateListener,
+      selectionListener,
       focusField,
       focusPlugin,
+      // WYSIWYG：开关字段 → 装饰插件 → atomicRanges（顺序要求：facet 须能
+      // 读到 wysiwygPlugin 实例，见架构 §3.6 扩展顺序建议）
+      wysiwygField,
+      wysiwygPlugin,
+      wysiwygAtomicRanges,
+      // 缩放（状态栏 90/100/110/125%）：Compartment 运行时重配，不重建编辑器
+      zoomCompartment.of(EditorView.theme({ '&': { fontSize: 'calc(var(--text-base) * 1)' } })),
     ],
   })
 

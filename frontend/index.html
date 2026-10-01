@@ -4,6 +4,24 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Inkmark</title>
+  <script>
+    // 防首帧闪烁（同步、样式表之前执行）：读 localStorage 偏好 + 系统深浅，
+    // 首帧前写好 <html data-theme>。缺省/非法偏好 → 跟随系统（深色系统落 dark，
+    // 否则 light）；纸感永不自动选中。localStorage 不可用时安全回退浅主题。
+    // 与 src/themes/theme.js 的解析规则保持一致（规格 §1.6）。
+    (function () {
+      try {
+        var pref = localStorage.getItem('inkmark-theme')
+        var valid = pref === 'light' || pref === 'dark' || pref === 'paper'
+        var theme = valid
+          ? pref
+          : (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light')
+        document.documentElement.dataset.theme = theme
+      } catch (e) {
+        /* 保持 html 标签上的默认 data-theme="light" */
+      }
+    })()
+  </script>
 </head>
 <body>
   <div id="app"></div>

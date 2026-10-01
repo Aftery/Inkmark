@@ -1,20 +1,29 @@
 // 导出能力：HTML（走系统保存对话框）+ PDF（打印）
 // 依赖 Go 端暴露的 SaveFileDialog / WriteFile（wailsjs 生成绑定）
 //
-// 设计语言：与预览区（themes/preview.css）一致 —— 赭石墨配色、
+// 设计语言：与预览区（themes/preview.css）一致 —— 三主题（浅 Indigo / 深 Indigo / 纸感赭石）、
 // 标题无下划线、引用块无彩色竖线、正文限宽居中、字号行高与编辑区一致。
 //
 // 裸 hex 说明：本文件是「自包含 HTML 生成器」，导出产物必须脱离编辑器独立可看，
 // 因此需要把 Token 值内联为静态值 —— 这与组件层的「禁止裸 hex」约束性质不同，
 // 属于 ADR-002 中「token 定义/生成文件」一类（AC-05 豁免，原因见下）。
 
-export function buildHtmlDocument(title, bodyHtml, theme) {
+// 版式宽参数化（phaseC-visual-spec §8.8 / ADR-003 已知坑 19）：
+// 同一份模板只暴露**一个**宽度变量 --export-measure，由出口场景注入值 ——
+//   HTML 导出 → 46rem（屏幕阅读舒适行宽，维持现状）
+//   PDF 导出 → 467px（与 A4 版心宽 467pt 一致，1 CSS px = 1 pt，分页以此为准）
+// 禁止用 transform: scale / zoom 凑宽度（会破坏 1 px = 1 pt 的分页假设）。
+export const HTML_EXPORT_MEASURE = '46rem'
+export const PDF_EXPORT_MEASURE = '467px'
+
+export function buildHtmlDocument(title, bodyHtml, theme, measure = HTML_EXPORT_MEASURE) {
   return `<!DOCTYPE html>
 <html lang="zh-CN" data-theme="${theme}">
 <head>
 <meta charset="UTF-8" />
 <title>${escapeHtml(title)}</title>
 <style>
+:root{--export-measure:${measure}}
 ${exportCss}
 </style>
 </head>
@@ -31,31 +40,45 @@ function escapeHtml(s) {
 }
 
 // 导出用样式：把当前主题的 CSS 变量值内联成静态值，脱离编辑器也能看。
+// 三套主题（light / dark / paper）由调用方传入的 theme 参数经 <html data-theme> 选择；
 // 取值来源：frontend/src/themes/tokens/design-tokens.css（改动 Token 时同步这里）。
 const exportCss = `
+:root,
 :root[data-theme='light'] {
-  --bg:#FFFFFF; --fg:#1E1D1B; --fg-2:#4A4844; --muted:#8B877F;
-  --accent:#B45309; --border:#E6E4E0; --surface-warm:#F6F5F3;
-  --code-bg:#F6F5F3; --code-inline-bg:#F1EFEC; --code-border:#E6E4E0;
+  --bg:#FFFFFF; --fg:#16171D; --fg-2:#40434E; --muted:#6B6E7A;
+  --accent:#4F46E5; --border:#E5E6EC; --surface-warm:#F3F4F8;
+  --code-bg:#F7F8FA; --code-inline-bg:#F1F2F6; --code-border:#E5E6EC;
   --font-body:-apple-system,BlinkMacSystemFont,"Inter","Segoe UI","PingFang SC","Noto Sans SC","Microsoft YaHei",sans-serif;
   --font-mono:"SF Mono","JetBrains Mono","Fira Code",Menlo,Consolas,monospace;
+  --leading-body:1.7;
   --hl-keyword:#A6392A; --hl-string:#4C7A44; --hl-number:#23608F;
   --hl-title:#8A5A24; --hl-comment:#8E8A82; --hl-attr:#6E5A1E;
 }
 :root[data-theme='dark'] {
-  --bg:#1F1F1E; --fg:#E7E4DF; --fg-2:#B3AFA8; --muted:#857F76;
-  --accent:#D98B4A; --border:#35332F; --surface-warm:#262523;
-  --code-bg:#262523; --code-inline-bg:#2B2A27; --code-border:#35332F;
+  --bg:#14151A; --fg:#E7E8ED; --fg-2:#B4B7C2; --muted:#8A8D99;
+  --accent:#6E76F0; --border:#2A2C34; --surface-warm:#1C1E25;
+  --code-bg:#1C1E25; --code-inline-bg:#21232B; --code-border:#2A2C34;
+  --leading-body:1.7;
   --hl-keyword:#E08C7C; --hl-string:#A8C68C; --hl-number:#84B4DB;
   --hl-title:#D8B173; --hl-comment:#8A857C; --hl-attr:#C7A86A;
+}
+:root[data-theme='paper'] {
+  --bg:#FAF7F1; --fg:#2A2620; --fg-2:#4E4941; --muted:#6F675A;
+  --accent:#9D5A2F; --border:#E5DED0; --surface-warm:#F1EADF;
+  --code-bg:#F3EEE5; --code-inline-bg:#EFE9DD; --code-border:#E5DED0;
+  --font-body:Georgia,"Times New Roman","Songti SC","Noto Serif SC","Source Han Serif SC","STSong",SimSun,serif;
+  --font-mono:"SF Mono","JetBrains Mono","Fira Code",Menlo,Consolas,monospace;
+  --leading-body:1.8;
+  --hl-keyword:#A6392A; --hl-string:#4C7A44; --hl-number:#23608F;
+  --hl-title:#8A5A24; --hl-comment:#8E8A82; --hl-attr:#6E5A1E;
 }
 *{box-sizing:border-box;margin:0;padding:0}
 body{
   background:var(--bg); color:var(--fg);
-  font-family:var(--font-body); font-size:15px; line-height:1.7;
+  font-family:var(--font-body); font-size:15px; line-height:var(--leading-body);
 }
 article.preview-body{
-  max-width:46rem; margin:0 auto; padding:40px 24px 64px;
+  max-width:var(--export-measure); margin:0 auto; padding:40px 24px 64px;
   overflow-wrap:break-word;
 }
 h1,h2,h3,h4,h5,h6{font-weight:590;line-height:1.3;letter-spacing:-.01em;color:var(--fg)}

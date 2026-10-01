@@ -2,42 +2,42 @@
   "$schema": "https://design-tokens.github.io/community-group/format/",
   "meta": {
     "product": "Inkmark",
-    "version": "1.0.2",
+    "version": "1.1.0",
     "author": "颜好看 (UI/UX Designer)",
-    "generatedAt": "2026-09-29",
+    "generatedAt": "2026-10-01",
     "register": "Product（工具型界面，文字为主角）",
     "platform": "adaptive（Wails 桌面，macOS 优先）",
-    "runtimeSourceOfTruth": "frontend/src/themes/tokens/design-tokens.css（单文件）；本 JSON 与 docs/design/design-tokens.css 为设计快照",
+    "runtimeSourceOfTruth": "frontend/src/themes/tokens/design-tokens.css（单文件）；本 JSON 与 docs/design/design-tokens.css 为设计快照（Phase C 已与之逐 token 对齐）",
     "scales": {
       "DESIGN_VARIANCE": 3,
       "MOTION_INTENSITY": 2,
       "VISUAL_DENSITY": 3
     },
-    "note": "亮/暗双主题。所有组件颜色必须引用语义层 token，禁止在组件内写裸 hex（#fff / #000 除外）。编辑区与预览区正文统一 15px / 行高 1.7。"
+    "note": "三主题（浅 Indigo / 深 Indigo / 纸感赭石）+ 跟随系统。所有组件颜色必须引用语义层 token，禁止在组件内写裸 hex（#fff / #000 除外）。编辑区与预览区正文统一 15px / 行高 1.7（纸感主题正文行高 1.8）。深色主题 --accent-on 为近黑墨字（非白字），因白字压 #6E76F0 仅 3.81:1 不达标。"
   },
 
   "color": {
     "light": {
       "bg":            { "value": "#FFFFFF", "type": "color", "role": "A1", "desc": "文档画布（纸面），全局最亮面，是视觉主角" },
-      "surface":       { "value": "#F7F7F6", "type": "color", "role": "A1", "desc": "界面外壳：工具栏 / 侧栏背景" },
-      "surface-2":     { "value": "#EFEEEC", "type": "color", "role": "A2", "desc": "外壳上的悬停 / 激活底色" },
-      "surface-warm":  { "value": "#F6F5F3", "type": "color", "role": "B",  "desc": "引用块 / 次级容器底色，极轻暖中性" },
-      "overlay":       { "value": "rgba(30,29,27,0.32)", "type": "color", "role": "A2", "desc": "模态框遮罩" },
+      "surface":       { "value": "#F7F8FA", "type": "color", "role": "A1", "desc": "界面外壳：工具条 / 侧栏 / 状态栏背景" },
+      "surface-2":     { "value": "#EEF0F4", "type": "color", "role": "A2", "desc": "外壳上的悬停 / 激活底色" },
+      "surface-warm":  { "value": "#F3F4F8", "type": "color", "role": "B",  "desc": "引用块 / 次级容器底色（靛蓝主题取冷中性）" },
+      "overlay":       { "value": "rgba(22,23,29,0.32)", "type": "color", "role": "A2", "desc": "模态框遮罩" },
 
-      "fg":            { "value": "#1E1D1B", "type": "color", "role": "A1", "desc": "正文主文字（暖墨黑，不用纯黑）" },
-      "fg-2":          { "value": "#4A4844", "type": "color", "role": "B",  "desc": "次级文字：编辑区源码、表单标签" },
-      "muted":         { "value": "#8B877F", "type": "color", "role": "A1", "desc": "弱化文字：状态、说明、占位" },
-      "meta":          { "value": "#A8A49C", "type": "color", "role": "B",  "desc": "元数据 / 三级前景：行号、时间戳" },
+      "fg":            { "value": "#16171D", "type": "color", "role": "A1", "desc": "正文主文字（冷中性墨黑，不用纯黑）" },
+      "fg-2":          { "value": "#40434E", "type": "color", "role": "B",  "desc": "次级文字：编辑区源码、表单标签" },
+      "muted":         { "value": "#6B6E7A", "type": "color", "role": "A1", "desc": "弱化文字：状态、说明、占位（对白底 5.08:1）" },
+      "meta":          { "value": "#8A8D99", "type": "color", "role": "B",  "desc": "元数据 / 三级前景：行号、时间戳（对白底 3.31:1）" },
 
-      "border":        { "value": "#E6E4E0", "type": "color", "role": "A1", "desc": "默认边框 / 分割线（发丝级 1px）" },
-      "border-strong": { "value": "#D3D0CA", "type": "color", "role": "A2", "desc": "强调边框：输入框聚焦前、树缩进轨" },
-      "border-soft":   { "value": "#F0EEEB", "type": "color", "role": "B",  "desc": "内部行分隔（列表项之间）" },
+      "border":        { "value": "#E5E6EC", "type": "color", "role": "A1", "desc": "默认边框 / 分割线（发丝级 1px）" },
+      "border-strong": { "value": "#D3D5DE", "type": "color", "role": "A2", "desc": "强调边框：输入框聚焦前、树缩进轨" },
+      "border-soft":   { "value": "#EEEFF4", "type": "color", "role": "B",  "desc": "内部行分隔（列表项之间）" },
 
-      "accent":        { "value": "#B45309", "type": "color", "role": "A1", "desc": "品牌强调色『赭石墨』：链接 / 光标 / 选中 / 激活" },
-      "accent-hover":  { "value": "#98450A", "type": "color", "role": "A2", "desc": "强调色悬停" },
-      "accent-active": { "value": "#7E3807", "type": "color", "role": "A2", "desc": "强调色按下" },
-      "accent-soft":   { "value": "#FAF0E4", "type": "color", "role": "A2", "desc": "强调色浅底：选区 / 高亮背景" },
-      "accent-on":     { "value": "#FFFFFF", "type": "color", "role": "A2", "desc": "强调色之上的前景" },
+      "accent":        { "value": "#4F46E5", "type": "color", "role": "A1", "desc": "品牌强调色『靛蓝 Indigo』（D-1 浅色主题）：链接 / 光标 / 选中 / 激活。作文字对白底 6.29:1" },
+      "accent-hover":  { "value": "#4338CA", "type": "color", "role": "A2", "desc": "强调色悬停（白字 7.90:1）" },
+      "accent-active": { "value": "#3730A3", "type": "color", "role": "A2", "desc": "强调色按下（白字 9.93:1）" },
+      "accent-soft":   { "value": "#EEEDFB", "type": "color", "role": "A2", "desc": "强调色浅底：选区 / 高亮背景" },
+      "accent-on":     { "value": "#FFFFFF", "type": "color", "role": "A2", "desc": "强调色之上的前景（白字 on #4F46E5 = 6.29:1）" },
 
       "success":       { "value": "#3E7D55", "type": "color", "role": "A2", "desc": "成功（低饱和苔绿）" },
       "success-soft":  { "value": "#E8F2EB", "type": "color", "role": "C",  "desc": "成功浅底" },
@@ -48,11 +48,17 @@
       "info":          { "value": "#35699B", "type": "color", "role": "A2", "desc": "信息（钢蓝）" },
       "info-soft":     { "value": "#E8F0F7", "type": "color", "role": "C",  "desc": "信息浅底" },
 
-      "code-bg":        { "value": "#F6F5F3", "type": "color", "role": "A2", "desc": "代码块背景" },
-      "code-inline-bg": { "value": "#F1EFEC", "type": "color", "role": "A2", "desc": "行内代码背景" },
-      "code-border":    { "value": "#E6E4E0", "type": "color", "role": "A2", "desc": "代码块边框" },
+      "code-bg":        { "value": "#F7F8FA", "type": "color", "role": "A2", "desc": "代码块背景" },
+      "code-inline-bg": { "value": "#F1F2F6", "type": "color", "role": "A2", "desc": "行内代码背景" },
+      "code-border":    { "value": "#E5E6EC", "type": "color", "role": "A2", "desc": "代码块边框" },
 
-      "hl-keyword": { "value": "#A6392A", "type": "color", "role": "A2", "desc": "代码高亮 · 关键字" },
+      "caret":                 { "value": "var(--accent)", "type": "color", "role": "C", "desc": "光标色（引用 accent，Phase C 新增）" },
+      "selection-bg":          { "value": "color-mix(in srgb, var(--accent) 20%, transparent)", "type": "color", "role": "C", "desc": "选区底（Phase C 新增）" },
+      "scrollbar-thumb":       { "value": "var(--border-strong)", "type": "color", "role": "C", "desc": "滚动条滑块（Phase C 新增）" },
+      "scrollbar-thumb-hover": { "value": "var(--muted)", "type": "color", "role": "C", "desc": "滚动条滑块悬停（Phase C 新增）" },
+      "scrollbar-track":       { "value": "transparent", "type": "color", "role": "C", "desc": "滚动条轨道（Phase C 新增）" },
+
+      "hl-keyword": { "value": "#A6392A", "type": "color", "role": "A2", "desc": "代码高亮 · 关键字（独立代码色板）" },
       "hl-string":  { "value": "#4C7A44", "type": "color", "role": "A2", "desc": "代码高亮 · 字符串" },
       "hl-number":  { "value": "#23608F", "type": "color", "role": "A2", "desc": "代码高亮 · 数字 / 字面量" },
       "hl-title":   { "value": "#8A5A24", "type": "color", "role": "A2", "desc": "代码高亮 · 函数 / 标题" },
@@ -61,26 +67,26 @@
     },
 
     "dark": {
-      "bg":            { "value": "#1F1F1E", "type": "color", "role": "A1", "desc": "文档画布：柔黑（非纯黑，降低对比疲劳）" },
-      "surface":       { "value": "#191918", "type": "color", "role": "A1", "desc": "界面外壳：沉入画布之下" },
-      "surface-2":     { "value": "#292826", "type": "color", "role": "A2", "desc": "外壳悬停 / 激活底色" },
-      "surface-warm":  { "value": "#262523", "type": "color", "role": "B",  "desc": "引用块 / 次级容器底色" },
+      "bg":            { "value": "#14151A", "type": "color", "role": "A1", "desc": "文档画布：柔黑（非纯黑，略偏冷以承托靛蓝）" },
+      "surface":       { "value": "#101116", "type": "color", "role": "A1", "desc": "界面外壳：沉入画布之下" },
+      "surface-2":     { "value": "#21232B", "type": "color", "role": "A2", "desc": "外壳悬停 / 激活底色" },
+      "surface-warm":  { "value": "#1C1E25", "type": "color", "role": "B",  "desc": "引用块 / 次级容器底色" },
       "overlay":       { "value": "rgba(0,0,0,0.55)", "type": "color", "role": "A2", "desc": "模态框遮罩" },
 
-      "fg":            { "value": "#E7E4DF", "type": "color", "role": "A1", "desc": "正文主文字（暖白，不用纯白）" },
-      "fg-2":          { "value": "#B3AFA8", "type": "color", "role": "B",  "desc": "次级文字" },
-      "muted":         { "value": "#857F76", "type": "color", "role": "A1", "desc": "弱化文字" },
-      "meta":          { "value": "#6B655C", "type": "color", "role": "B",  "desc": "元数据 / 三级前景" },
+      "fg":            { "value": "#E7E8ED", "type": "color", "role": "A1", "desc": "正文主文字（冷白，不用纯白；对 bg 14.90:1）" },
+      "fg-2":          { "value": "#B4B7C2", "type": "color", "role": "B",  "desc": "次级文字" },
+      "muted":         { "value": "#8A8D99", "type": "color", "role": "A1", "desc": "弱化文字（对 bg 5.51:1）" },
+      "meta":          { "value": "#6A6D78", "type": "color", "role": "B",  "desc": "元数据 / 三级前景（对 bg 3.53:1）" },
 
-      "border":        { "value": "#35332F", "type": "color", "role": "A1", "desc": "默认边框" },
-      "border-strong": { "value": "#47443E", "type": "color", "role": "A2", "desc": "强调边框" },
-      "border-soft":   { "value": "#2A2926", "type": "color", "role": "B",  "desc": "内部行分隔" },
+      "border":        { "value": "#2A2C34", "type": "color", "role": "A1", "desc": "默认边框" },
+      "border-strong": { "value": "#3A3D47", "type": "color", "role": "A2", "desc": "强调边框" },
+      "border-soft":   { "value": "#20222A", "type": "color", "role": "B",  "desc": "内部行分隔" },
 
-      "accent":        { "value": "#D98B4A", "type": "color", "role": "A1", "desc": "品牌强调色『赭石墨』暗色版（提亮以保对比）" },
-      "accent-hover":  { "value": "#E39B5F", "type": "color", "role": "A2", "desc": "强调色悬停" },
-      "accent-active": { "value": "#EFAF77", "type": "color", "role": "A2", "desc": "强调色按下" },
-      "accent-soft":   { "value": "#33261A", "type": "color", "role": "A2", "desc": "强调色浅底（暗）" },
-      "accent-on":     { "value": "#1F1F1E", "type": "color", "role": "A2", "desc": "强调色之上的前景（深色）" },
+      "accent":        { "value": "#6E76F0", "type": "color", "role": "A1", "desc": "品牌强调色『靛蓝』暗色版（D-1 深色主题）。作文字/链接对 bg 4.79:1" },
+      "accent-hover":  { "value": "#8A91F5", "type": "color", "role": "A2", "desc": "强调色悬停（提亮；墨字 6.93:1）" },
+      "accent-active": { "value": "#9AA0F7", "type": "color", "role": "A2", "desc": "强调色按下（再亮；墨字 8.14:1）" },
+      "accent-soft":   { "value": "#1E2040", "type": "color", "role": "A2", "desc": "强调色浅底（暗）" },
+      "accent-on":     { "value": "#0B0C10", "type": "color", "role": "A2", "desc": "强调色之上的前景：近黑墨字（白字压 #6E76F0 仅 3.81 不达标；墨字 5.13:1 通过）" },
 
       "success":       { "value": "#5FAE7E", "type": "color", "role": "A2", "desc": "成功" },
       "success-soft":  { "value": "#1E2A22", "type": "color", "role": "C",  "desc": "成功浅底" },
@@ -91,9 +97,15 @@
       "info":          { "value": "#7BA8D6", "type": "color", "role": "A2", "desc": "信息" },
       "info-soft":     { "value": "#1C2530", "type": "color", "role": "C",  "desc": "信息浅底" },
 
-      "code-bg":        { "value": "#262523", "type": "color", "role": "A2", "desc": "代码块背景" },
-      "code-inline-bg": { "value": "#2B2A27", "type": "color", "role": "A2", "desc": "行内代码背景" },
-      "code-border":    { "value": "#35332F", "type": "color", "role": "A2", "desc": "代码块边框" },
+      "code-bg":        { "value": "#1C1E25", "type": "color", "role": "A2", "desc": "代码块背景" },
+      "code-inline-bg": { "value": "#21232B", "type": "color", "role": "A2", "desc": "行内代码背景" },
+      "code-border":    { "value": "#2A2C34", "type": "color", "role": "A2", "desc": "代码块边框" },
+
+      "caret":                 { "value": "var(--accent)", "type": "color", "role": "C", "desc": "光标色（引用 accent，Phase C 新增）" },
+      "selection-bg":          { "value": "color-mix(in srgb, var(--accent) 30%, transparent)", "type": "color", "role": "C", "desc": "选区底（深色提高不透明度以在暗底可见）" },
+      "scrollbar-thumb":       { "value": "var(--border-strong)", "type": "color", "role": "C", "desc": "滚动条滑块（Phase C 新增）" },
+      "scrollbar-thumb-hover": { "value": "var(--muted)", "type": "color", "role": "C", "desc": "滚动条滑块悬停（Phase C 新增）" },
+      "scrollbar-track":       { "value": "transparent", "type": "color", "role": "C", "desc": "滚动条轨道（Phase C 新增）" },
 
       "hl-keyword": { "value": "#E08C7C", "type": "color", "role": "A2", "desc": "代码高亮 · 关键字" },
       "hl-string":  { "value": "#A8C68C", "type": "color", "role": "A2", "desc": "代码高亮 · 字符串" },
@@ -101,20 +113,71 @@
       "hl-title":   { "value": "#D8B173", "type": "color", "role": "A2", "desc": "代码高亮 · 函数 / 标题" },
       "hl-comment": { "value": "#8A857C", "type": "color", "role": "A2", "desc": "代码高亮 · 注释（斜体）" },
       "hl-attr":    { "value": "#C7A86A", "type": "color", "role": "A2", "desc": "代码高亮 · 属性 / 变量" }
+    },
+
+    "paper": {
+      "bg":            { "value": "#FAF7F1", "type": "color", "role": "A1", "desc": "纸张底（L≈0.97 近白、低彩；刻意不铺饱和米色）" },
+      "surface":       { "value": "#F3EEE5", "type": "color", "role": "A1", "desc": "界面外壳：略深纸 / 封皮" },
+      "surface-2":     { "value": "#EFE8DC", "type": "color", "role": "A2", "desc": "外壳悬停 / 激活底色" },
+      "surface-warm":  { "value": "#F1EADF", "type": "color", "role": "B",  "desc": "引用块 / 次级容器底色" },
+      "overlay":       { "value": "rgba(42,38,32,0.32)", "type": "color", "role": "A2", "desc": "模态框遮罩" },
+
+      "fg":            { "value": "#2A2620", "type": "color", "role": "A1", "desc": "正文主文字（墨黑；对 bg 14.06:1）" },
+      "fg-2":          { "value": "#4E4941", "type": "color", "role": "B",  "desc": "次级文字" },
+      "muted":         { "value": "#6F675A", "type": "color", "role": "A1", "desc": "弱化文字（对 bg 5.22:1；原 #7C7466 仅 4.32 已修正）" },
+      "meta":          { "value": "#908776", "type": "color", "role": "B",  "desc": "元数据 / 三级前景（对 bg 3.32:1）" },
+
+      "border":        { "value": "#E5DED0", "type": "color", "role": "A1", "desc": "默认边框" },
+      "border-strong": { "value": "#DAD2C2", "type": "color", "role": "A2", "desc": "强调边框" },
+      "border-soft":   { "value": "#EDE7DB", "type": "color", "role": "B",  "desc": "内部行分隔" },
+
+      "accent":        { "value": "#9D5A2F", "type": "color", "role": "A1", "desc": "品牌强调色『赭石』（D-1 纸感主题）。作文字对 bg 4.99:1" },
+      "accent-hover":  { "value": "#8A4D26", "type": "color", "role": "A2", "desc": "强调色悬停（白字 6.62:1）" },
+      "accent-active": { "value": "#7C431F", "type": "color", "role": "A2", "desc": "强调色按下（白字 7.84:1）" },
+      "accent-soft":   { "value": "#F4E7D8", "type": "color", "role": "A2", "desc": "强调色浅底" },
+      "accent-on":     { "value": "#FFFFFF", "type": "color", "role": "A2", "desc": "强调色之上的前景（白字 on #9D5A2F = 5.33:1）" },
+
+      "success":       { "value": "#3E6B3C", "type": "color", "role": "A2", "desc": "成功" },
+      "success-soft":  { "value": "#E9EFE5", "type": "color", "role": "C",  "desc": "成功浅底" },
+      "warn":          { "value": "#8A6210", "type": "color", "role": "A2", "desc": "警告（对 bg 5.12:1）" },
+      "warn-soft":     { "value": "#F5EDDA", "type": "color", "role": "C",  "desc": "警告浅底" },
+      "danger":        { "value": "#A5392F", "type": "color", "role": "A2", "desc": "错误 / 危险（对 bg 6.09:1）" },
+      "danger-soft":   { "value": "#F6E6E2", "type": "color", "role": "C",  "desc": "错误浅底" },
+      "info":          { "value": "#33608F", "type": "color", "role": "A2", "desc": "信息（对 bg 6.12:1）" },
+      "info-soft":     { "value": "#E7EEF5", "type": "color", "role": "C",  "desc": "信息浅底" },
+
+      "code-bg":        { "value": "#F3EEE5", "type": "color", "role": "A2", "desc": "代码块背景" },
+      "code-inline-bg": { "value": "#EFE9DD", "type": "color", "role": "A2", "desc": "行内代码背景" },
+      "code-border":    { "value": "#E5DED0", "type": "color", "role": "A2", "desc": "代码块边框" },
+
+      "caret":                 { "value": "var(--accent)", "type": "color", "role": "C", "desc": "光标色（引用 accent，Phase C 新增）" },
+      "selection-bg":          { "value": "color-mix(in srgb, var(--accent) 20%, transparent)", "type": "color", "role": "C", "desc": "选区底" },
+      "scrollbar-thumb":       { "value": "var(--border-strong)", "type": "color", "role": "C", "desc": "滚动条滑块" },
+      "scrollbar-thumb-hover": { "value": "var(--muted)", "type": "color", "role": "C", "desc": "滚动条滑块悬停" },
+      "scrollbar-track":       { "value": "transparent", "type": "color", "role": "C", "desc": "滚动条轨道" },
+
+      "hl-keyword": { "value": "#A6392A", "type": "color", "role": "A2", "desc": "代码高亮 · 关键字（沿用亮色代码色板）" },
+      "hl-string":  { "value": "#4C7A44", "type": "color", "role": "A2", "desc": "代码高亮 · 字符串" },
+      "hl-number":  { "value": "#23608F", "type": "color", "role": "A2", "desc": "代码高亮 · 数字 / 字面量" },
+      "hl-title":   { "value": "#8A5A24", "type": "color", "role": "A2", "desc": "代码高亮 · 函数 / 标题" },
+      "hl-comment": { "value": "#8E8A82", "type": "color", "role": "A2", "desc": "代码高亮 · 注释（斜体）" },
+      "hl-attr":    { "value": "#6E5A1E", "type": "color", "role": "A2", "desc": "代码高亮 · 属性 / 变量" }
     }
   },
 
   "font": {
     "family": {
-      "display": { "value": "-apple-system, BlinkMacSystemFont, \"Inter\", \"Segoe UI\", \"PingFang SC\", \"Noto Sans SC\", \"Microsoft YaHei\", sans-serif", "type": "fontFamily", "desc": "标题与界面。系统原生字优先，中文走 PingFang SC / Noto Sans SC" },
-      "body":    { "value": "-apple-system, BlinkMacSystemFont, \"Inter\", \"Segoe UI\", \"PingFang SC\", \"Noto Sans SC\", \"Microsoft YaHei\", sans-serif", "type": "fontFamily", "desc": "编辑器与预览正文。编辑区放弃等宽，改用正文字体" },
+      "display": { "value": "-apple-system, BlinkMacSystemFont, \"Inter\", \"Segoe UI\", \"PingFang SC\", \"Noto Sans SC\", \"Microsoft YaHei\", sans-serif", "type": "fontFamily", "desc": "标题（浅/深主题）。系统原生字优先，中文走 PingFang SC / Noto Sans SC；纸感主题覆写为衬线栈" },
+      "body":    { "value": "-apple-system, BlinkMacSystemFont, \"Inter\", \"Segoe UI\", \"PingFang SC\", \"Noto Sans SC\", \"Microsoft YaHei\", sans-serif", "type": "fontFamily", "desc": "编辑器与预览正文（浅/深主题）。纸感主题覆写为 Georgia, Times New Roman, Songti SC, Noto Serif SC, STSong, SimSun, serif" },
+      "ui":      { "value": "-apple-system, BlinkMacSystemFont, \"Inter\", \"Segoe UI\", \"PingFang SC\", \"Noto Sans SC\", \"Microsoft YaHei\", sans-serif", "type": "fontFamily", "desc": "界面外壳（工具条 / 状态栏 / 侧栏）—— 纸感主题下 chrome 仍用无衬线。Phase C 新增" },
       "mono":    { "value": "\"SF Mono\", \"JetBrains Mono\", \"Fira Code\", Menlo, Consolas, \"Courier New\", monospace", "type": "fontFamily", "desc": "仅用于代码块与行内代码" }
     },
     "size": {
-      "text-xs":   { "value": "0.75rem",   "px": "12px", "type": "dimension", "desc": "行号、徽标" },
-      "text-sm":   { "value": "0.8125rem", "px": "13px", "type": "dimension", "desc": "工具栏按钮、树节点、状态" },
+      "text-xs":   { "value": "0.75rem",   "px": "12px", "type": "dimension", "desc": "行号、徽标、状态栏" },
+      "text-sm":   { "value": "0.8125rem", "px": "13px", "type": "dimension", "desc": "工具条按钮、树节点、状态" },
       "text-base": { "value": "0.9375rem", "px": "15px", "type": "dimension", "desc": "编辑区正文（基准）" },
       "text-md":   { "value": "0.9375rem", "px": "15px", "type": "dimension", "desc": "预览区正文（与编辑区一致，保证左右两栏对齐）" },
+      "text-reading": { "value": "1.0625rem", "px": "17px", "type": "dimension", "desc": "阅读模式正文（比常规 +2px）。Phase C 新增" },
       "text-lg":   { "value": "1.125rem",  "px": "18px", "type": "dimension", "desc": "辅标题 / 引导文案" },
       "text-xl":   { "value": "1.25rem",   "px": "20px", "type": "dimension", "desc": "预览 h3" },
       "text-2xl":  { "value": "1.5rem",    "px": "24px", "type": "dimension", "desc": "预览 h2" },
@@ -130,12 +193,13 @@
     },
     "weight": {
       "read":     { "value": 400, "type": "fontWeight", "desc": "正文 / 描述" },
-      "emphasize":{ "value": 510, "type": "fontWeight", "desc": "小标题 / 标签 / 按钮" },
+      "emphasize":{ "value": 510, "type": "fontWeight", "desc": "小标题 / 标签 / 按钮 / 加粗" },
       "announce": { "value": 590, "type": "fontWeight", "desc": "大标题 / 文档标题" }
     },
     "leading": {
-      "body":    { "value": 1.7,  "type": "number", "desc": "编辑区正文行高" },
-      "reading": { "value": 1.7,  "type": "number", "desc": "预览区正文行高（与编辑区一致，保证左右对齐）" },
+      "body":    { "value": 1.7,  "type": "number", "desc": "编辑区正文行高（纸感主题覆写为 1.8）" },
+      "reading": { "value": 1.7,  "type": "number", "desc": "预览区正文行高（纸感主题覆写为 1.85）" },
+      "reading-mode": { "value": 1.8, "type": "number", "desc": "阅读模式行高。Phase C 新增" },
       "tight":   { "value": 1.3,  "type": "number", "desc": "标题行高" },
       "ui":      { "value": 1.4,  "type": "number", "desc": "界面控件行高" }
     },
@@ -170,7 +234,7 @@
   "shadow": {
     "flat":   { "value": "none", "type": "boxShadow", "desc": "内容区默认：无阴影，靠留白与 1px 边框分层" },
     "ring":   { "value": "0 0 0 1px var(--border)", "type": "boxShadow", "desc": "发丝边框环（作为层级手段）" },
-    "raised": { "value": "0 1px 2px rgba(30,29,27,0.05), 0 4px 12px rgba(30,29,27,0.07)", "type": "boxShadow", "desc": "浮层 / 下拉 / 模态（仅在暗色下减弱）" }
+    "raised": { "value": "0 1px 2px rgba(16,17,22,0.05), 0 4px 12px rgba(16,17,22,0.07)", "type": "boxShadow", "desc": "浮层 / 下拉 / 模态（仅在暗色下减弱）" }
   },
 
   "focus": {
@@ -181,29 +245,34 @@
     "fast":   { "value": "120ms", "type": "duration", "desc": "hover 变色 / 按下反馈" },
     "base":   { "value": "180ms", "type": "duration", "desc": "状态确认 / 淡入" },
     "slow":   { "value": "240ms", "type": "duration", "desc": "浮层展开 / 侧栏折叠" },
-    "ease-standard": { "value": "cubic-bezier(0.2, 0, 0, 1)", "type": "cubicBezier", "desc": "通用缓动" },
+    "ease-standard": { "value": "cubic-bezier(0.2, 0, 0, 1)", "type": "cubicBezier", "desc": "通用缓动（禁弹跳缓动）" },
     "ease-out":      { "value": "cubic-bezier(0.16, 1, 0.3, 1)", "type": "cubicBezier", "desc": "进入动效" }
   },
 
   "layout": {
-    "toolbar-height":      { "value": "44px",   "type": "dimension" },
-    "sidebar-width":       { "value": "232px",  "type": "dimension" },
-    "preview-measure":     { "value": "46rem",  "type": "dimension", "desc": "预览区最大阅读宽度（≈736px，长文舒适行宽）" },
-    "preview-padding-y":   { "value": "40px",   "type": "dimension" },
-    "editor-gutter-width": { "value": "44px",   "type": "dimension" }
+    "toolbar-height":        { "value": "44px",   "type": "dimension", "desc": "顶栏标题栏（macOS 隐藏式）" },
+    "editor-toolbar-height": { "value": "38px",   "type": "dimension", "desc": "编辑区顶部工具条。Phase C 新增" },
+    "statusbar-height":      { "value": "26px",   "type": "dimension", "desc": "底部状态栏。Phase C 新增" },
+    "sidebar-width":         { "value": "232px",  "type": "dimension" },
+    "preview-measure":       { "value": "46rem",  "type": "dimension", "desc": "预览/编辑/阅读共用的常规最大阅读宽度（≈736px）" },
+    "reading-measure":       { "value": "50rem",  "type": "dimension", "desc": "阅读模式正文宽度（≈800px；纸感主题覆写为 48rem）。Phase C 新增" },
+    "preview-padding-y":     { "value": "40px",   "type": "dimension" },
+    "editor-gutter-width":   { "value": "44px",   "type": "dimension" }
   },
 
   "icon": {
     "library": { "value": "内联 SVG（零新增依赖）—— 不引 npm 图标库", "type": "string", "desc": "唯一渲染入口 components/icons/AppIcon.vue；几何数据 + 语义白名单 components/icons/paths.js" },
     "geometrySource": { "value": "lucide-static@1.48.0 · icons/*.svg（逐字摘录，未重绘）", "type": "string", "desc": "https://github.com/lucide-icons/lucide · 采集自 unpkg.com/lucide-static@1.48.0" },
     "license": { "value": "ISC（部分源自 Feather 的图标为 MIT）", "type": "string", "desc": "全文见 components/icons/LICENSE，项目根 README 已标注" },
-    "dataModel": { "value": "paths.js 的 value 承载「完整内层 SVG 标记」（可含 circle/path/rect 多元素），非单条 path 的 d 值", "type": "string", "desc": "13 个几何中 8 个为多元素；单路径模型会渲染残缺" },
+    "dataModel": { "value": "paths.js 的 value 承载「完整内层 SVG 标记」（可含 circle/path/rect 多元素），非单条 path 的 d 值", "type": "string", "desc": "多元素图标单路径模型会渲染残缺" },
     "size": {
-      "inline": { "value": "16px", "type": "dimension", "desc": "行内 / 文件树 / 文字旁" },
-      "button": { "value": "20px", "type": "dimension", "desc": "按钮内独立图标" }
+      "inline":     { "value": "16px", "type": "dimension", "desc": "行内 / 文件树 / 文字旁" },
+      "button":     { "value": "20px", "type": "dimension", "desc": "按钮内独立图标" },
+      "standalone": { "value": "24px", "type": "dimension", "desc": "独立图标位。Phase C 新增" }
     },
     "strokeWidth": { "value": 1.75, "type": "number", "desc": "全项目统一描边粗细（由 AppIcon 注入，不写在几何数据里）" },
     "a11y": { "value": "图标按钮必带 aria-label；纯装饰图标 aria-hidden", "type": "string" },
-    "verification": { "value": "13 几何逐字节比对官方源一致；16px/20px 双尺寸目视核验通过", "type": "string" }
+    "phaseCAdditions": { "value": "pen-line, sun-moon, monitor, newspaper, bold, italic, strikethrough, code, heading, quote, list, list-ordered, list-todo, link, image, square-code, table, minus, undo-2, redo-2, ellipsis, circle-check, loader, circle-dot", "type": "string", "desc": "Phase C 需新增采集的 24 个 lucide 图标（均经 lucide-static@1.48.0 核实存在），清单与内层标记见 docs/design/phaseC-visual-spec.md §6 与附录 A" },
+    "verification": { "value": "既有几何逐字节比对官方源一致；16px/20px 双尺寸目视核验通过", "type": "string" }
   }
 }
