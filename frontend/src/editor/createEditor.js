@@ -216,7 +216,10 @@ export function createEditor(parent, { doc = '', onDocChange, onScroll, onUpdate
            唯一 theme 扩展内追加（§3.6：EditorView.theme 多次提供会同键覆盖，
            禁止为装饰样式另开第二个 theme）。值全部引用语义 Token，无裸 hex。 */
         '.cm-md-quote': { backgroundColor: 'var(--surface-warm)' },
-        '.cm-md-codeblock': { backgroundColor: 'var(--code-bg)' },
+        /* 代码块不做行内样式预览（用户反馈：左侧应保持原 Markdown 样式，
+           行内样式装饰与右侧完整预览重复，且与「围栏可见」的源码感冲突）。
+           装饰类 .cm-md-codeblock 由 wysiwyg.js 生成，此处不附着视觉样式；
+           若日后需要代码块底色，恢复此行即可（值：var(--code-bg)）。 */
         '.cm-md-bullet': { color: 'var(--muted)', padding: '0 1px' },
         '.cm-md-listmark': { color: 'var(--muted)' },
         '.cm-md-empty': { color: 'var(--meta)' }, // 空标记弱提示（**** []()）
