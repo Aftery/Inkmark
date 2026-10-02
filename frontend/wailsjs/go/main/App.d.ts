@@ -26,4 +26,6 @@ export function SnapshotRead(arg1:string,arg2:string):Promise<string>;
 
 export function SnapshotWrite(arg1:string,arg2:string):Promise<void>;
 
+export function WatchDir(arg1:string):Promise<void>;
+
 export function WriteFile(arg1:string,arg2:string):Promise<void>;

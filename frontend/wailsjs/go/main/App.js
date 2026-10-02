@@ -50,6 +50,10 @@ export function SnapshotWrite(arg1, arg2) {
   return window['go']['main']['App']['SnapshotWrite'](arg1, arg2);
 }
 
+export function WatchDir(arg1) {
+  return window['go']['main']['App']['WatchDir'](arg1);
+}
+
 export function WriteFile(arg1, arg2) {
   return window['go']['main']['App']['WriteFile'](arg1, arg2);
 }

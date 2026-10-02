@@ -145,6 +145,15 @@ const sidebarOpen = ref(false)
 const sidebarTab = ref('files') // 'files' | 'outline'
 const outline = ref([])
 
+// ---------- 文件树外部变更监听（Go 侧 fsnotify，仅根目录一层）----------
+// 根目录直接子项增删改 → Go 去抖后发 fs:changed → 递增信号让 FileTree 重新拉取列表。
+// folderPath 变化（打开 / 切换文件夹）时同步重设监听；关闭时传空串停止。
+const treeSignal = ref(0)
+safeEventsOn('fs:changed', () => { treeSignal.value++ })
+watch(folderPath, (p) => {
+  try { window.go?.main?.App?.WatchDir?.(p || '') } catch { /* 浏览器预览无绑定 */ }
+})
+
 // 视图四态：'edit' | 'preview' | 'split' | 'reading'（函数见下方「视图四态」节；
 // 声明须在 useOutlineSync 之前，其依赖注入引用本 ref）
 const viewMode = ref('split')
@@ -615,7 +624,7 @@ function onDividerKeydown(e) {
         <div v-show="sidebarTab === 'files'" class="sidebar-body">
           <template v-if="folderPath">
             <div class="sidebar-title" :title="folderPath">{{ folderPath.split('/').pop() }}</div>
-            <FileTree :root="folderPath" @select="openTreeFile" />
+            <FileTree :root="folderPath" :reload-signal="treeSignal" @select="openTreeFile" />
           </template>
           <div v-else class="sidebar-empty">
             <p>打开一个文件夹，在侧栏浏览文件</p>
