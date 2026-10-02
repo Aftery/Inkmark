@@ -8,6 +8,8 @@
 // 节点名均实测自 @lezer/markdown@1.7.2（node_modules Type 枚举）。
 
 import { syntaxTree } from '@codemirror/language'
+import { extractOutline } from './outline'
+import { createSlugCounter } from './anchors'
 
 const FENCE_RE = /^\s*(```|~~~)/
 
@@ -266,6 +268,50 @@ export const insertTable = (view) => {
 export const insertHr = (view) => {
   const r = view.state.selection.main
   view.dispatch({ changes: [{ from: r.from, insert: '\n---\n' }] })
+  return true
+}
+
+// ---------- 插入目录 ----------
+// 锚点规则与 preview/markdown.js 的标题 id 严格一致（editor/anchors.js 的
+// 顺序去重计数器），目录链接在预览里才能点得动。
+
+export const insertToc = (view) => {
+  const items = extractOutline(view.state.doc)
+  const slugs = createSlugCounter()
+  const lines = items.map(
+    (it) => '  '.repeat(it.level - 1) + `- [${it.text}](#${slugs.slug(it.text)})`,
+  )
+  const toc = '## 目录\n\n' + (lines.length ? lines.join('\n') : '（暂无标题）') + '\n'
+  const r = view.state.selection.main
+  view.dispatch({ changes: [{ from: r.from, to: r.to, insert: toc }] })
+  return true
+}
+
+// ---------- 清除格式：摘除选区（无选区时为光标所在行）内的行内标记 ----------
+// 范围：加粗/斜体/删除线/行内代码包裹符，链接/图片还原为文字。
+// 不动标题/列表/引用 —— 各有专属 toggle，一把全清误伤面太大；围栏代码块整段跳过。
+const INLINE_STRIP_RES = [
+  /!\[([^\]]*)\]\([^)]*\)/g, // 图片 → alt 文字
+  /\[([^\]]*)\]\([^)]*\)/g, // 链接 → 链接文字
+  /\*\*([^*]+)\*\*/g,
+  /__([^_]+)__/g,
+  /\*([^*\n]+)\*/g,
+  /_([^_\n]+)_/g,
+  /~~([^~]+)~~/g,
+  /`([^`\n]+)`/g,
+]
+
+export const clearFormatting = (view) => {
+  const state = view.state
+  const changes = []
+  for (const line of selectedLines(state)) {
+    // 围栏代码块内的行原样保留（语法树判定，与 toggleCodeBlock 同源）
+    if (enclosing(state, Math.min(line.from + 1, state.doc.length), ['FencedCode'])) continue
+    const text = state.doc.sliceString(line.from, line.to)
+    const next = INLINE_STRIP_RES.reduce((acc, re) => acc.replace(re, '$1'), text)
+    if (next !== text) changes.push({ from: line.from, to: line.to, insert: next })
+  }
+  if (changes.length) view.dispatch({ changes })
   return true
 }
 

@@ -7,7 +7,11 @@
 //    围栏代码与预览区 highlight.js 共用同一套 --hl-* 变量（单一色板）
 import { EditorView, keymap, highlightSpecialChars, ViewPlugin, Decoration } from '@codemirror/view'
 import { EditorState, StateField, StateEffect, RangeSetBuilder, Compartment } from '@codemirror/state'
-import { defaultKeymap, history, historyKeymap, indentWithTab } from '@codemirror/commands'
+import {
+  defaultKeymap, history, historyKeymap, indentWithTab,
+  moveLineUp, moveLineDown, copyLineUp, copyLineDown, deleteLine,
+} from '@codemirror/commands'
+import { search, searchKeymap, openSearchPanel } from '@codemirror/search'
 import { syntaxHighlighting, HighlightStyle, syntaxTree } from '@codemirror/language'
 import { markdown, markdownLanguage } from '@codemirror/lang-markdown'
 import { tags as t } from '@lezer/highlight'
@@ -151,6 +155,14 @@ export function setEditorZoom(view, scale) {
   })
 }
 
+// ---------- 打字机模式：把光标所在行滚到视口中部（App.vue 在开关联通时调用） ----------
+export function centerCursor(view) {
+  if (!view) return
+  view.dispatch({
+    effects: EditorView.scrollIntoView(view.state.selection.main.head, { y: 'center' }),
+  })
+}
+
 // ---------- 整体替换文档（打开文件 / 切换文件 / 恢复快照） ----------
 // 用 setState 而非 dispatch 承载「整份替换」，两个理由：
 // 1) 语义正确：CM6 对 setState 的说明正是本场景——「新状态并非派生自旧状态」
@@ -219,8 +231,23 @@ export function createEditor(parent, { doc = '', onDocChange, onScroll, onUpdate
     extensions: [
       highlightSpecialChars(),
       history(),
-      // 自定义 Enter 键位须排在 defaultKeymap 之前才优先生效（见 exitCodeBlockOnEnter）
-      keymap.of([{ key: 'Enter', run: exitCodeBlockOnEnter }, ...defaultKeymap, ...historyKeymap, indentWithTab]),
+      // 自定义 Enter 键位须排在 defaultKeymap 之前才优先生效（见 exitCodeBlockOnEnter）。
+      // searchKeymap：⌘F 查找面板（darwin 无菜单入口，按键直达 WebView）+ Esc 关闭。
+      // 行操作键位沿用 VS Code 惯例（⌥↑↓ 移动行、⇧⌥↑↓ 复制行、⌘⇧K 删除行）——
+      // darwin 端「编辑」菜单是硬编码 Role，这些能力只能靠键位 + 快捷键速查暴露。
+      keymap.of([
+        { key: 'Enter', run: exitCodeBlockOnEnter },
+        { key: 'Mod-Alt-f', run: openSearchPanel },
+        { key: 'Alt-ArrowUp', run: moveLineUp },
+        { key: 'Alt-ArrowDown', run: moveLineDown },
+        { key: 'Shift-Alt-ArrowUp', run: copyLineUp },
+        { key: 'Shift-Alt-ArrowDown', run: copyLineDown },
+        { key: 'Mod-Shift-k', run: deleteLine },
+        ...defaultKeymap,
+        ...historyKeymap,
+        ...searchKeymap,
+        indentWithTab,
+      ]),
       // 图片粘贴 / 拖拽：仅在拿到图片文件且注册了 onImageFile 时拦截，其余放行
       EditorView.domEventHandlers({
         paste(event, view) {
@@ -248,6 +275,8 @@ export function createEditor(parent, { doc = '', onDocChange, onScroll, onUpdate
       }),
       markdown({ base: markdownLanguage, codeLanguages }),
       syntaxHighlighting(mdHighlight, { fallback: true }),
+      // 查找/替换面板（⌘F / ⌘⌥F）：面板停靠编辑区顶部
+      search({ top: true }),
       EditorView.theme({
         '&': {
           height: '100%',

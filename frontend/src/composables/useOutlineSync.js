@@ -17,8 +17,10 @@ const HEADING_SEL = '.preview-body h1,.preview-body h2,.preview-body h3,.preview
  * @param {import('vue').Ref<string>} deps.viewMode 'edit'|'preview'|'split'|'reading'
  * @param {import('vue').Ref<boolean>} deps.sidebarOpen 侧栏可见性
  * @param {import('vue').Ref<Array>}  deps.outline 大纲数据
+ * @param {Function} [deps.syncEnabled] 滚动联动开关（菜单 checkbox）；
+ *   返回 false 时只保留大纲高亮，不做跨栏联动写入
  */
-export function useOutlineSync({ getEditor, previewEl, viewMode, sidebarOpen, outline }) {
+export function useOutlineSync({ getEditor, previewEl, viewMode, sidebarOpen, outline, syncEnabled }) {
   const outlineActive = ref(-1) // 当前节在大纲里的下标，-1 = 首个标题之前
 
   let anchorsCache = null
@@ -112,7 +114,9 @@ export function useOutlineSync({ getEditor, previewEl, viewMode, sidebarOpen, ou
   }
 
   function onEditorScroll() {
-    scheduleOutlineSync() // 滚动驱动大纲当前节高亮（rAF 节流）
+    scheduleOutlineSync() // 滚动驱动大纲当前节高亮（rAF 节流）——联动关闭时仍保留
+    // 联动开关（视图菜单 checkbox）：关闭时高亮照常、跨栏写入终止
+    if (syncEnabled && !syncEnabled()) return
     // 单栏态守卫（交互 Spec §1.4）：对侧 display:none，联动无意义
     if (viewMode.value !== 'split' || syncingScroll || !getEditor() || !previewEl.value) return
     const cm = getEditor().scrollDOM
@@ -132,6 +136,7 @@ export function useOutlineSync({ getEditor, previewEl, viewMode, sidebarOpen, ou
 
   function onPreviewScroll() {
     scheduleOutlineSync() // 预览态下以预览滚动驱动高亮
+    if (syncEnabled && !syncEnabled()) return
     if (viewMode.value !== 'split' || syncingScroll || !getEditor() || !previewEl.value) return
     const pane = previewEl.value
     if (isSyncEcho(pane)) return

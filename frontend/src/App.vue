@@ -1,14 +1,19 @@
 <script setup>
 import { ref, onMounted, onBeforeUnmount, computed, nextTick, triggerRef, watch } from 'vue'
-import { createEditor, setEditorZoom, replaceDocument } from './editor/createEditor'
+import { createEditor, setEditorZoom, replaceDocument, centerCursor } from './editor/createEditor'
 import { extractOutline } from './editor/outline'
 import {
   toggleBold, toggleItalic, toggleStrike, toggleInlineCode,
   toggleLink, insertImage, toggleHeading,
   toggleBulletList, toggleOrderedList, toggleTaskList, toggleBlockquote,
-  toggleCodeBlock, insertTable, insertHr, activeFormats,
+  toggleCodeBlock, insertTable, insertHr, insertToc, clearFormatting, activeFormats,
 } from './editor/commands'
-import { undo, redo } from '@codemirror/commands'
+import {
+  undo, redo, selectAll,
+  moveLineUp, moveLineDown, copyLineDown, deleteLine,
+  indentMore, indentLess,
+} from '@codemirror/commands'
+import { openSearchPanel } from '@codemirror/search'
 import { createRenderer, render } from './preview/markdown'
 import FileTree from './components/FileTree.vue'
 import Outline from './components/Outline.vue'
@@ -76,10 +81,14 @@ hello('Inkmark')
 | ⌘O | 打开文件 |
 | ⌘⇧O | 打开文件夹 |
 | ⌘S | 保存 |
+| ⌘F | 查找（⌘⌥F 查找替换） |
+| ⌘L | 跳转到行 |
 | ⌘1 / ⌘2 / ⌘3 / ⌘4 | 编辑 / 预览 / 双栏 / 阅读 |
 | ⌘⇧F | 专注模式（Esc 退出） |
 | ⌘B | 显示 / 隐藏大纲 |
 | ⌘⇧L | 切换主题 |
+
+> 全部键位见菜单「帮助 → 快捷键速查」（⌘/）。
 `
 
 // ---------- 编辑器 ----------
@@ -90,8 +99,27 @@ let editor = null
 // 状态栏数据源
 const caret = ref({ line: 1, col: 1 })
 const activeFmt = ref({})
-const ZOOM_LEVELS = [90, 100, 110, 125]
+// ---------- 缩放（状态栏循环 + 视图菜单 放大/缩小/重置，80%~150%） ----------
+const ZOOM_LEVELS = [80, 90, 100, 110, 125, 150]
 const zoom = ref(100)
+
+function setZoom(level) {
+  zoom.value = level
+  if (editor) setEditorZoom(editor, level / 100)
+}
+
+function cycleZoom() {
+  const i = ZOOM_LEVELS.indexOf(zoom.value)
+  setZoom(ZOOM_LEVELS[(i + 1) % ZOOM_LEVELS.length])
+}
+
+function zoomIn() {
+  setZoom(ZOOM_LEVELS.find((z) => z > zoom.value) ?? zoom.value)
+}
+
+function zoomOut() {
+  setZoom([...ZOOM_LEVELS].reverse().find((z) => z < zoom.value) ?? zoom.value)
+}
 
 // 字数：CJK 按字计，西文按词计
 const wordCount = computed(() => {
@@ -107,6 +135,10 @@ function onEditorUpdate(u) {
   const line = u.state.doc.lineAt(pos)
   caret.value = { line: line.number, col: pos - line.from + 1 }
   activeFmt.value = activeFormats(u.state)
+  // 打字机模式：输入后把光标行滚到视口中部（rAF 避开 update 事务内再 dispatch）
+  if (typewriterOn.value && u.docChanged) {
+    requestAnimationFrame(() => centerCursor(editor))
+  }
 }
 
 // ---------- 轻提示（导出结果 / 快照反馈） ----------
@@ -162,8 +194,31 @@ watch(folderPath, (p) => {
 const viewMode = ref('split')
 let modeBeforeReading = null
 
+// ---------- 菜单开关态（checkbox 行为本体在 App.vue，偏好持久化 localStorage） ----------
+// 滚动联动 / 打字机模式的偏好真源在前端；Go 侧 checkbox 只是初始态镜像
+// （挂载时经 window.go.main.App.SetScrollSync / SetTypewriter 回读同步）。
+const scrollSyncOn = ref(localStorage.getItem('inkmark-scroll-sync') !== '0')
+const typewriterOn = ref(localStorage.getItem('inkmark-typewriter') === '1')
+
+function toggleScrollSync(on) {
+  scrollSyncOn.value = !!on
+  localStorage.setItem('inkmark-scroll-sync', scrollSyncOn.value ? '1' : '0')
+}
+
+function toggleTypewriter(on) {
+  typewriterOn.value = !!on
+  localStorage.setItem('inkmark-typewriter', typewriterOn.value ? '1' : '0')
+}
+
 // ---------- 滚动双向联动 + 大纲当前节高亮（composables/useOutlineSync） ----------
-const sync = useOutlineSync({ getEditor: () => editor, previewEl, viewMode, sidebarOpen, outline })
+const sync = useOutlineSync({
+  getEditor: () => editor,
+  previewEl,
+  viewMode,
+  sidebarOpen,
+  outline,
+  syncEnabled: () => scrollSyncOn.value, // 关闭时保留大纲高亮、停止跨栏联动
+})
 const { outlineActive } = sync
 
 // ---------- 预览渲染防抖 ----------
@@ -280,6 +335,12 @@ onMounted(() => {
   if (savedMode === 'edit' || savedMode === 'preview' || savedMode === 'reading') {
     requestAnimationFrame(() => setViewMode(savedMode, { persist: false }))
   }
+  // 开关偏好回读给 Go：菜单 checkbox 初始态（Go 在 buildMenu 时用的默认值）
+  try {
+    const api = window.go?.main?.App
+    api?.SetScrollSync?.(scrollSyncOn.value)
+    api?.SetTypewriter?.(typewriterOn.value)
+  } catch { /* 浏览器预览无绑定 */ }
 })
 
 // 开发期调试钩子：浏览器（vite dev）下没有 wails 绑定，无法走真实「打开文件」路径，
@@ -369,12 +430,35 @@ function toggleFocus() {
   }
 }
 
-// Esc 退出专注 / 阅读 / 历史面板（Esc 不在菜单 accelerator 里，无「菜单先消费按键」冲突）
+// Esc 退出专注 / 阅读 / 历史面板 / 对话框；⌘F / ⌘L 全局兜底
+// （darwin 无「编辑」菜单入口，按键直达 WebView；编辑器内 ⌘F 由 CM searchKeymap
+// 处理，此处只补编辑器外场景。⌘L 两边都没绑，统一走这里。）
 function onGlobalKeydown(e) {
-  if (e.key !== 'Escape' || e.isComposing) return
-  if (focusOn.value) toggleFocus()
-  else if (persistence.showHistory.value) persistence.showHistory.value = false
-  else if (viewMode.value === 'reading') exitReading()
+  if (e.isComposing) return
+  if (e.key === 'Escape') {
+    if (dialog.show) closeDialog(null)
+    else if (showShortcuts.value) showShortcuts.value = false
+    else if (focusOn.value) toggleFocus()
+    else if (persistence.showHistory.value) persistence.showHistory.value = false
+    else if (viewMode.value === 'reading') exitReading()
+    return
+  }
+  if (dialog.show) return // 输入对话框打开期间不响应全局命令键
+  const mod = e.metaKey || e.ctrlKey
+  if (!mod || e.shiftKey) return
+  const k = e.key.toLowerCase()
+  if (k === 'f') {
+    // 编辑器焦点内交给 CM keymap，避免双开面板抢焦点
+    if (!(editor && editor.dom.contains(e.target))) {
+      e.preventDefault()
+      openFind()
+    }
+    return
+  }
+  if (k === 'l') {
+    e.preventDefault()
+    jumpToLine()
+  }
 }
 
 // ---------- 侧栏 tab 切换 / 大纲开关（refs 与联动在文件前部声明） ----------
@@ -403,6 +487,10 @@ function loadDocument(content, path) {
   syncAfterDocReplace(content)
   filePath.value = path
   persistence.resetSession()
+  // 登记最近打开（Go 侧持久化 + 重建「最近打开」子菜单）；未落盘文档跳过
+  if (path) {
+    try { window.go?.main?.App?.AddRecent?.(path) } catch { /* 浏览器预览无绑定 */ }
+  }
 }
 
 async function openFile() {
@@ -428,6 +516,179 @@ async function openTreeFile(path) {
   const content = await ReadFile(path)
   loadDocument(content, path)
 }
+
+// ---------- 文件：新建 / 重命名 ----------
+
+async function newFile() {
+  await persistence.snapshotBoundary() // 破坏性边界前先留一份快照
+  loadDocument('', '')
+  showToast('已新建文件，⌘S 保存到磁盘')
+}
+
+async function renameFile() {
+  if (!filePath.value) {
+    showToast('请先保存文档（⌘S）再重命名', true)
+    return
+  }
+  const api = window.go?.main?.App
+  if (!api?.RenameFile) {
+    showToast('当前环境不支持重命名', true)
+    return
+  }
+  const name = await askInput({ title: '重命名', value: title.value })
+  if (name === null) return
+  const trimmed = name.trim()
+  if (!trimmed || trimmed === title.value) return
+  try {
+    const newPath = await api.RenameFile(filePath.value, trimmed)
+    filePath.value = newPath
+    api.AddRecent?.(newPath)
+    showToast('已重命名')
+  } catch (err) {
+    showToast(`重命名失败：${err?.message || err}`, true)
+  }
+}
+
+// ---------- 查找 / 替换（CM search 面板；⌘F/⌘⌥F） ----------
+
+function openFind() {
+  if (!editor) return
+  // 预览/阅读态编辑器隐藏，先回到双栏再开面板
+  if (viewMode.value === 'preview' || viewMode.value === 'reading') setViewMode('split')
+  nextTick(() => {
+    editor.focus()
+    openSearchPanel(editor)
+  })
+}
+
+// ---------- 跳转到行（⌘L，输入对话框） ----------
+
+async function jumpToLine() {
+  if (!editor) return
+  const v = await askInput({ title: '跳转到行', placeholder: `1 ~ ${editor.state.doc.lines}` })
+  if (v === null) return
+  const n = Number.parseInt(v, 10)
+  if (!Number.isFinite(n) || n < 1 || n > editor.state.doc.lines) {
+    showToast(`行号超出范围（1 ~ ${editor.state.doc.lines}）`, true)
+    return
+  }
+  const line = editor.state.doc.line(n)
+  editor.dispatch({ selection: { anchor: line.from }, scrollIntoView: true })
+  editor.focus()
+}
+
+// ---------- 复制选区为 HTML（非 darwin 编辑菜单入口） ----------
+
+function copySelectionAsHtml() {
+  if (!editor) return
+  const r = editor.state.selection.main
+  const md = r.empty ? editor.state.doc.toString() : editor.state.sliceDoc(r.from, r.to)
+  const html = render(renderer, md)
+  navigator.clipboard?.writeText(html).then(
+    () => showToast('已复制为 HTML'),
+    () => showToast('复制失败', true),
+  )
+}
+
+// ---------- 帮助：快捷键速查 / Markdown 语法示例 ----------
+
+const showShortcuts = ref(false)
+const IS_MAC = /mac/i.test(navigator.platform || '')
+
+// 键位展示：mac 用符号，其余平台把 ⌘/⌥/⇧ 替换为 Ctrl/Alt/Shift
+function fmtKey(k) {
+  if (IS_MAC) return k
+  return k.replace(/⌘/g, 'Ctrl+').replace(/⌥/g, 'Alt+').replace(/⇧/g, 'Shift+')
+}
+
+const SHORTCUTS = [
+  ['⌘N', '新建文件'],
+  ['⌘O / ⌘⇧O', '打开文件 / 打开文件夹'],
+  ['⌘S / ⌘⇧S', '保存 / 另存为'],
+  ['⌘P', '导出 PDF'],
+  ['⌘F', '查找（⌘⌥F 查找替换）'],
+  ['⌘L', '跳转到行'],
+  ['⌥↑ / ⌥↓', '上移 / 下移行'],
+  ['⇧⌥↑ / ⇧⌥↓', '在上方 / 下方复制当前行'],
+  ['⌘⇧K', '删除当前行'],
+  ['⌘B / ⌘I', '加粗 / 斜体'],
+  ['⌘K', '插入链接'],
+  ['⌘1 ~ ⌘4', '编辑 / 预览 / 双栏 / 阅读'],
+  ['⌘⇧F', '专注模式（Esc 退出）'],
+  ['⌘B', '显示 / 隐藏大纲'],
+  ['⌘= / ⌘- / ⌘0', '放大 / 缩小 / 重置缩放'],
+  ['⌘⇧L', '切换主题'],
+  ['⌘/', '快捷键速查'],
+]
+
+const SYNTAX_DOC = `# Markdown 语法速览
+
+一份可玩的速查表：左边是源码，右边看效果。改一改，立刻看到变化。
+
+## 行内元素
+
+**加粗**、*斜体*、~~删除线~~、\`行内代码\`，
+[链接](https://daringfireball.net/projects/markdown/) 指向 Markdown 原文。
+
+## 列表
+
+1. 有序列表自动编号
+2. 嵌套只需缩进两格
+   - 无序子项
+   - [ ] 任务列表：把 x 换成空格试试
+   - [x] 已完成的事项
+
+## 引用与代码
+
+> 引用块适合放一段提醒或摘录。
+> 可以连续多行。
+
+\`\`\`js
+// 围栏代码块，支持语言高亮
+function hello(name) {
+  console.log(\`你好, \${name}!\`)
+}
+\`\`\`
+
+## 表格与分割线
+
+| 语法 | 效果 |
+| --- | --- |
+| \`**文字**\` | 加粗 |
+| \`[文字](url)\` | 链接 |
+
+---
+
+更多能力：菜单「格式 → 插入」可以放图片、表格、目录；「帮助 → 快捷键速查」看全部键位。
+`
+
+async function loadSyntaxSample() {
+  await persistence.snapshotBoundary()
+  loadDocument(SYNTAX_DOC, '')
+  showToast('已载入语法示例（⌘S 可另存）')
+}
+
+// ---------- 输入对话框（跳转到行 / 重命名共用） ----------
+// WKWebView 不支持 window.prompt（静默返回 null），自己搭一个最小对话框。
+
+const dialog = ref({ show: false, title: '', placeholder: '', value: '', _resolve: null })
+const dialogInputEl = ref(null)
+
+function askInput({ title, placeholder = '', value = '' }) {
+  return new Promise((resolve) => {
+    dialog.value = { show: true, title, placeholder, value, _resolve: resolve }
+    nextTick(() => dialogInputEl.value?.focus())
+  })
+}
+
+function closeDialog(result) {
+  const d = dialog.value
+  if (!d.show) return
+  d.show = false
+  d._resolve?.(result)
+  d._resolve = null
+}
+
 
 // ---------- 格式化命令（菜单事件 / 工具条共用） ----------
 
@@ -469,14 +730,7 @@ function onToolbarCommand(id) {
   if (cmd) execCmd(cmd)
 }
 
-// ---------- 缩放（状态栏，90/100/110/125% 循环） ----------
-
-function cycleZoom() {
-  const i = ZOOM_LEVELS.indexOf(zoom.value)
-  const next = ZOOM_LEVELS[(i + 1) % ZOOM_LEVELS.length]
-  zoom.value = next
-  if (editor) setEditorZoom(editor, next / 100)
-}
+// ---------- 缩放：见文件前部 ZOOM_LEVELS / setZoom / cycleZoom ----------
 
 // ---------- 原生菜单事件（main.go 的 buildMenu 发出） ----------
 // 快捷键由菜单 accelerator 承担（⌘O/⌘S/⌘⇧L…），菜单会先于 WebView 消费按键，
@@ -526,6 +780,48 @@ safeEventsOn('menu:format-list-ordered', () => execCmd(toggleOrderedList))
 safeEventsOn('menu:format-list-todo', () => execCmd(toggleTaskList))
 safeEventsOn('menu:format-quote', () => execCmd(toggleBlockquote))
 safeEventsOn('menu:format-code-block', () => execCmd(toggleCodeBlock))
+// ---- 新增菜单接线（结构见 main.go buildMenu；事件名与 Go 侧一一对应） ----
+// 文件
+safeEventsOn('menu:new-file', newFile)
+safeEventsOn('menu:rename', renameFile)
+safeEventsOn('menu:open-recent', async (path) => {
+  // Go 侧「最近打开」子菜单点击，payload 为文件绝对路径
+  if (path && path !== filePath.value) await openTreeFile(path)
+})
+// 查找 / 跳转 / 行操作
+safeEventsOn('menu:find', openFind)
+safeEventsOn('menu:find-replace', openFind) // CM 面板自带替换行，同一入口
+safeEventsOn('menu:jump-line', jumpToLine)
+safeEventsOn('menu:move-line-up', () => execCmd(moveLineUp))
+safeEventsOn('menu:move-line-down', () => execCmd(moveLineDown))
+safeEventsOn('menu:dup-line', () => execCmd(copyLineDown))
+safeEventsOn('menu:delete-line', () => execCmd(deleteLine))
+safeEventsOn('menu:copy-as-html', copySelectionAsHtml)
+// 格式 → 插入 / 缩进 / 清除格式
+safeEventsOn('menu:insert-image', () => execCmd(insertImage))
+safeEventsOn('menu:insert-table', () => execCmd(insertTable))
+safeEventsOn('menu:insert-hr', () => execCmd(insertHr))
+safeEventsOn('menu:insert-toc', () => execCmd(insertToc))
+safeEventsOn('menu:indent', () => execCmd(indentMore))
+safeEventsOn('menu:outdent', () => execCmd(indentLess))
+safeEventsOn('menu:clear-format', () => execCmd(clearFormatting))
+// 视图：缩放 / 开关（payload 为 checkbox 勾选后的新值）
+safeEventsOn('menu:zoom-in', zoomIn)
+safeEventsOn('menu:zoom-out', zoomOut)
+safeEventsOn('menu:zoom-reset', () => setZoom(100))
+safeEventsOn('menu:toggle-scroll-sync', toggleScrollSync)
+safeEventsOn('menu:toggle-typewriter', toggleTypewriter)
+safeEventsOn('menu:toggle-always-on-top', () => { /* 窗口行为已在 Go 侧完成 */ })
+// 帮助
+safeEventsOn('menu:help-shortcuts', () => { showShortcuts.value = true })
+safeEventsOn('menu:help-syntax', loadSyntaxSample)
+// 非 darwin 自建「编辑」菜单（剪贴板类：按键已由 WebView 原生承接，这里只接点击）
+safeEventsOn('menu:undo', () => execCmd(undo))
+safeEventsOn('menu:redo', () => execCmd(redo))
+safeEventsOn('menu:cut', () => document.execCommand?.('cut'))
+safeEventsOn('menu:copy', () => document.execCommand?.('copy'))
+safeEventsOn('menu:paste', () => showToast('请使用 Ctrl+V 粘贴（剪贴板权限由系统管理）'))
+safeEventsOn('menu:select-all', () => execCmd(selectAll))
 
 // ---------- 左右分栏拖拽 ----------
 // 编辑区宽度用百分比，预览区吃剩余空间；双击分割条回到对半，宽度写入 localStorage。
@@ -722,6 +1018,43 @@ function onDividerKeydown(e) {
     <div v-show="toast.show" class="focus-toast" :class="{ 'is-err': toast.isErr }" role="status">
       {{ toast.msg }}
     </div>
+
+    <!-- 输入对话框：跳转到行 / 重命名共用（WKWebView 无 window.prompt） -->
+    <div v-if="dialog.show" class="dialog-mask" @click.self="closeDialog(null)">
+      <div class="dialog" role="dialog" aria-modal="true" :aria-label="dialog.title">
+        <p class="dialog-title">{{ dialog.title }}</p>
+        <input
+          ref="dialogInputEl"
+          v-model="dialog.value"
+          class="dialog-input"
+          type="text"
+          :placeholder="dialog.placeholder"
+          @keydown.enter.prevent="closeDialog(dialog.value)"
+        />
+        <div class="dialog-actions">
+          <button class="dialog-btn" type="button" @click="closeDialog(null)">取消</button>
+          <button class="dialog-btn primary" type="button" @click="closeDialog(dialog.value)">确定</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 快捷键速查（帮助菜单 ⌘/ / Esc 关闭） -->
+    <div v-if="showShortcuts" class="dialog-mask" @click.self="showShortcuts = false">
+      <div class="dialog dialog-wide" role="dialog" aria-modal="true" aria-label="快捷键速查">
+        <p class="dialog-title">快捷键速查</p>
+        <table class="shortcut-table">
+          <tbody>
+            <tr v-for="([keys, desc], i) in SHORTCUTS" :key="i">
+              <td class="shortcut-keys">{{ fmtKey(keys) }}</td>
+              <td class="shortcut-desc">{{ desc }}</td>
+            </tr>
+          </tbody>
+        </table>
+        <div class="dialog-actions">
+          <button class="dialog-btn primary" type="button" @click="showShortcuts = false">关闭</button>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -856,6 +1189,81 @@ function onDividerKeydown(e) {
   white-space: nowrap;
 }
 .focus-toast.is-err { color: var(--danger); border-color: var(--danger); }
+
+/* ---- 输入对话框 / 快捷键速查（--surface 底、Token 化描边，z-index 高于 toast） ---- */
+.dialog-mask {
+  position: fixed;
+  inset: 0;
+  background: color-mix(in srgb, var(--fg) 18%, transparent);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1400; /* 高于 toast 层 1300（DESIGN §6 阶梯之上加一层） */
+}
+.dialog {
+  width: min(360px, 86vw);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--elev-raised);
+  padding: var(--space-6) var(--space-6) var(--space-4);
+}
+.dialog-wide { width: min(480px, 92vw); }
+.dialog-title {
+  margin: 0 0 var(--space-3);
+  font-size: var(--text-md);
+  font-weight: var(--weight-emphasize);
+  color: var(--fg);
+}
+.dialog-input {
+  width: 100%;
+  box-sizing: border-box;
+  min-height: 36px;
+  padding: 0 var(--space-3);
+  background: var(--bg);
+  color: var(--fg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  font: inherit;
+  font-size: var(--text-sm);
+}
+.dialog-input:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: var(--focus-ring);
+}
+.dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-2);
+  margin-top: var(--space-4);
+}
+.dialog-btn {
+  min-height: 32px;
+  padding: 0 var(--space-4);
+  background: var(--surface-2);
+  color: var(--fg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  font: inherit;
+  font-size: var(--text-sm);
+  cursor: pointer;
+}
+.dialog-btn:hover { background: var(--accent-soft); border-color: var(--border-strong); }
+.dialog-btn.primary { background: var(--accent); color: var(--accent-on); border-color: var(--accent); }
+.dialog-btn.primary:hover { filter: brightness(1.05); }
+.dialog-btn:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+.shortcut-table { width: 100%; border-collapse: collapse; font-size: var(--text-sm); }
+.shortcut-table td { padding: 6px 0; border-bottom: 1px solid var(--border-soft); }
+.shortcut-table tr:last-child td { border-bottom: none; }
+.shortcut-keys {
+  width: 42%;
+  color: var(--fg);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  white-space: nowrap;
+}
+.shortcut-desc { color: var(--fg-2); }
 
 /* ---- 分栏：编辑区宽度可拖，预览区吃剩余空间 ---- */
 .pane { min-width: 0; overflow: hidden; }

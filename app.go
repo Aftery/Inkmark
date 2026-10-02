@@ -5,11 +5,13 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/wailsapp/wails/v2/pkg/runtime"
@@ -25,7 +27,20 @@ type App struct {
 	// 语义定义、生命周期与扩展路径见 docs/architecture/ADR-005-dirty-semantics.md；
 	// 若扩展为多文档，本字段应升级为 docKey→dirty 映射，不得在此布尔量上叠加第二种含义。
 	dirty bool
+
+	// mu 保护下方可变 UI 状态（菜单回调 / 前端 IPC 两个入口并发触碰）。
+	mu sync.Mutex
+	// 滚动联动 / 打字机模式 / 窗口置顶：菜单 checkbox 的初始态真源在 Go。
+	// 行为本体在前端；前端挂载时回读自身 localStorage 后调 Set* 同步到这里，
+	// 菜单切换时 emitChecked 先落这里、再广播事件给前端。
+	scrollSync   bool
+	typewriter   bool
+	alwaysOnTop  bool
+	recents      []string // 最近打开的文件（新 → 旧，上限 recentFileLimit）
 }
+
+// recentFileLimit 最近打开列表上限（菜单里超过 10 项的列表没有检索价值）
+const recentFileLimit = 10
 
 // DirEntry 是文件树的一个节点（只展开一层，前端点击目录时再懒加载）
 type DirEntry struct {
@@ -36,11 +51,158 @@ type DirEntry struct {
 }
 
 func NewApp() *App {
-	return &App{}
+	return &App{scrollSync: true} // 滚动联动默认开（历史行为）
 }
 
 func (a *App) startup(ctx context.Context) {
 	a.ctx = ctx
+	a.loadRecents()
+}
+
+// ---------- 菜单状态（checkbox / 最近打开） ----------
+
+// SetScrollSync 由前端挂载时回读 localStorage 后调用，同步 checkbox 初始态。
+func (a *App) SetScrollSync(v bool) {
+	a.mu.Lock()
+	a.scrollSync = v
+	a.mu.Unlock()
+}
+
+// SetTypewriter 同上。
+func (a *App) SetTypewriter(v bool) {
+	a.mu.Lock()
+	a.typewriter = v
+	a.mu.Unlock()
+}
+
+// SetAlwaysOnTop 由菜单 checkbox 回调调用：落状态 + 应用到窗口。
+func (a *App) SetAlwaysOnTop(v bool) {
+	a.mu.Lock()
+	a.alwaysOnTop = v
+	a.mu.Unlock()
+	if a.ctx != nil {
+		runtime.WindowSetAlwaysOnTop(a.ctx, v)
+	}
+}
+
+// RefreshMenu 用当前状态整体重建应用菜单。
+// 最近打开列表 / checkbox 状态变化后调用（MenuSetApplicationMenu 是 v2 提供的
+// 唯一菜单更新通道——整体替换，不做增量）。
+func (a *App) RefreshMenu() {
+	if a.ctx == nil {
+		return
+	}
+	runtime.MenuSetApplicationMenu(a.ctx, buildMenu(a))
+}
+
+// AddRecent 前端成功打开文件后调用：去重置顶、截断上限、持久化并重建菜单。
+func (a *App) AddRecent(path string) {
+	if strings.TrimSpace(path) == "" {
+		return
+	}
+	a.mu.Lock()
+	out := []string{path}
+	for _, p := range a.recents {
+		if p != path && len(out) < recentFileLimit {
+			out = append(out, p)
+		}
+	}
+	a.recents = out
+	a.mu.Unlock()
+	a.saveRecents()
+	a.RefreshMenu()
+}
+
+// ClearRecents 清空最近打开列表（文件菜单入口）。
+func (a *App) ClearRecents() {
+	a.mu.Lock()
+	a.recents = nil
+	a.mu.Unlock()
+	a.saveRecents()
+	a.RefreshMenu()
+}
+
+// recentLabels 生成展示名：默认文件名；重名时追加「 — 上级目录名」消歧。
+func recentLabels(paths []string) []string {
+	counts := make(map[string]int, len(paths))
+	for _, p := range paths {
+		counts[filepath.Base(p)]++
+	}
+	labels := make([]string, len(paths))
+	for i, p := range paths {
+		base := filepath.Base(p)
+		if counts[base] > 1 {
+			labels[i] = base + " — " + filepath.Base(filepath.Dir(p))
+		} else {
+			labels[i] = base
+		}
+	}
+	return labels
+}
+
+// recentsPath 配置文件位置：<UserConfigDir>/inkmark/recents.json；拿不到目录返回空串跳过持久化。
+func (a *App) recentsPath() string {
+	base, err := os.UserConfigDir()
+	if err != nil {
+		return ""
+	}
+	return filepath.Join(base, "inkmark", "recents.json")
+}
+
+func (a *App) loadRecents() {
+	p := a.recentsPath()
+	if p == "" {
+		return
+	}
+	data, err := os.ReadFile(p)
+	if err != nil {
+		return // 首次启动无文件，正常
+	}
+	var list []string
+	if json.Unmarshal(data, &list) == nil {
+		a.recents = list
+	}
+}
+
+func (a *App) saveRecents() {
+	p := a.recentsPath()
+	if p == "" {
+		return
+	}
+	if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+		return
+	}
+	a.mu.Lock()
+	data, err := json.Marshal(a.recents)
+	a.mu.Unlock()
+	if err == nil {
+		_ = os.WriteFile(p, data, 0o644)
+	}
+}
+
+// ---------- 文件重命名 ----------
+
+// RenameFile 重命名当前文档（仅限同目录改名），返回新路径供前端更新 filePath。
+// 通过 window.go.main.App.RenameFile 调用（新方法，未走 wailsjs 代码生成）。
+func (a *App) RenameFile(oldPath, newName string) (string, error) {
+	newName = strings.TrimSpace(newName)
+	if newName == "" {
+		return "", fmt.Errorf("文件名不能为空")
+	}
+	if strings.ContainsAny(newName, "/\\") {
+		return "", fmt.Errorf("文件名不能包含路径分隔符")
+	}
+	newPath := filepath.Join(filepath.Dir(oldPath), newName)
+	if newPath == oldPath {
+		return "", fmt.Errorf("文件名未变化")
+	}
+	if _, err := os.Stat(newPath); err == nil {
+		return "", fmt.Errorf("同名文件已存在: %s", newName)
+	}
+	if err := os.Rename(oldPath, newPath); err != nil {
+		return "", fmt.Errorf("重命名失败: %w", err)
+	}
+	return newPath, nil
 }
 
 // ---------- 对话框 ----------

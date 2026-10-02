@@ -10,6 +10,7 @@
 // 会自动登记。
 import MarkdownIt from 'markdown-it'
 import hljs from 'highlight.js/lib/core'
+import { createSlugCounter } from '../editor/anchors'
 
 import javascript from 'highlight.js/lib/languages/javascript'
 import typescript from 'highlight.js/lib/languages/typescript'
@@ -44,7 +45,7 @@ for (const [name, lang] of Object.entries(LANGUAGES)) {
 }
 
 export function createRenderer() {
-  return new MarkdownIt({
+  const md = new MarkdownIt({
     html: false,          // 不渲染原始 HTML，防注入（本地工具可开，默认关）
     linkify: true,        // 自动识别 URL
     breaks: true,         // 单个换行转成 <br>，符合写作直觉
@@ -58,8 +59,18 @@ export function createRenderer() {
       return '' // 空串 = 让 markdown-it 自己做转义
     },
   })
+  // 标题写 id（「插入 → 目录」链接的跳转目标）：slug 生成规则在 editor/anchors.js，
+  // 与目录插入共用同一套顺序去重计数，两边的 id 严格对应。
+  md._slugs = createSlugCounter()
+  md.renderer.rules.heading_open = (tokens, idx) => {
+    const inline = tokens[idx + 1]
+    const text = inline && inline.type === 'inline' ? inline.content : ''
+    return `<${tokens[idx].tag} id="${md._slugs.slug(text)}">`
+  }
+  return md
 }
 
 export function render(renderer, markdown) {
+  renderer._slugs = createSlugCounter() // 每次渲染重置去重计数，重复标题稳定为 -1/-2…
   return renderer.render(markdown)
 }
