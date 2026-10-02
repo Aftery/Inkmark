@@ -1,5 +1,5 @@
 <script setup>
-import { ref, onMounted, onBeforeUnmount, computed, nextTick, triggerRef } from 'vue'
+import { ref, onMounted, onBeforeUnmount, computed, nextTick, triggerRef, watch } from 'vue'
 import { createEditor, setEditorZoom, replaceDocument } from './editor/createEditor'
 import { extractOutline } from './editor/outline'
 import {
@@ -131,6 +131,12 @@ const persistence = useDocumentPersistence({
   onDocReplaced: syncAfterDocReplace,
 })
 const { saveState, dirty, showHistory, snapshots, historyLoading } = persistence
+
+// 未保存状态同步给 Go 侧：OnBeforeClose 用它决定是否弹「未保存」确认对话框。
+// 浏览器预览没有 window.go，可选链静默跳过，不影响 UI。
+watch(dirty, (d) => {
+  try { window.go?.main?.App?.SetDirty?.(d) } catch { /* 预览环境无绑定 */ }
+})
 
 // ---------- 侧栏：常驻双 tab（文件 / 大纲） ----------
 // 侧栏从「打开文件夹才出现」改为可随时开关（交互 Spec 3.1）；

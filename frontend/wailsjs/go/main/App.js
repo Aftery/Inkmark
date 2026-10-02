@@ -26,6 +26,10 @@ export function SaveFileDialog(arg1) {
   return window['go']['main']['App']['SaveFileDialog'](arg1);
 }
 
+export function SetDirty(arg1) {
+  return window['go']['main']['App']['SetDirty'](arg1);
+}
+
 export function SnapshotDocKey(arg1) {
   return window['go']['main']['App']['SnapshotDocKey'](arg1);
 }

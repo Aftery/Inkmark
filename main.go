@@ -28,9 +28,10 @@ func main() {
 		AssetServer: &assetserver.Options{
 			Assets: assets,
 		},
-		OnStartup: app.startup,
-		Bind:      []interface{}{app},
-		Menu:      buildMenu(app),
+		OnStartup:     app.startup,
+		OnBeforeClose: app.OnBeforeClose,
+		Bind:          []interface{}{app},
+		Menu:          buildMenu(app),
 		Mac: &mac.Options{
 			TitleBar: mac.TitleBarHiddenInset(),
 		},

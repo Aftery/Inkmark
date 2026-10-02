@@ -14,6 +14,8 @@ export function ReadFile(arg1:string):Promise<string>;
 
 export function SaveFileDialog(arg1:string):Promise<string>;
 
+export function SetDirty(arg1:boolean):Promise<void>;
+
 export function SnapshotDocKey(arg1:string):Promise<string>;
 
 export function SnapshotList(arg1:string):Promise<Array<main.SnapshotMeta>>;
