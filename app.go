@@ -2,11 +2,15 @@ package main
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/base64"
+	"encoding/hex"
 	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 )
@@ -140,4 +144,55 @@ func (a *App) OnBeforeClose(ctx context.Context) bool {
 		return true // 对话框异常时保守阻止关闭，避免误丢内容
 	}
 	return choice != "不保存退出"
+}
+
+// ---------- 图片粘贴 / 拖拽插入 ----------
+
+const maxImageBytes = 20 << 20 // 单张图片上限 20MB
+
+// allowedImageExt 允许的图片扩展名（前端已小写，此处再校验一次）。
+var allowedImageExt = map[string]bool{
+	"png": true, "jpg": true, "jpeg": true, "gif": true,
+	"webp": true, "bmp": true, "svg": true, "avif": true,
+}
+
+// shortRandHex 生成 n 字节的随机 hex（图片文件名后缀，避免同毫秒冲突）。
+func shortRandHex(n int) string {
+	b := make([]byte, n)
+	if _, err := rand.Read(b); err != nil {
+		return "00000000"
+	}
+	return hex.EncodeToString(b)
+}
+
+// SaveImage 把粘贴/拖拽的图片写入「文档同级 assets/ 目录」，返回可写进 Markdown 的
+// 相对路径（assets/<文件名>）。docPath 为空（文档尚未落盘）时返回错误。
+func (a *App) SaveImage(docPath, dataBase64, ext string) (string, error) {
+	if strings.TrimSpace(docPath) == "" {
+		return "", fmt.Errorf("文档尚未保存，无法确定图片存放位置")
+	}
+	ext = strings.ToLower(strings.TrimPrefix(ext, "."))
+	if !allowedImageExt[ext] {
+		return "", fmt.Errorf("不支持的图片类型: %s", ext)
+	}
+	raw, err := base64.StdEncoding.DecodeString(dataBase64)
+	if err != nil {
+		return "", fmt.Errorf("图片数据解码失败: %w", err)
+	}
+	if len(raw) == 0 {
+		return "", fmt.Errorf("图片数据为空")
+	}
+	if len(raw) > maxImageBytes {
+		return "", fmt.Errorf("图片超过 %dMB 上限", maxImageBytes>>20)
+	}
+	dir := filepath.Join(filepath.Dir(docPath), "assets")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return "", fmt.Errorf("无法创建 assets 目录: %w", err)
+	}
+	// 文件名 img-<unix毫秒>-<随机>.<ext>：避免同毫秒 / 同名覆盖
+	name := fmt.Sprintf("img-%d-%s.%s", time.Now().UnixMilli(), shortRandHex(4), ext)
+	if err := os.WriteFile(filepath.Join(dir, name), raw, 0o644); err != nil {
+		return "", fmt.Errorf("写入图片失败: %w", err)
+	}
+	return "assets/" + name, nil
 }

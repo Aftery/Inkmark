@@ -173,7 +173,32 @@ export function replaceDocument(view, content) {
   view.setState(tr.state)
 }
 
-export function createEditor(parent, { doc = '', onDocChange, onScroll, onUpdate }) {
+// ---------- 图片粘贴 / 拖拽插入 ----------
+// 只拦截「文件型图片」；普通文本 / 其它文件一律放行（返回 false 交默认处理）。
+// 真正落盘由上层 onImageFile 回调完成（App.vue 调 Go SaveImage），编辑器只管插入 Markdown。
+function imageFileFromDataTransfer(dt) {
+  if (!dt || !dt.files || dt.files.length === 0) return null
+  for (const f of dt.files) {
+    if (f.type && f.type.startsWith('image/')) return f
+  }
+  return null
+}
+
+function insertImageMarkdown(view, file, pos, onImageFile) {
+  Promise.resolve(onImageFile(file))
+    .then((url) => {
+      if (!url) return
+      const at = Math.max(0, Math.min(pos, view.state.doc.length))
+      const snippet = `![](${url})`
+      view.dispatch({
+        changes: { from: at, insert: snippet },
+        selection: { anchor: at + snippet.length },
+      })
+    })
+    .catch(() => { /* 插入失败静默：上层已给 toast */ })
+}
+
+export function createEditor(parent, { doc = '', onDocChange, onScroll, onUpdate, onImageFile }) {
   // 只监听文档变化。滚动不要在这里监听 —— CM6 的 ViewUpdate 根本没有 scrollChanged
   // 这个属性（真实属性只有 docChanged/selectionSet/focusChanged/viewportChanged/
   // heightChanged/geometryChanged 等），写了永远是 undefined，滚动联动会静默失效。
@@ -196,6 +221,31 @@ export function createEditor(parent, { doc = '', onDocChange, onScroll, onUpdate
       history(),
       // 自定义 Enter 键位须排在 defaultKeymap 之前才优先生效（见 exitCodeBlockOnEnter）
       keymap.of([{ key: 'Enter', run: exitCodeBlockOnEnter }, ...defaultKeymap, ...historyKeymap, indentWithTab]),
+      // 图片粘贴 / 拖拽：仅在拿到图片文件且注册了 onImageFile 时拦截，其余放行
+      EditorView.domEventHandlers({
+        paste(event, view) {
+          const file = imageFileFromDataTransfer(event.clipboardData)
+          if (!file || !onImageFile) return false
+          event.preventDefault()
+          insertImageMarkdown(view, file, view.state.selection.main.head, onImageFile)
+          return true
+        },
+        drop(event, view) {
+          const file = imageFileFromDataTransfer(event.dataTransfer)
+          if (!file || !onImageFile) return false
+          event.preventDefault()
+          const pos = view.posAtCoords({ x: event.clientX, y: event.clientY })
+          insertImageMarkdown(view, file, pos ?? view.state.selection.main.head, onImageFile)
+          return true
+        },
+        dragover(event) {
+          // 文件拖拽需阻止默认，否则浏览器不会派发 drop
+          if (event.dataTransfer && Array.from(event.dataTransfer.types).includes('Files')) {
+            event.preventDefault()
+          }
+          return false
+        },
+      }),
       markdown({ base: markdownLanguage, codeLanguages }),
       syntaxHighlighting(mdHighlight, { fallback: true }),
       EditorView.theme({

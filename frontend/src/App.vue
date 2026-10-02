@@ -186,6 +186,30 @@ function cancelPendingPreview() {
   pendingDoc = null
 }
 
+// 图片落盘：编辑器粘贴/拖拽得到图片文件后回调（Go 侧 SaveImage 写入文档同级 assets/），
+// 返回可插入 Markdown 的相对路径；未落盘文档或环境不支持时提示并返回 null。
+async function onImageFile(file) {
+  const api = window.go?.main?.App
+  if (!api?.SaveImage) {
+    showToast('当前环境不支持插入图片', true)
+    return null
+  }
+  if (!filePath.value) {
+    showToast('请先保存文档（⌘S）再插入图片', true)
+    return null
+  }
+  try {
+    const bytes = new Uint8Array(await file.arrayBuffer())
+    let bin = ''
+    for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i])
+    const ext = (file.name.split('.').pop() || 'png').toLowerCase()
+    return await api.SaveImage(filePath.value, btoa(bin), ext)
+  } catch (err) {
+    showToast(`插入图片失败：${err?.message || err}`, true)
+    return null
+  }
+}
+
 function onDocChange(doc) {
   // 诊断（预览不同步排查）：确认链路是否触发、值是否变化。定位后移除。
   console.log('[onDocChange] len=', doc.length, 'changed=', doc !== markdown.value)
@@ -233,6 +257,7 @@ onMounted(() => {
     onDocChange,
     onScroll: sync.onEditorScroll,
     onUpdate: onEditorUpdate,
+    onImageFile,
   })
   markdown.value = DEFAULT_DOC
   outline.value = extractOutline(editor.state.doc)
