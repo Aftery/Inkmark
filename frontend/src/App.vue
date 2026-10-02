@@ -133,6 +133,9 @@ const persistence = useDocumentPersistence({
 const { saveState, dirty, showHistory, snapshots, historyLoading } = persistence
 
 // 未保存状态同步给 Go 侧：OnBeforeClose 用它决定是否弹「未保存」确认对话框。
+// dirty 的唯一语义 =「内存文档是否落后于磁盘」（含从未落盘的新文档）——
+// 定义、生命周期与扩展路径见 docs/architecture/ADR-005-dirty-semantics.md；
+// 此处只做镜像转发，不在此处推断语义，也不得给它叠加第二种含义。
 // 浏览器预览没有 window.go，可选链静默跳过，不影响 UI。
 watch(dirty, (d) => {
   try { window.go?.main?.App?.SetDirty?.(d) } catch { /* 预览环境无绑定 */ }

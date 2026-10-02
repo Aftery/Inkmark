@@ -84,6 +84,7 @@ inkmark/
 ├── export_pdf_darwin.go # PDF 一键直出（WKWebView/PDFKit）
 ├── export_pdf_other.go  # 非 darwin 平台的降级实现
 ├── wails.json           # Wails 配置（前后端构建命令）
+├── docs/                # 架构决策记录（architecture/ADR-00x）、规格（spec/）、方案（plan/）
 └── frontend/
     ├── src/
     │   ├── App.vue          # 主界面：视图四态、顶栏、侧栏、双栏布局、滚动联动、预览防抖
@@ -128,7 +129,7 @@ inkmark/
 7. **渲染进程零 Node 能力**：前端只能通过生成的 `wailsjs` 绑定调 Go 方法，文件系统攻击面收在 `app.go`。
 8. **WYSIWYG 即时渲染的边界**：只产装饰、绝不 `dispatch` 文档变更（内容零篡改）；`view.composing` 为 true（中文输入中）时冻结重算，避免抖动；装饰只在 `visibleRanges` 内计算（大文档性能）；活跃行向上下各扩 1 行，避免方向键因标记符显隐突变而跳跃。
 9. **快照与自动保存解耦**：自动保存 800ms 防抖覆盖原文件；快照独立按「节流 / 显式保存 / 切换文件边界 / 手动」触发，避免每次按键都落快照、污染历史。
-10. **关闭拦截的状态同步**：`dirty` 真源在前端、关闭钩子在 Go——前端 `watch(dirty)` 调 `SetDirty` 同步；对话框异常时保守「阻止关闭」，宁可多问一次也不丢内容。
+10. **关闭拦截的状态同步（`dirty` 语义已固化为不变量）**：`dirty` 只有一个含义——「编辑器内存内容 ≠ 磁盘内容」（含从未落盘的新文档）。真源在前端、关闭钩子在 Go，前端 `watch(dirty)` 调 `SetDirty` 镜像；Go 侧不读盘比对。硬约束：任何改动文档内容的路径都必须**显式声明**对 `dirty` 的影响（标脏或落盘归零），不得默认继承。对话框异常时保守「阻止关闭」，宁可多问一次也不丢内容。完整定义、生命周期表与多文档扩展路径见 [`docs/architecture/ADR-005-dirty-semantics.md`](docs/architecture/ADR-005-dirty-semantics.md)。
 11. **图片落盘位置**：写入「文档同级 `assets/`」而非全局目录，让 `.md` 能连附件整体搬移；文件名带时间戳 + 随机，避免同毫秒 / 同名覆盖。
 12. **代码块高亮按需注册**：`highlight.js` 用 `lib/core` + 注册 22 种常用语言（非整库导入），前端 JS 包从 1756kB 降到 891kB（gzip 603kB → 324kB）。新增语言只需加一行 import + 一行注册。
 

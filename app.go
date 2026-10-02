@@ -18,8 +18,13 @@ import (
 // App 是暴露给前端的核心服务。所有"接触操作系统"的能力都收敛在这里，
 // 前端通过生成的 JS 绑定直接调用这些方法（Wails 自动做 IPC）。
 type App struct {
-	ctx   context.Context
-	dirty bool // 未保存更改标记：由前端 SetDirty 同步，OnBeforeClose 读取
+	ctx context.Context
+	// dirty 是前端文档「是否落后于磁盘」状态的镜像：
+	// true ⟺ 编辑器内存内容 ≠ 磁盘内容（含从未落盘的新文档）。
+	// 真源在前端，此处只镜像、不读盘比对、不自行推断；由 SetDirty 写入、OnBeforeClose 读取。
+	// 语义定义、生命周期与扩展路径见 docs/architecture/ADR-005-dirty-semantics.md；
+	// 若扩展为多文档，本字段应升级为 docKey→dirty 映射，不得在此布尔量上叠加第二种含义。
+	dirty bool
 }
 
 // DirEntry 是文件树的一个节点（只展开一层，前端点击目录时再懒加载）
@@ -118,7 +123,8 @@ func (a *App) ListDir(path string) ([]DirEntry, error) {
 
 // ---------- 未保存关闭拦截 ----------
 
-// SetDirty 由前端 watch(dirty) 调用，把未保存状态同步到后端。
+// SetDirty 由前端 watch(dirty) 调用，把「文档是否落后于磁盘」镜像到后端。
+// 只接收、不推断：Go 侧不读盘比对内容；语义与生命周期以 ADR-005 为准。
 // 不加锁：读写都发生在 Wails 主事件循环序列内，最坏是一次多余的确认框，不影响数据安全。
 func (a *App) SetDirty(d bool) {
 	a.dirty = d

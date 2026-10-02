@@ -50,6 +50,10 @@ export function useDocumentPersistence({ getEditor, filePath, title, previewHtml
   // 状态机：unsaved（有改动未落盘）→ saving（写入中）→ saved；写入失败 → error。
   // 四态在状态栏用「图标形状 + 文案 + 颜色」三重表达（AC-20）。
   const saveState = ref('unsaved')
+  // dirty 的唯一语义：当前文档的内存内容 ≠ 磁盘内容（含从未落盘的新文档）。
+  // 真源在此，Go 侧（App.dirty / SetDirty）仅作镜像；任何改动文档内容的路径都必须
+  // 显式声明对它的影响（标脏，或确已落盘时归零），不得默认继承上一状态。
+  // 定义与扩展路径见 docs/architecture/ADR-005-dirty-semantics.md。
   const dirty = ref(false)
   const showHistory = ref(false)
   const snapshots = ref([])
@@ -253,6 +257,10 @@ export function useDocumentPersistence({ getEditor, filePath, title, previewHtml
       // dispatch 会命中 CM6 tile 增量崩溃，现象是编辑器停在旧内容不刷新。
       replaceDocument(getEditor(), content)
       onDocReplaced?.(content) // setState 不触发 updateListener，派生状态须手工同步
+      // 恢复快照改变了文档内容 → 内存 ≠ 磁盘，按 dirty 不变量标脏（ADR-005 §三）。
+      // 不可依赖 onDocReplaced：它与「打开文件」共用，而打开文件时内存 == 磁盘、不应标脏。
+      // 标脏同时启动 800ms 自动保存，恢复内容按常态落盘（用户仍可 ⌘Z）。
+      markDirty()
       getEditor()?.focus()
       showHistory.value = false
       notify?.(`已恢复到 ${formatSnapTime(s.createdAt)}，可 ⌘Z 撤销`)
