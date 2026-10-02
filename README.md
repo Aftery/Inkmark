@@ -11,12 +11,17 @@
 | Markdown 编辑 + 语法高亮 | CodeMirror 6（`src/editor/`），写作工具形态：无行号、无整行高亮、正文栈 15px |
 | **WYSIWYG 即时渲染（默认）** | `src/editor/wysiwyg.js`：光标所在行及上下相邻 1 行显示 Markdown 源码，其余行呈现渲染效果（列表圆点 / 任务勾选框以 widget 替换标记符）；仅产装饰、**零文档篡改**；中文输入（IME）时冻结重算；装饰只在可视区计算，大文档不卡 |
 | 实时预览 | markdown-it + highlight.js（`src/preview/`），正文限宽居中 |
+| **预览渲染防抖** | 输入期预览渲染防抖 ~120ms，大文档连续输入不卡；打开 / 恢复文件即时渲染，导出前强制 flush 保证内容最新（`App.vue`） |
 | **视图四态** | 编辑 `⌘1` / 预览 `⌘2` / 双栏 `⌘3` / 阅读 `⌘4`（`App.vue`）；阅读模式只渲染、隐藏编辑器 |
 | **专注模式** | `⌘⇧F` 收起界面干扰、强制进入编辑态（`App.vue`） |
 | **三主题 + 跟随系统** | 浅 Indigo / 深 Indigo / 纸感赭石（`src/themes/tokens/design-tokens.css`）；`system` 偏好由 `theme.js` 解析为具体主题并写入；切换只改 `<html data-theme>`，**不重建编辑器** |
 | **大纲视图** | `⌘B` 开关（`src/components/Outline.vue` + `outline.js` + `useOutlineSync.js`），从文档提取标题层级、点击跳转 |
 | **历史快照** | `src/components/HistoryPanel.vue`：与自动保存**解耦**——编辑会话每 ≥3 分钟节流一次 + 显式保存 + 切换文件前 + 手动触发；轮转 / 去重由 Go 侧 `SnapshotWrite` 负责 |
 | 自动保存 | 改动后 800ms 防抖覆盖原文件，状态栏显示保存态 |
+| **未保存关闭拦截** | 脏状态下关闭窗口弹系统确认（取消 → 阻止关闭；不保存退出 → 放行）；`dirty` 由前端同步到 Go（`OnBeforeClose`） |
+| **图片粘贴 / 拖拽插入** | 编辑器内粘贴或拖入图片 → 写入文档同级 `assets/`（`img-<时间戳>-<随机>.<ext>`），并插入 `![](assets/xxx)`（Go 侧 `SaveImage`） |
+| **文件树外部变更监听** | 打开文件夹后监听其**一层**增删改（fsnotify，`watcher.go`），去抖后自动刷新文件树 |
+| **代码块 Enter 跳出** | 光标位于紧邻结束围栏的空行时按 Enter，跳到围栏之后另起一行（`createEditor.js`） |
 | 原生菜单栏 | macOS 顶部系统菜单栏；Windows/Linux 窗口内菜单条（`main.go` 的 `buildMenu`，事件发给前端） |
 | 快捷键 | 文件 / 格式 / 视图三类，见下方「快捷键」 |
 | 文本导出 | HTML：内联样式模板（46rem 行宽）；PDF：macOS 一键直出（WebKit/PDFKit，dark→light 主题映射，467px 版心），其它平台走系统打印（`src/export/`） |
@@ -72,18 +77,22 @@
 
 ```
 inkmark/
-├── main.go              # 入口：窗口配置、原生应用菜单、绑定 App 服务
-├── app.go               # 核心服务：文件对话框、读写文件、目录遍历、快照写入（暴露给前端）
+├── main.go              # 入口：窗口配置、原生应用菜单、OnBeforeClose 钩子、绑定 App 服务
+├── app.go               # 核心服务：对话框、文件读写、目录遍历、图片保存、dirty 状态
+├── snapshot.go          # 历史快照存储（写入 / 轮转 / 读取，docKey 派生）
+├── watcher.go           # 文件树外部变更监听（fsnotify，一层 + 去抖推送）
+├── export_pdf_darwin.go # PDF 一键直出（WKWebView/PDFKit）
+├── export_pdf_other.go  # 非 darwin 平台的降级实现
 ├── wails.json           # Wails 配置（前后端构建命令）
 └── frontend/
     ├── src/
-    │   ├── App.vue          # 主界面：视图四态、顶栏、侧栏、双栏布局、滚动联动
-    │   ├── editor/          # CodeMirror 封装：createEditor.js / wysiwyg.js（即时渲染）/ outline.js（大纲提取）
-    │   ├── preview/         # markdown-it 渲染配置
+    │   ├── App.vue          # 主界面：视图四态、顶栏、侧栏、双栏布局、滚动联动、预览防抖
+    │   ├── editor/          # CodeMirror 封装：createEditor.js / wysiwyg.js / outline.js / commands.js
+    │   ├── preview/         # markdown-it 渲染配置（highlight.js core 按需注册）
     │   ├── export/          # HTML / PDF 导出模板与 exporters
     │   ├── composables/     # useDocumentPersistence（保存/快照/导出）/ useOutlineSync（大纲+滚动锚点）
-    │   ├── components/      # FileTree / Outline / HistoryPanel / Toolbar / StatusBar + icons/
-    │   └── themes/          # tokens/design-tokens.css（单文件三主题 Token）+ theme.js（解析与持久化）+ base.css / preview.css
+    │   ├── components/      # FileTree / TreeNode / Outline / HistoryPanel / Toolbar / StatusBar + icons/
+    │   └── themes/          # tokens/design-tokens.css（单文件三主题 Token）+ theme.js + base.css / preview.css
     └── wailsjs/             # Wails 自动生成的 IPC 绑定（勿手改）
 ```
 
@@ -101,11 +110,12 @@ inkmark/
 # 生产构建（产物在 build/bin/）
 ~/go/bin/wails build
 
-# 重新生成前端 IPC 绑定（改了 app.go 的导出方法后）
+# 重新生成前端 IPC 绑定（改了 app.go 等导出方法后【必须】执行）
 ~/go/bin/wails generate module
 ```
 
 > 本机网络需镜像：Go 依赖走 `GOPROXY=https://goproxy.cn,direct`，npm 走 `--registry=https://registry.npmmirror.com`，且先 `unset` 环境里的代理变量。
+> `wails` 命令依赖 PATH 中的 `go`；若报 `exec: "go": executable file not found`，先 `export PATH="/usr/local/bin:$PATH"`。
 
 ## 设计要点（为什么这么做）
 
@@ -118,14 +128,13 @@ inkmark/
 7. **渲染进程零 Node 能力**：前端只能通过生成的 `wailsjs` 绑定调 Go 方法，文件系统攻击面收在 `app.go`。
 8. **WYSIWYG 即时渲染的边界**：只产装饰、绝不 `dispatch` 文档变更（内容零篡改）；`view.composing` 为 true（中文输入中）时冻结重算，避免抖动；装饰只在 `visibleRanges` 内计算（大文档性能）；活跃行向上下各扩 1 行，避免方向键因标记符显隐突变而跳跃。
 9. **快照与自动保存解耦**：自动保存 800ms 防抖覆盖原文件；快照独立按「节流 / 显式保存 / 切换文件边界 / 手动」触发，避免每次按键都落快照、污染历史。
+10. **关闭拦截的状态同步**：`dirty` 真源在前端、关闭钩子在 Go——前端 `watch(dirty)` 调 `SetDirty` 同步；对话框异常时保守「阻止关闭」，宁可多问一次也不丢内容。
+11. **图片落盘位置**：写入「文档同级 `assets/`」而非全局目录，让 `.md` 能连附件整体搬移；文件名带时间戳 + 随机，避免同毫秒 / 同名覆盖。
+12. **代码块高亮按需注册**：`highlight.js` 用 `lib/core` + 注册 22 种常用语言（非整库导入），前端 JS 包从 1756kB 降到 891kB（gzip 603kB → 324kB）。新增语言只需加一行 import + 一行注册。
 
 ## 已知问题与待办
 
-- [ ] 未保存关闭拦截（窗口关闭前确认目前仅状态栏提示，未拦截关闭）
-- [ ] 图片粘贴 / 拖拽插入（配合 Go 端存到 assets 目录）
-- [ ] 文件树监听外部变更（fsnotify）
-- [ ] 预览渲染防抖（大文档连续输入时的渲染节流）
-- **已知（非阻塞）**：WYSIWYG 即时模式下，光标位于代码块内时按 Enter 暂不能自动跳出围栏；可在代码块末尾追加一个空行再回车绕开。
+暂无。原历史待办五项（预览渲染防抖 / 代码块 Enter 跳出 / 未保存关闭拦截 / 图片粘贴拖拽 / 文件树外部变更监听）已于 2026-10-02 全部完成。
 
 ## 关于插件系统（现在不做）
 
