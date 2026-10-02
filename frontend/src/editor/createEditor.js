@@ -8,11 +8,35 @@
 import { EditorView, keymap, highlightSpecialChars, ViewPlugin, Decoration } from '@codemirror/view'
 import { EditorState, StateField, StateEffect, RangeSetBuilder, Compartment } from '@codemirror/state'
 import { defaultKeymap, history, historyKeymap, indentWithTab } from '@codemirror/commands'
-import { syntaxHighlighting, HighlightStyle } from '@codemirror/language'
+import { syntaxHighlighting, HighlightStyle, syntaxTree } from '@codemirror/language'
 import { markdown, markdownLanguage } from '@codemirror/lang-markdown'
 import { tags as t } from '@lezer/highlight'
 import codeLanguages from './markdownHighlight'
 import { wysiwygField, wysiwygPlugin, wysiwygAtomicRanges } from './wysiwyg'
+
+// 围栏代码块内按 Enter 跳出（真机反馈：光标在代码块内按 Enter 跳不出围栏）。
+// 规则：光标位于「紧邻结束围栏的空行」时，在结束围栏之后另起一行并把光标移过去。
+// 放行（返回 false 交给默认 Enter）：非空行、代码块中段、未闭合围栏、非空选区。
+function exitCodeBlockOnEnter(view) {
+  const { state } = view
+  if (!state.selection.main.empty) return false
+  const pos = state.selection.main.head
+  let node = syntaxTree(state).resolveInner(pos, -1)
+  while (node && node.name !== 'FencedCode') node = node.parent
+  if (!node) return false
+  const line = state.doc.lineAt(pos)
+  if (line.text.trim() !== '') return false
+  const closeLine = state.doc.lineAt(node.to)
+  if (line.number !== closeLine.number - 1) return false
+  const ct = closeLine.text.trim()
+  if (!ct.startsWith('```') && !ct.startsWith('~~~')) return false
+  view.dispatch({
+    changes: { from: closeLine.to, insert: '\n' },
+    selection: { anchor: closeLine.to + 1 },
+    scrollIntoView: true,
+  })
+  return true
+}
 
 // 语法着色：Markdown 结构 + 围栏代码
 const mdHighlight = HighlightStyle.define([
@@ -170,7 +194,8 @@ export function createEditor(parent, { doc = '', onDocChange, onScroll, onUpdate
     extensions: [
       highlightSpecialChars(),
       history(),
-      keymap.of([...defaultKeymap, ...historyKeymap, indentWithTab]),
+      // 自定义 Enter 键位须排在 defaultKeymap 之前才优先生效（见 exitCodeBlockOnEnter）
+      keymap.of([{ key: 'Enter', run: exitCodeBlockOnEnter }, ...defaultKeymap, ...historyKeymap, indentWithTab]),
       markdown({ base: markdownLanguage, codeLanguages }),
       syntaxHighlighting(mdHighlight, { fallback: true }),
       EditorView.theme({
