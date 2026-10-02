@@ -2,35 +2,88 @@
 
 技术栈：**Go (Wails v2) + Vue 3 + CodeMirror 6 + markdown-it + highlight.js**
 
+> 定位：Typora 式「所写即所见」写作工具——默认即时渲染，可切纯源码 / 纯预览 / 双栏 / 阅读多种视图。
+
 ## 已实现能力
 
 | 功能 | 实现 |
 |---|---|
 | Markdown 编辑 + 语法高亮 | CodeMirror 6（`src/editor/`），写作工具形态：无行号、无整行高亮、正文栈 15px |
+| **WYSIWYG 即时渲染（默认）** | `src/editor/wysiwyg.js`：光标所在行及上下相邻 1 行显示 Markdown 源码，其余行呈现渲染效果（列表圆点 / 任务勾选框以 widget 替换标记符）；仅产装饰、**零文档篡改**；中文输入（IME）时冻结重算；装饰只在可视区计算，大文档不卡 |
 | 实时预览 | markdown-it + highlight.js（`src/preview/`），正文限宽居中 |
-| **原生菜单栏** | macOS 顶部系统菜单栏；Windows/Linux 窗口内菜单条（`main.go` 的 `buildMenu`，事件发给前端） |
-| 快捷键 | ⌘O 打开 / ⌘⇧O 打开文件夹 / ⌘S 保存 / ⌘⇧S 另存为 / ⌘⇧H 导出 HTML / ⌘P 导出 PDF / ⌘⇧L 切换主题 |
-| 明暗主题切换 | 单文件 Token（`src/themes/tokens/design-tokens.css`），`data-theme` 切换，localStorage 持久化 |
-| 文本导出 | HTML：内联样式模板导出；PDF：走系统打印对话框（`src/export/`） |
+| **视图四态** | 编辑 `⌘1` / 预览 `⌘2` / 双栏 `⌘3` / 阅读 `⌘4`（`App.vue`）；阅读模式只渲染、隐藏编辑器 |
+| **专注模式** | `⌘⇧F` 收起界面干扰、强制进入编辑态（`App.vue`） |
+| **三主题 + 跟随系统** | 浅 Indigo / 深 Indigo / 纸感赭石（`src/themes/tokens/design-tokens.css`）；`system` 偏好由 `theme.js` 解析为具体主题并写入；切换只改 `<html data-theme>`，**不重建编辑器** |
+| **大纲视图** | `⌘B` 开关（`src/components/Outline.vue` + `outline.js` + `useOutlineSync.js`），从文档提取标题层级、点击跳转 |
+| **历史快照** | `src/components/HistoryPanel.vue`：与自动保存**解耦**——编辑会话每 ≥3 分钟节流一次 + 显式保存 + 切换文件前 + 手动触发；轮转 / 去重由 Go 侧 `SnapshotWrite` 负责 |
+| 自动保存 | 改动后 800ms 防抖覆盖原文件，状态栏显示保存态 |
+| 原生菜单栏 | macOS 顶部系统菜单栏；Windows/Linux 窗口内菜单条（`main.go` 的 `buildMenu`，事件发给前端） |
+| 快捷键 | 文件 / 格式 / 视图三类，见下方「快捷键」 |
+| 文本导出 | HTML：内联样式模板（46rem 行宽）；PDF：macOS 一键直出（WebKit/PDFKit，dark→light 主题映射，467px 版心），其它平台走系统打印（`src/export/`） |
 | 本地文件管理 | 打开文件 / 打开文件夹，递归懒加载文件树（`app.go` + `src/components/FileTree.vue`） |
-| 编辑/预览滚动联动 | 按比例映射 + 互斥锁（`App.vue`），两边内容区留白一致保证映射准确 |
-| 分栏宽度可拖 | 编辑/预览之间的分割条可拖动调宽（20%~80%），双击复位，宽度持久化 |
+| 编辑/预览滚动联动 | 双栏模式下**标题锚点映射** + 互斥锁（`App.vue` / `useOutlineSync.js`） |
+| 分栏宽度可拖 | 编辑/预览分割条可拖动调宽（20%~80%），双击复位，宽度持久化 |
+
+## 快捷键
+
+**文件**
+
+| 操作 | 快捷键 |
+|---|---|
+| 打开文件 | ⌘O |
+| 打开文件夹 | ⌘⇧O |
+| 保存 | ⌘S |
+| 另存为 | ⌘⇧S |
+| 历史快照面板 | 菜单「文件 ▸ 历史快照…」（无快捷键，ADR-004 避免误触） |
+| 导出 HTML | ⌘⇧H |
+| 导出 PDF | ⌘P |
+
+**格式（WYSIWYG 命令）**
+
+| 操作 | 快捷键 |
+|---|---|
+| 加粗 | ⌘⇧B |
+| 斜体 | ⌘I |
+| 删除线 | ⌘⇧X |
+| 行内代码 | ⌘` |
+| 链接 | ⌘K |
+| 标题 1–6 | ⌘⌥1 … ⌘⌥6 |
+| 无序列表 | ⌘⇧8 |
+| 有序列表 | ⌘⇧7 |
+| 任务列表 | ⌘⇧9 |
+| 引用块 | ⌘⇧. |
+| 代码块 | ⌘⌥C |
+
+> 菜单「格式」各项事件名与前端 `formatCommands` 接线清单严格一致，改名需前后端同步。
+
+**视图**
+
+| 操作 | 快捷键 |
+|---|---|
+| 编辑模式 | ⌘1 |
+| 预览模式 | ⌘2 |
+| 双栏模式 | ⌘3 |
+| 阅读模式 | ⌘4 |
+| 专注模式 | ⌘⇧F |
+| 显示 / 隐藏大纲 | ⌘B |
+| 切换主题 | ⌘⇧L |
 
 ## 目录结构
 
 ```
 inkmark/
 ├── main.go              # 入口：窗口配置、原生应用菜单、绑定 App 服务
-├── app.go               # 核心服务：文件对话框、读写文件、目录遍历（暴露给前端）
+├── app.go               # 核心服务：文件对话框、读写文件、目录遍历、快照写入（暴露给前端）
 ├── wails.json           # Wails 配置（前后端构建命令）
 └── frontend/
     ├── src/
-    │   ├── App.vue          # 主界面：顶栏（标题+主题）+ 侧栏 + 双栏布局
-    │   ├── editor/          # CodeMirror 封装、代码围栏语言识别
+    │   ├── App.vue          # 主界面：视图四态、顶栏、侧栏、双栏布局、滚动联动
+    │   ├── editor/          # CodeMirror 封装：createEditor.js / wysiwyg.js（即时渲染）/ outline.js（大纲提取）
     │   ├── preview/         # markdown-it 渲染配置
-    │   ├── export/          # HTML 导出模板
-    │   ├── themes/          # tokens/design-tokens.css（单文件 Token，含兼容别名层）+ base.css / preview.css
-    │   └── components/      # FileTree / TreeNode + icons/（AppIcon.vue + paths.js）
+    │   ├── export/          # HTML / PDF 导出模板与 exporters
+    │   ├── composables/     # useDocumentPersistence（保存/快照/导出）/ useOutlineSync（大纲+滚动锚点）
+    │   ├── components/      # FileTree / Outline / HistoryPanel / Toolbar / StatusBar + icons/
+    │   └── themes/          # tokens/design-tokens.css（单文件三主题 Token）+ theme.js（解析与持久化）+ base.css / preview.css
     └── wailsjs/             # Wails 自动生成的 IPC 绑定（勿手改）
 ```
 
@@ -58,27 +111,22 @@ inkmark/
 
 1. **文件安全写入**：`WriteFile` 先写 `.tmp` 再 `rename`，避免写一半崩溃留下半个文件。
 2. **文件树懒加载**：`ListDir` 只返回一层，点击目录才展开——千级文件的仓库也不会卡启动。
-3. **主题=CSS 变量**：编辑器（CodeMirror theme）、预览排版、代码高亮 token 全部引用同一组变量，切换零成本；预览高亮没用 hljs 官方主题 CSS，而是把 token 色值做成了变量（`--hl-keyword` 等），保证明暗一致。
-4. **滚动同步用比例映射 + 互斥锁**。三个坑都会让联动**静默失效**（本项目三个都踩过）：
-   - CM6 的 `ViewUpdate` **没有 `scrollChanged` 属性**，监听编辑器滚动必须用原生事件
-     `view.scrollDOM.addEventListener('scroll', ...)`；
-   - `@scroll` 必须绑在**真正滚动的元素**上（是 `.preview-pane`，不是 `.preview-body`——后者不滚动，且 `scroll` 事件不冒泡）；
-   - 编辑器 `.cm-content` 与预览区 `.preview-body` 的**上下留白必须一致**，两边可滚动高度才可比。
-   后续可升级为按标题锚点映射（体验更好）。
-5. **窗口拖拽用 `--wails-draggable`**：Wails 不读 `-webkit-app-region`（那是 Chromium 的，
-   macOS WKWebView 不认）。顶栏设 `--wails-draggable: drag`，交互子元素设 `no-drag`。
+3. **主题 = CSS 变量**：编辑器（CodeMirror theme）、预览排版、代码高亮 token 全部引用同一组变量，切换零成本；预览高亮没用 hljs 官方主题 CSS，而是把 token 色值做成变量（`--hl-keyword` 等），保证明暗一致。`data-theme` 始终存「已解析」的具体主题（不存 `system`），切换只改属性、不重建编辑器。
+4. **滚动同步用标题锚点映射**：双栏模式下按标题位置对齐编辑 / 预览滚动，体验优于纯比例映射；仍用互斥锁防回环（一边滚动时锁另一边，松开再放开）。
+5. **窗口拖拽用 `--wails-draggable`**：Wails 不读 `-webkit-app-region`（那是 Chromium 的，macOS WKWebView 不认）。顶栏设 `--wails-draggable: drag`，交互子元素设 `no-drag`。
 6. **操作全在系统菜单栏**：设置 `options.Menu` 会整体替换默认菜单，必须把 `AppMenu` / `EditMenu` / `WindowMenu` 三个 Role 手动拼回来——尤其 EditMenu，丢了它 macOS 下 ⌘C/⌘V 会失效。菜单项只在 Go 侧发事件，业务逻辑统一在前端。
 7. **渲染进程零 Node 能力**：前端只能通过生成的 `wailsjs` 绑定调 Go 方法，文件系统攻击面收在 `app.go`。
+8. **WYSIWYG 即时渲染的边界**：只产装饰、绝不 `dispatch` 文档变更（内容零篡改）；`view.composing` 为 true（中文输入中）时冻结重算，避免抖动；装饰只在 `visibleRanges` 内计算（大文档性能）；活跃行向上下各扩 1 行，避免方向键因标记符显隐突变而跳跃。
+9. **快照与自动保存解耦**：自动保存 800ms 防抖覆盖原文件；快照独立按「节流 / 显式保存 / 切换文件边界 / 手动」触发，避免每次按键都落快照、污染历史。
 
-## 已知待办（骨架之后建议按序做）
+## 已知问题与待办
 
-- [ ] 预览渲染防抖（当前每次输入同步渲染，大文档会卡）
-- [ ] 未保存关闭确认（拦截窗口关闭事件）
-- [ ] 图片粘贴/拖拽插入（配合 Go 端存到 assets 目录）
-- [ ] 滚动同步升级为标题锚点映射
-- [ ] 代码块高亮瘦身：`highlight.js/lib/common` 占了大头（当前 JS 包 1.7MB / gzip 590KB），可换成 `core` + 按需注册
+- [ ] 未保存关闭拦截（窗口关闭前确认目前仅状态栏提示，未拦截关闭）
+- [ ] 图片粘贴 / 拖拽插入（配合 Go 端存到 assets 目录）
+- [ ] 代码块高亮瘦身：`highlight.js` 全量占用大头（JS 包 ~1.7MB / gzip ~590KB），可换 `common` 或 `core` + 按需注册
 - [ ] 文件树监听外部变更（fsnotify）
-- [ ] 大纲视图（从预览 AST 提取标题）
+- [ ] 预览渲染防抖（大文档连续输入时的渲染节流）
+- **已知（非阻塞）**：WYSIWYG 即时模式下，光标位于代码块内时按 Enter 暂不能自动跳出围栏；可在代码块末尾追加一个空行再回车绕开。
 
 ## 关于插件系统（现在不做）
 
