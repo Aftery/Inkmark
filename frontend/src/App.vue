@@ -148,19 +148,60 @@ let modeBeforeReading = null
 const sync = useOutlineSync({ getEditor: () => editor, previewEl, viewMode, sidebarOpen, outline })
 const { outlineActive } = sync
 
+// ---------- 预览渲染防抖 ----------
+// markdown 只驱动预览（编辑器内容在 CM6 内，大纲取自 editor.doc）。大文档下
+// 每键全量渲染会卡，故把「输入期」的 markdown 更新防抖 ~120ms；打开 / 恢复文件
+// 走 syncAfterDocReplace 直接赋值（不防抖，需即时）。导出前调 flushPreview() 补齐。
+const PREVIEW_DEBOUNCE_MS = 120
+let previewTimer = null
+let pendingDoc = null
+
+// 立即应用待渲染内容并重建锚点（导出、以及任何需要「所见即最新」的场合）
+function flushPreview() {
+  if (previewTimer === null) return
+  clearTimeout(previewTimer)
+  previewTimer = null
+  const doc = pendingDoc
+  pendingDoc = null
+  if (doc !== null) {
+    markdown.value = doc
+    triggerRef(markdown)
+  }
+  nextTick(() => {
+    sync.invalidateAnchors()
+    sync.scheduleOutlineSync()
+  })
+}
+
+// 丢弃待渲染内容（切换文件等破坏性边界前调用，防止旧内容稍后覆盖新文档）
+function cancelPendingPreview() {
+  clearTimeout(previewTimer)
+  previewTimer = null
+  pendingDoc = null
+}
+
 function onDocChange(doc) {
   // 诊断（预览不同步排查）：确认链路是否触发、值是否变化。定位后移除。
   console.log('[onDocChange] len=', doc.length, 'changed=', doc !== markdown.value)
-  markdown.value = doc
-  triggerRef(markdown) // 防御性：强制依赖 markdown 的 computed（previewHtml）重算
+  // 预览渲染防抖：停手 ~120ms 后再更新 markdown → previewHtml（见上方说明）
+  pendingDoc = doc
+  clearTimeout(previewTimer)
+  previewTimer = setTimeout(() => {
+    previewTimer = null
+    const d = pendingDoc
+    pendingDoc = null
+    if (d === null) return
+    markdown.value = d
+    triggerRef(markdown) // 防御性：强制依赖 markdown 的 computed（previewHtml）重算
+    // 预览 DOM 到 nextTick 才刷新，此时才能重建标题锚点；大纲同机更新
+    nextTick(() => {
+      sync.invalidateAnchors()
+      outline.value = extractOutline(editor.state.doc)
+      sync.scheduleOutlineSync()
+    })
+  }, PREVIEW_DEBOUNCE_MS)
   persistence.markDirty()
   persistence.maybeSnapshot() // 「有效编辑会话」节流快照（≥3 分钟，AC-14 与自动保存解耦）
-  // 预览 DOM 要到 nextTick 才更新完，那时才能重建标题锚点；大纲同机更新
-  nextTick(() => {
-    sync.invalidateAnchors()
-    outline.value = extractOutline(editor.state.doc)
-    sync.scheduleOutlineSync()
-  })
 }
 
 // 整份替换文档后的外部状态同步。
@@ -168,6 +209,7 @@ function onDocChange(doc) {
 // 而 setState 不是事务更新、不会触发 updateListener，所以这里手工补上 onDocChange
 // 中除「脏标记 / 快照」以外的全部派生状态（预览、行列、格式态、大纲锚点）。
 function syncAfterDocReplace(content) {
+  cancelPendingPreview() // 丢弃输入期待渲染内容，防止稍后覆盖刚打开/恢复的文档
   markdown.value = content
   triggerRef(markdown)
   caret.value = { line: 1, col: 1 }
@@ -414,8 +456,9 @@ safeEventsOn('menu:open-file', openFile)
 safeEventsOn('menu:open-folder', openFolder)
 safeEventsOn('menu:save', persistence.saveFile)
 safeEventsOn('menu:save-as', persistence.saveFileAs)
-safeEventsOn('menu:export-html', persistence.exportHtml)
-safeEventsOn('menu:export-pdf', persistence.exportPdf)
+// 导出前 flush 预览，避免防抖窗口内取到旧 HTML（flushPreview 定义见「预览渲染防抖」节）
+safeEventsOn('menu:export-html', () => { flushPreview(); persistence.exportHtml() })
+safeEventsOn('menu:export-pdf', () => { flushPreview(); persistence.exportPdf() })
 safeEventsOn('menu:view-edit', () => setViewMode('edit'))
 safeEventsOn('menu:view-preview', () => setViewMode('preview'))
 safeEventsOn('menu:view-split', () => setViewMode('split'))
