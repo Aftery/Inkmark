@@ -13,10 +13,11 @@
 // editor 以 getter 注入：编辑器实例在 App.vue 的 onMounted 才创建，
 // composable 需在 setup 同步实例化（状态栏初始态先于编辑器存在）。
 
-import { ref } from 'vue'
+import { ref, onBeforeUnmount } from 'vue'
 import { SaveFileDialog, WriteFile } from '../../wailsjs/go/main/App'
 import { buildHtmlDocument } from '../export/exporters'
 import { replaceDocument } from '../editor/createEditor'
+import { getPref, onPrefsChange } from '../themes/prefs.js'
 
 // ---------- 快照元数据展示格式化（历史面板 / 恢复提示共用） ----------
 
@@ -60,8 +61,19 @@ export function useDocumentPersistence({ getEditor, filePath, title, previewHtml
   const historyLoading = ref(false)
 
   let saveTimer = null
-  const SNAPSHOT_INTERVAL = 3 * 60 * 1000
+  // 自动保存延时 / 快照间隔改由用户偏好驱动（themes/prefs.js 唯一真源）。
+  // 0 = 关闭对应自动行为（AC-10）；手动「立即快照」走 writeSnapshot(true) 绕过节流，关间隔仍可用。
+  // 缓存到局部变量，避免每键都读一次 localStorage（markDirty 在每次文档变更时调用）。
+  let autosaveDelay = getPref('autosave')
+  let snapshotIntervalMs = getPref('snapshot')
   let lastSnapshotAt = Date.now()
+
+  // 偏好实时生效：面板改动后无需重开文档即更新自动保存 / 快照节奏
+  const offPrefs = onPrefsChange(() => {
+    autosaveDelay = getPref('autosave')
+    snapshotIntervalMs = getPref('snapshot')
+  })
+  onBeforeUnmount(() => offPrefs())
 
   // Go 绑定直调（wailsjs 生成文件未再生成，且浏览器预览下不存在）
   function getAppApi() {
@@ -70,13 +82,14 @@ export function useDocumentPersistence({ getEditor, filePath, title, previewHtml
 
   const docText = () => getEditor()?.state.doc.toString() ?? ''
 
-  // ---------- 自动保存（800ms 防抖，AC-13）----------
+  // ---------- 自动保存（防抖延时由偏好驱动，默认 800ms，AC-13）----------
 
   function markDirty() {
     dirty.value = true
     saveState.value = 'unsaved'
     clearTimeout(saveTimer)
-    if (filePath.value) saveTimer = setTimeout(autoSave, 800)
+    // autosaveDelay = 0（用户关闭）→ 不调度定时器，仅保留脏标记与状态栏提示
+    if (filePath.value && autosaveDelay > 0) saveTimer = setTimeout(autoSave, autosaveDelay)
   }
 
   async function autoSave() {
@@ -95,13 +108,15 @@ export function useDocumentPersistence({ getEditor, filePath, title, previewHtml
   // ---------- 历史快照（AC-14：与自动保存解耦）----------
 
   function maybeSnapshot() {
-    if (Date.now() - lastSnapshotAt >= SNAPSHOT_INTERVAL) writeSnapshot(true)
+    // 间隔为 0（用户关闭）→ 不再自动快照（AC-10）
+    if (snapshotIntervalMs > 0 && Date.now() - lastSnapshotAt >= snapshotIntervalMs) writeSnapshot(true)
   }
 
   async function writeSnapshot(force = false) {
     const api = getAppApi()
     if (!api?.SnapshotWrite || !filePath.value || !getEditor()) return
-    if (!force && Date.now() - lastSnapshotAt < SNAPSHOT_INTERVAL) return
+    // force = 手动「立即快照」/ 显式保存 / 破坏性边界：不受间隔约束，间隔为 0 也照常写
+    if (!force && (snapshotIntervalMs <= 0 || Date.now() - lastSnapshotAt < snapshotIntervalMs)) return
     try {
       await api.SnapshotWrite(filePath.value, docText())
       lastSnapshotAt = Date.now()

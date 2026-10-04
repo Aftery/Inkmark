@@ -20,6 +20,7 @@ import Outline from './components/Outline.vue'
 import Toolbar from './components/Toolbar.vue'
 import StatusBar from './components/StatusBar.vue'
 import HistoryPanel from './components/HistoryPanel.vue'
+import SettingsPanel from './components/SettingsPanel.vue'
 import AppIcon from './components/icons/AppIcon.vue'
 import { useDocumentPersistence } from './composables/useDocumentPersistence'
 import { useOutlineSync } from './composables/useOutlineSync'
@@ -437,6 +438,8 @@ function onGlobalKeydown(e) {
   if (e.isComposing) return
   if (e.key === 'Escape') {
     if (dialog.show) closeDialog(null)
+    // 设置面板是模态弹层：优先级仅次于输入对话框，Esc 关闭并把焦点交还编辑器
+    else if (showSettings.value) closeSettings()
     else if (showShortcuts.value) showShortcuts.value = false
     else if (focusOn.value) toggleFocus()
     else if (persistence.showHistory.value) persistence.showHistory.value = false
@@ -593,7 +596,16 @@ function copySelectionAsHtml() {
 // ---------- 帮助：快捷键速查 / Markdown 语法示例 ----------
 
 const showShortcuts = ref(false)
+// 设置面板可见性（menu:open-settings ⌘, 打开；Esc / 关闭按钮收起）
+const showSettings = ref(false)
 const IS_MAC = /mac/i.test(navigator.platform || '')
+
+// 关闭设置面板并把焦点交还编辑器（AC-07）。
+// 恢复默认等偏好副作用已在 prefs.js 内实时落地，这里只管可见性与焦点。
+function closeSettings() {
+  showSettings.value = false
+  editor?.focus()
+}
 
 // 键位展示：mac 用符号，其余平台把 ⌘/⌥/⇧ 替换为 Ctrl/Alt/Shift
 function fmtKey(k) {
@@ -605,7 +617,8 @@ const SHORTCUTS = [
   ['⌘N', '新建文件'],
   ['⌘O / ⌘⇧O', '打开文件 / 打开文件夹'],
   ['⌘S / ⌘⇧S', '保存 / 另存为'],
-  ['⌘P', '导出 PDF'],
+  ['⌘P', '打印'],
+  ['⇧⌘P', '导出 PDF'],
   ['⌘F', '查找（⌘⌥F 查找替换）'],
   ['⌘L', '跳转到行'],
   ['⌥↑ / ⌥↓', '上移 / 下移行'],
@@ -618,6 +631,7 @@ const SHORTCUTS = [
   ['⌘B', '显示 / 隐藏大纲'],
   ['⌘= / ⌘- / ⌘0', '放大 / 缩小 / 重置缩放'],
   ['⌘⇧L', '切换主题'],
+  ['⌘,', '设置'],
   ['⌘/', '快捷键速查'],
 ]
 
@@ -756,6 +770,10 @@ safeEventsOn('menu:save-as', persistence.saveFileAs)
 // 导出前 flush 预览，避免防抖窗口内取到旧 HTML（flushPreview 定义见「预览渲染防抖」节）
 safeEventsOn('menu:export-html', () => { flushPreview(); persistence.exportHtml() })
 safeEventsOn('menu:export-pdf', () => { flushPreview(); persistence.exportPdf() })
+// 打印（文件 → 打印… ⌘P）：先 flush 预览补齐防抖窗口内的最新内容，再走系统打印。
+// @media print（App.vue 末尾）已隐藏 chrome、只输出预览区，故无需另做打印视图。
+safeEventsOn('menu:print', () => { flushPreview(); window.print() })
+safeEventsOn('menu:open-settings', () => { showSettings.value = true })
 safeEventsOn('menu:view-edit', () => setViewMode('edit'))
 safeEventsOn('menu:view-preview', () => setViewMode('preview'))
 safeEventsOn('menu:view-split', () => setViewMode('split'))
@@ -1012,6 +1030,9 @@ function onDividerKeydown(e) {
       @snapshot-now="persistence.snapshotNow"
       @restore="persistence.restoreSnapshot"
     />
+
+    <!-- 设置面板（menu:open-settings ⌘, 打开；Esc / 关闭按钮收起，焦点回编辑器） -->
+    <SettingsPanel v-if="showSettings" @close="closeSettings" />
 
     <!-- 一次性 / 结果提示（专注模式首次进入、导出结果、快照反馈） -->
     <div v-show="focusToast" class="focus-toast" role="status">已进入专注模式，Esc 退出</div>

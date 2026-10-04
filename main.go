@@ -128,6 +128,9 @@ func buildMenu(app *App) *menu.Menu {
 	// 历史快照面板：低频入口，按 ADR-004 不分配快捷键（避免误触）
 	fileMenu.AddText("历史快照…", nil, emit("menu:toggle-history"))
 	fileMenu.AddSeparator()
+	// 打印：直接走系统打印对话框（前端 window.print()）；@media print 已隐藏 chrome、
+	// 只输出预览正文，故无需另建打印视图。键位对齐 macOS 惯例 ⌘P = 打印。
+	fileMenu.AddText("打印…", keys.CmdOrCtrl("p"), emit("menu:print"))
 	fileMenu.AddText("导出 HTML…", keys.Combo("h", keys.CmdOrCtrlKey, keys.ShiftKey), emit("menu:export-html"))
 	// 非 darwin 平台一键直出不可用（ADR-003 路线 A′ 依赖 WebKit/PDFKit），
 	// 菜单项保持可用不置灰，文案显式说明走系统打印；不做 tooltip（原生菜单 tooltip 不可靠）
@@ -135,7 +138,13 @@ func buildMenu(app *App) *menu.Menu {
 	if goruntime.GOOS != "darwin" {
 		exportPDFTitle = "导出 PDF…（本平台走系统打印）"
 	}
-	fileMenu.AddText(exportPDFTitle, keys.CmdOrCtrl("p"), emit("menu:export-pdf"))
+	// 导出 PDF 让位：⌘P 已给打印，降为 ⇧⌘P（macOS 惯例，与「打印…」区分）
+	fileMenu.AddText(exportPDFTitle, keys.Combo("p", keys.CmdOrCtrlKey, keys.ShiftKey), emit("menu:export-pdf"))
+	fileMenu.AddSeparator()
+	// 设置…：Apple HIG 要求放应用菜单，但 Wails 的 menu.AppMenu() 是硬编码 Role，
+	// 自定义项追加不进去（已实测 v2.16.0）；故按「窗口置顶」先例放文件菜单末尾。
+	// 绝不动 AppMenu Role —— 丢了它，「关于/退出」等系统项会一并消失。
+	fileMenu.AddText("设置…", keys.CmdOrCtrl(","), emit("menu:open-settings"))
 
 	// ③ 编辑（macOS 必需：撤销/剪切/拷贝/粘贴/全选）
 	if goruntime.GOOS == "darwin" {
