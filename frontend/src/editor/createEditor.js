@@ -282,16 +282,16 @@ export function createEditor(parent, { doc = '', onDocChange, onScroll, onUpdate
           height: '100%',
           backgroundColor: 'var(--bg)',
           color: 'var(--fg)',
-          fontFamily: 'var(--font-body)',
+          fontFamily: 'var(--font-body-user, var(--font-body))',
           fontSize: 'var(--text-base)',      /* 15px，与预览区一致 */
           lineHeight: 'var(--leading-body)', /* 1.7，与预览区一致 */
         },
         '.cm-scroller': {
-          fontFamily: 'var(--font-body)',
+          fontFamily: 'var(--font-body-user, var(--font-body))',
           lineHeight: 'var(--leading-body)',
         },
         '.cm-content': {
-          fontFamily: 'var(--font-body)',
+          fontFamily: 'var(--font-body-user, var(--font-body))',
           lineHeight: 'var(--leading-body)',
           caretColor: 'var(--accent)',
           padding: 'var(--preview-padding-y) 0 var(--space-16)',  /* 与预览区上下留白一致，比例映射才准 */

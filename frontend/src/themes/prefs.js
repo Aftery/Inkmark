@@ -8,6 +8,8 @@
  *  - 应用方式【必须】写 document.documentElement 的**内联样式**，绝不写样式表 ——
  *    `[data-theme="paper"]` 用属性选择器覆写了 --font-body / --leading-* /
  *    --reading-measure，样式表写法会被 paper 主题静默压掉（C1，血泪教训）。
+ *  - 正文字体走**文档作用域**变量 --font-body-user（R4）：只影响编辑区 / 预览区正文，
+ *    chrome（工具条 / 侧栏 / 弹层）与主题衬线外壳仍读 --font-body，不被用户字体偏好污染。
  *  - 字号【必须】成对同改 --text-base（编辑区）与 --text-md（预览区），
  *    两者不等会导致左右两栏文字错位（C2 不变量）。
  *  - 绝不碰 --zoom-scale：视图缩放走独立变量，与基础字号正交叠加（C3）。
@@ -38,7 +40,10 @@ export const PREF_OPTIONS = {
   snapshot: [0, 180000, 600000, 1800000],
 }
 
-/** 正文字体字栈：system 走 removeProperty（回退 token / paper 主题的衬线栈） */
+/**
+ * 正文字体字栈（**文档作用域**，写 --font-body-user）。
+ * system 走 removeProperty → 正文回退 --font-body（token / paper 主题的衬线栈照常生效）。
+ */
 const FONT_STACKS = {
   serif: 'Georgia, "Times New Roman", "Songti SC", "Noto Serif SC", serif',
   mono: '"SF Mono", "JetBrains Mono", Menlo, monospace',
@@ -69,9 +74,10 @@ const LEADING = { compact: '1.5', standard: '1.7', loose: '1.9' }
 const PREVIEW_MEASURE = { narrow: '40rem', standard: '46rem', wide: '54rem' }
 const READING_MEASURE = { narrow: '44rem', standard: '50rem', wide: '58rem' }
 
-/** 内联样式需要管理的 CSS 变量名（resetPrefs 逐项 clear） */
+/** 内联样式需要管理的 CSS 变量名（resetPrefs 逐项 clear）。
+ *  字体走 --font-body-user（文档作用域），不碰 --font-body（chrome 与主题衬线外壳靠它） */
 const MANAGED_VARS = [
-  '--font-body',
+  '--font-body-user',
   '--text-base',
   '--text-md',
   '--leading-body',
@@ -146,9 +152,12 @@ export function applyPrefs() {
   const root = document.documentElement
   const p = getPrefs()
 
-  // 正文字体：system 显式 removeProperty，让 paper 主题的衬线栈照常生效
-  if (p.fontFamily === 'system') root.style.removeProperty('--font-body')
-  else root.style.setProperty('--font-body', FONT_STACKS[p.fontFamily])
+  // 正文字体（**文档作用域**，R4）：写 --font-body-user，**不写 --font-body**。
+  // 编辑区 / 预览区正文用 var(--font-body-user, var(--font-body)) 读取，故只有正文受影响；
+  // 工具条 / 侧栏 / 状态栏 / 弹层等 chrome 仍走 --font-body —— paper 主题的衬线外壳得以保留。
+  // system 档 = 交还主题决定：removeProperty('--font-body-user') → 正文回退 --font-body。
+  if (p.fontFamily === 'system') root.style.removeProperty('--font-body-user')
+  else root.style.setProperty('--font-body-user', FONT_STACKS[p.fontFamily])
 
   // 字号：C2 不变量 —— 编辑区 --text-base 与预览区 --text-md 必须成对同改
   const size = FONT_SIZE_REM[p.fontSize]

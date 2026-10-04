@@ -11,7 +11,7 @@
   max-width: var(--preview-measure);
   margin: 0 auto;
   padding: var(--preview-padding-y) var(--space-6) var(--space-16);
-  font-family: var(--font-body);
+  font-family: var(--font-body-user, var(--font-body));
   font-size: var(--text-md);
   line-height: var(--leading-reading);
   color: var(--fg);
