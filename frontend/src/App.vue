@@ -1343,7 +1343,7 @@ function onDividerKeydown(e) {
    状态栏 / 历史面板同属 chrome，打印一律隐藏。 */
 @media print {
   .toolbar, .sidebar, .editor-pane, .divider, .focus-toast,
-  .statusbar, .history-panel { display: none !important; }
+  .statusbar, .history-panel, .dialog-mask { display: none !important; }
   .preview-pane {
     display: block !important;
     width: 100% !important;

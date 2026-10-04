@@ -259,4 +259,9 @@ onMounted(() => {
 .settings-btn.primary { background: var(--accent); color: var(--accent-on); border-color: var(--accent); }
 .settings-btn.primary:hover { filter: brightness(1.05); }
 .settings-btn:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+
+/* 打印只输出正文：面板与遮罩一并隐藏（AC-06，与 App.vue 的 @media print 同一处理） */
+@media print {
+  .settings-mask { display: none !important; }
+}
 </style>
