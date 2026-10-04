@@ -71,13 +71,19 @@ function countLines(text) {
  *   emit("x")                    —— 普通菜单项
  *   emitChecked("x", setter)     —— checkbox 菜单项
  *   runtime.EventsEmit(ctx, "x") —— 直接发（最近打开等动态项）
+ *
+ * [注意] 引号风格无关（`"` / `` ` `` / `'` 都是合法 Go 字符串）——
+ * 早先只认双引号，写成反引号会导致扫不到、进而让下游差集检查**静默放行**。
+ * 这就是「解析器把『看起来像』当成『是』」那类坑，与 shell grep 静默无输出同源。
  */
 function collectGoEmitted(goSrc) {
   const names = new Map() // name -> 首个出现的行号（1-based）
+  // 事件名一律用双引号字面量（Go 社区惯例），但解析不假设引号风格
+  const Q = '["`\']'
   const patterns = [
-    /\bemit\(\s*"([^"]+)"/g, // emit("...")
-    /\bemitChecked\(\s*"([^"]+)"/g, // emitChecked("...")
-    /\bEventsEmit\(\s*[\w.]+\s*,\s*"([^"]+)"/g, // EventsEmit(ctx, "...")
+    new RegExp(`\\bemit\\(\\s*${Q}([^"'\`]+)${Q}`, 'g'), // emit("...")
+    new RegExp(`\\bemitChecked\\(\\s*${Q}([^"'\`]+)${Q}`, 'g'), // emitChecked("...")
+    new RegExp(`\\bEventsEmit\\(\\s*[\\w.]+\\s*,\\s*${Q}([^"'\`]+)${Q}`, 'g'), // EventsEmit(ctx, "...")
   ]
   for (const re of patterns) {
     for (const m of goSrc.matchAll(re)) {
@@ -88,6 +94,26 @@ function collectGoEmitted(goSrc) {
   }
   return names
 }
+
+/**
+ * 统计 main.go 里**字面量形式**的 emit 调用点数量（缺陷 3 的对账基准）。
+ *
+ * 为什么要这个对账：`collectGoEmitted` 只认「引号紧跟括号」的写法。
+ * 若 Go 侧把事件名抽成常量（`const evtNewFile = "menu:new-file"` + `emit(evtNewFile)`，
+ * 这是 Go 里常见且推荐的做法），解析器就**扫不到那个事件**了 ——
+ * 于是差集变空、误判成「前端多注册了事件」，**报错方向指向前端，真因在解析器**。
+ * 有了这个计数，两者不等就能立刻定位到解析器，而不是让人去查前端。
+ *
+ * 只统计「看起来是 emit 调用点」的：`emit(` / `emitChecked(` / `EventsEmit(`。
+ * 函数**声明**本身（`emit := func(...)`）不计。
+ */
+function countGoEmitCallSites(goSrc) {
+  const callSites = goSrc.match(/\b(?:emit|emitChecked|EventsEmit)\s*\(/g) || []
+  // 减去闭包声明：`emit := func(` / `emitChecked := func(` 各计 1 次
+  const decls = goSrc.match(/\b(?:emit|emitChecked)\s*:=\s*func\s*\(/g) || []
+  return callSites.length - decls.length
+}
+
 
 /** 前端侧注册的事件名（safeEventsOn） */
 function collectFrontendRegistered(src) {
@@ -146,6 +172,31 @@ describe('契约 1 · 菜单事件双向闭合（AC-03）', () => {
     )
   })
 
+  /**
+   * 缺陷 3 的核心守卫：**解析器能力对账**。
+   *
+   * 背景：把事件名抽成常量（`const evtX = "menu:x"` + `emit(evtX)`）会让
+   * `collectGoEmitted` 扫不到该事件。此时差集变空，下游「前端多注册」用例报错 ——
+   * 但**真因在解析器，报错却指向前端**，会让人白查半天。
+   * 我们正要大规模改 main.go，这种假失败的返工代价是实打实的。
+   *
+   * 判据：字面量 emit 调用点数必须等于解析出的事件数。
+   * 不等 = 解析器已覆盖不全 → 直接指向解析器，**先于任何差集断言**。
+   */
+  test('解析器必须覆盖 main.go 全部 emit 调用点（能力对账，防归因错报）', () => {
+    const callSites = countGoEmitCallSites(goSrc)
+    const parsed = emitted.size
+    assert.equal(
+      parsed,
+      callSites,
+      `解析器覆盖不全：main.go 有 ${callSites} 个 emit 调用点，只解析出 ${parsed} 个事件。` +
+        '说明 Go 侧出现了本检查无法解析的写法（最常见：事件名被抽成常量，' +
+        '如 const evtX = "menu:x" 后写成 emit(evtX)）。' +
+        '请更新 collectGoEmitted / countGoEmitCallSites 以支持该写法 —— ' +
+        '不要去改前端，本条报的是**解析器**的账。'
+    )
+  })
+
   test('Go 发出的每个事件都必须在前端注册面（App.vue ∪ main.js）里有 safeEventsOn', () => {
     const missing = [...emitted.entries()].filter(([name]) => !registered.has(name))
     assert.deepEqual(
@@ -195,8 +246,35 @@ describe('契约 1 · 菜单事件双向闭合（AC-03）', () => {
 // ===========================================================================
 // 契约 2：⌘P 唯一性
 // ===========================================================================
+
+/**
+ * ⌘P 绑定的匹配器（引号风格无关）。
+ *
+ * Go 的字符串有三种写法 —— `"p"` / `` `p` `` / `'p'` 都合法。
+ * 早先这里用精确子串 `keys.CmdOrCtrl("p")`，改成反引号就会**静默漏检**，
+ * 于是「唯一性」名存实亡（实测：注入第 2 个反引号写法的 ⌘P，门禁仍放行）。
+ * 这类「解析器把『看起来像』当成『是』」的坑与 shell grep 静默无输出同源。
+ *
+ * [职责边界 — 必读，加检查前先看这里]
+ *   **键位语义一致性由 `scripts/verify/verify-shortcuts.mjs` 负责**
+ *   （CI job `docs-contract`，真源 = main.go buildMenu()，覆盖 main.go ↔ README
+ *     ↔ App.vue SHORTCUTS 三方对齐）。
+ *   **本组仅守 main.go 内部的键位唯一性，不承担跨文件语义校验。**
+ *
+ *   为什么不再加更宽的键位检查（已实测论证，见 Spec §10）：
+ *     1. 计数式判据有结构盲区 —— 2026-10-04 修过的 ⌘B 撞键 bug，在 main.go 里
+ *        `⌘B`/`⌘⇧B` 各只出现 1 次、本身完全合法，冲突只存在于
+ *        「App.vue 速查表声称 ⌘B=加粗」与「main.go 里 ⌘B=大纲」之间。
+ *        任何基于「数 main.go 里有几个 ⌘X」的检查都抓不到它。
+ *     2. 再加一道 = 两道口径不同的重复门禁（那边数 43 项 accelerator、
+ *        这边数 1 个 ⌘P），main.go 一变就可能只修一边 —— 重复口径即漂移源。
+ *   ⏳ 待 `scripts/parse-main-menu.mjs` 落地后，把「main.go 内部 accelerator
+ *      唯一性」挪进那个真源解析器，**本组届时删除**，避免留下两套口径。
+ */
+const CMD_P_RE = /keys\.CmdOrCtrl\(\s*["'`]p["'`]\s*\)/
+
 describe('契约 2 · ⌘P 键位唯一性', () => {
-  test('全仓 keys.CmdOrCtrl("p") 只能出现 1 次（打印）', () => {
+  test('全仓 ⌘P 绑定只能出现 1 次（打印）', () => {
     const files = [
       ...listFiles(REPO).filter((f) => /\.(go|vue|js|mjs|ts|tsx|jsx)$/.test(f)),
     ]
@@ -204,13 +282,13 @@ describe('契约 2 · ⌘P 键位唯一性', () => {
     for (const f of files) {
       const text = read(f)
       text.split('\n').forEach((line, i) => {
-        if (line.includes('keys.CmdOrCtrl("p")')) hits.push(`${rel(f)}:${i + 1}`)
+        if (CMD_P_RE.test(line)) hits.push(`${rel(f)}:${i + 1}`)
       })
     }
     assert.equal(
       hits.length,
       1,
-      `keys.CmdOrCtrl("p") 出现 ${hits.length} 次（${hits.join(', ')}）。` +
+      `⌘P 绑定出现 ${hits.length} 次（${hits.join(', ')}）。` +
         '⌘P 必须唯一（当前归属：打印）。导出 PDF 应为 ⇧⌘P（keys.Combo）。' +
         '两处同键会导致行为不确定且不报错。'
     )
@@ -218,9 +296,7 @@ describe('契约 2 · ⌘P 键位唯一性', () => {
 
   test('命中点必须落在 main.go 的「打印」菜单项上', () => {
     const goSrc = read(join(REPO, 'main.go'))
-    const line = goSrc
-      .split('\n')
-      .find((l) => l.includes('keys.CmdOrCtrl("p")'))
+    const line = goSrc.split('\n').find((l) => CMD_P_RE.test(l))
     assert.ok(line, 'main.go 应存在 ⌘P 绑定')
     assert.ok(
       line.includes('打印'),
@@ -247,9 +323,102 @@ describe('契约 2 · ⌘P 键位唯一性', () => {
 // 契约 3：打印样式存在性
 // ===========================================================================
 
-/** 取出 .vue 文件里所有 @media print 块（连同所属 <style> 是否 scoped） */
+/**
+ * 剥掉 CSS/JS 注释，返回「原样长度的字符串」：
+ * 注释内的字符替换为空格（保留换行以维持行号），注释外的字符原样保留。
+ *
+ * [注意] 这是缺陷 2 的修复核心。早先直接按行扫 `@media print`，
+ * 于是**块注释里提到「@media print」的那一行被当成真实规则** ——
+ * 实测 SettingsPanel.vue:263 就是这种情形，被误判成一个 print 块。
+ * 危险场景已构造验证：把某组件的 @media print 整块删掉、只在注释里留字样，
+ * 早先的判据**认为通过** → 打印时遮罩会印出来（用户才骂）。
+ * 这与「shell grep 静默无输出」「unquote() 后判引号恒 false」同源：
+ * *解析器把「看起来像」当成「是」*。
+ */
+function stripComments(src) {
+  let out = ''
+  let i = 0
+  const n = src.length
+  // 状态：normal | line-comment | block-comment | in-string
+  let state = 'normal'
+  let quote = ''
+  while (i < n) {
+    const c = src[i]
+    const c2 = src.slice(i, i + 2)
+    if (state === 'normal') {
+      if (c2 === '//') {
+        out += '  '
+        i += 2
+        state = 'line-comment'
+        continue
+      }
+      if (c2 === '/*') {
+        out += '  '
+        i += 2
+        state = 'block-comment'
+        continue
+      }
+      if (c === '"' || c === "'" || c === '`') {
+        state = 'in-string'
+        quote = c
+        out += c
+        i++
+        continue
+      }
+      out += c
+      i++
+      continue
+    }
+    if (state === 'line-comment') {
+      if (c === '\n') {
+        out += '\n'
+        state = 'normal'
+      } else {
+        out += ' ' // 注释内容抹成空格，长度不变
+      }
+      i++
+      continue
+    }
+    if (state === 'block-comment') {
+      if (c2 === '*/') {
+        out += '  '
+        i += 2
+        state = 'normal'
+        continue
+      }
+      out += c === '\n' ? '\n' : ' '
+      i++
+      continue
+    }
+    // state === 'in-string'：字符串内部的注释符号不算注释
+    if (c === '\\') {
+      out += src.slice(i, i + 2)
+      i += 2
+      continue
+    }
+    if (c === quote) {
+      state = 'normal'
+      out += c
+      i++
+      continue
+    }
+    out += c
+    i++
+  }
+  return out
+}
+
+/**
+ * 取出 .vue 文件里所有 @media print 块（连同所属 <style> 是否 scoped）。
+ *
+ * 两道修复（缺陷 2）：
+ *   1. 先 stripComments —— 注释里的 @media print 不再被当成真实规则
+ *   2. 块提取用**花括号计数配平**，而不是「吃到第一个只含 } 的行为止」——
+ *      早先的写法遇到空块 `@media print { }` 会越过它、把相邻规则吞进块内
+ *      （潜伏隐患：块内出现别的选择器会让「含 display:none」误判为真）
+ */
 function collectPrintBlocks(vueSrc) {
-  const lines = vueSrc.split('\n')
+  const lines = stripComments(vueSrc).split('\n')
   const blocks = []
   let inStyle = false
   let styleScoped = false
@@ -264,15 +433,26 @@ function collectPrintBlocks(vueSrc) {
       inStyle = false
       continue
     }
-    if (inStyle && /@media\s+print/.test(line)) {
-      // 从这里吃到第一个只含空白的右花括号为止
-      const body = []
-      for (let j = i; j < lines.length; j++) {
-        body.push(lines[j])
-        if (/^\s*\}\s*$/.test(lines[j])) break
+    if (!inStyle || !/@media\s+print/.test(line)) continue
+
+    // 从本行起做花括号配平，找到真正属于本 @media 块的右花括号
+    let depth = 0
+    let started = false
+    const body = []
+    for (let j = i; j < lines.length; j++) {
+      body.push(lines[j])
+      for (const ch of lines[j]) {
+        if (ch === '{') {
+          depth++
+          started = true
+        } else if (ch === '}') {
+          depth--
+        }
       }
-      blocks.push({ line: i + 1, scoped: styleScoped, body: body.join('\n') })
+      // 配平（depth<=0）且已经见过 '{' 才算块结束
+      if (started && depth <= 0) break
     }
+    blocks.push({ line: i + 1, scoped: styleScoped, body: body.join('\n') })
   }
   return blocks
 }
@@ -573,14 +753,19 @@ const LINE_EXEMPTIONS = {
     reason:
       'CodeMirror 6 扩展装配集中地（extensions 数组 + 主题 + 事件绑定），' +
       '拆分需先有 createEditor 的行为测试网。与 App.vue 同属既有债，' +
-      '待 C 任务一并处理。',
+      '待 C 任务一并处理。' +
+      '【下一轮优先目标】Wave 2 把 App.vue 拆到 900 以下后，本文件将成为' +
+      '最接近 300 红线的白名单项，白名单会开始掩盖真实超限文件 —— ' +
+      '届时应优先为 createEditor 建立行为测试网并拆分，而不是继续调阈值。',
   },
   'frontend/src/editor/commands.js': {
     limit: 341,
     reason:
       '行操作命令集（增删复制移动/缩进/清除格式 + 选区转 HTML），' +
       '命令数量多且共享同一 selection 上下文，过早拆分易破坏语义。' +
-      '与 App.vue 同属既有债，待 C 任务一并处理。',
+      '与 App.vue 同属既有债，待 C 任务一并处理。' +
+      '【下一轮优先目标】Wave 2 把 App.vue 拆到 900 以下后，本文件将成为' +
+      '最接近 300 红线的白名单项 —— 与 createEditor.js 同为下一轮优先目标。',
   },
 }
 
