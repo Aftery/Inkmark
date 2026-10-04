@@ -54,10 +54,18 @@ const FONT_SIZE_REM = {
   20: '1.25rem',
 }
 
-/** 行距档位（同时写 --leading-body 与 --leading-reading） */
+/**
+ * 行距档位（同时写 --leading-body 与 --leading-reading）。
+ * 注：standard 档 = 交还主题决定（applyPrefs 走 removeProperty，不落内联），
+ * 此处的 '1.7' 仅作基准值文档，实际不写入；只有 compact / loose 会写内联。
+ */
 const LEADING = { compact: '1.5', standard: '1.7', loose: '1.9' }
 
-/** 预览行宽档位；--reading-measure 恒比 --preview-measure 宽 4rem（沿用项目既有关系） */
+/**
+ * 预览行宽档位；--reading-measure 恒比 --preview-measure 宽 4rem（沿用项目既有关系）。
+ * 注：standard 档 = 交还主题决定（applyPrefs 走 removeProperty，paper 自带更窄行宽）；
+ * 只有 narrow / wide 会写内联。
+ */
 const PREVIEW_MEASURE = { narrow: '40rem', standard: '46rem', wide: '54rem' }
 const READING_MEASURE = { narrow: '44rem', standard: '50rem', wide: '58rem' }
 
@@ -147,13 +155,25 @@ export function applyPrefs() {
   root.style.setProperty('--text-base', size)
   root.style.setProperty('--text-md', size)
 
-  // 行距：正文与阅读态同一档位
-  root.style.setProperty('--leading-body', LEADING[p.lineHeight])
-  root.style.setProperty('--leading-reading', LEADING[p.lineHeight])
+  // 行距：「标准」档 = 交还主题决定（removeProperty，避免通用默认值 1.7 压掉
+  // paper 主题刻意调校的衬线行距 1.8/1.85）；「紧凑 / 宽松」= 用户显式覆盖，写内联。
+  if (p.lineHeight === 'standard') {
+    root.style.removeProperty('--leading-body')
+    root.style.removeProperty('--leading-reading')
+  } else {
+    root.style.setProperty('--leading-body', LEADING[p.lineHeight])
+    root.style.setProperty('--leading-reading', LEADING[p.lineHeight])
+  }
 
-  // 行宽：阅读态恒宽 4rem（保持项目既有的「阅读态略宽」关系）
-  root.style.setProperty('--preview-measure', PREVIEW_MEASURE[p.measure])
-  root.style.setProperty('--reading-measure', READING_MEASURE[p.measure])
+  // 行宽：「标准」档 = 交还主题决定（paper 自带更窄的 --reading-measure:48rem）；
+  // 「窄 / 宽」= 用户显式覆盖（阅读态恒比常规宽 4rem，保持项目既有关系）。
+  if (p.measure === 'standard') {
+    root.style.removeProperty('--preview-measure')
+    root.style.removeProperty('--reading-measure')
+  } else {
+    root.style.setProperty('--preview-measure', PREVIEW_MEASURE[p.measure])
+    root.style.setProperty('--reading-measure', READING_MEASURE[p.measure])
+  }
 
   // 注意：绝不触碰 --zoom-scale（C3 正交，视图缩放独立于基础字号）
 }
