@@ -395,91 +395,70 @@ describe('契约 1 · 菜单事件双向闭合（AC-03）', () => {
 })
 
 // ===========================================================================
-// 契约 2：⌘P 唯一性
+// 契约 2：⌘P / 键位唯一性 —— 已职责转移，本组用例移除
 // ===========================================================================
 
 /**
- * ⌘P 绑定的匹配器（引号风格无关）。
+ * [职责边界 — 键位类检查请看这里，本文件不再承担]
  *
- * Go 的字符串有三种写法 —— `"p"` / `` `p` `` / `'p'` 都合法。
- * 早先这里用精确子串 `keys.CmdOrCtrl("p")`，改成反引号就会**静默漏检**，
- * 于是「唯一性」名存实亡（实测：注入第 2 个反引号写法的 ⌘P，门禁仍放行）。
- * 这类「解析器把『看起来像』当成『是』」的坑与 shell grep 静默无输出同源。
+ *   **键位相关的一切检查都已由真源解析器承担**：
+ *   - `scripts/parse-main-menu.mjs` 的 `findAcceleratorDuplicates`
+ *     —— main.go **内部** accelerator 唯一性（独立于文档比对）
+ *   - `scripts/verify/verify-shortcuts.mjs`（CI job `docs-contract`）
+ *     —— main.go ↔ README ↔ App.vue SHORTCUTS 的**跨文件语义**一致性
  *
- * [职责边界 — 必读，加检查前先看这里]
- *   **键位语义一致性由 `scripts/verify/verify-shortcuts.mjs` 负责**
- *   （CI job `docs-contract`，真源 = main.go buildMenu()，覆盖 main.go ↔ README
- *     ↔ App.vue SHORTCUTS 三方对齐）。
- *   **本组仅守 main.go 内部的键位唯一性，不承担跨文件语义校验。**
+ *   两者合起来覆盖了本文件原先那三条用例（⌘P 唯一 / 命中打印 / 导出 PDF 不得占 ⌘P），
+ *   且判据更强：真源解析器按 MOD_ORDER 规范化 accelerator，能区分
+ *   `keys.CmdOrCtrl("p")`（⌘P）与 `keys.Combo("p", Cmd, Shift)`（⇧⌘P），
+ *   而原先的正则做不到这个规范化。
  *
- *   为什么不再加更宽的键位检查（已实测论证，见 Spec §10）：
- *     1. 计数式判据有结构盲区 —— 2026-10-04 修过的 ⌘B 撞键 bug，在 main.go 里
- *        `⌘B`/`⌘⇧B` 各只出现 1 次、本身完全合法，冲突只存在于
- *        「App.vue 速查表声称 ⌘B=加粗」与「main.go 里 ⌘B=大纲」之间。
- *        任何基于「数 main.go 里有几个 ⌘X」的检查都抓不到它。
- *     2. 再加一道 = 两道口径不同的重复门禁（那边数 43 项 accelerator、
- *        这边数 1 个 ⌘P），main.go 一变就可能只修一边 —— 重复口径即漂移源。
- *   ⏳ 待 `scripts/parse-main-menu.mjs` 落地后，把「main.go 内部 accelerator
- *      唯一性」挪进那个真源解析器，**本组届时删除**，避免留下两套口径。
+ * [本组用例已随之移除 —— 这是「职责转移」，不是「检查消失」]
+ *   时间线：
+ *   - `0fbee9d` 本文件建立三条 ⌘P 用例（当时唯一性无任何覆盖）
+ *   - `d76b5aa` 抽出共享解析模块 `parse-main-menu.mjs`（**仍无**唯一性检查）
+ *   - `3ef4e12` 修复引号敏感性（精确子串 → 引号无关正则）
+ *   - `5d2d494` **真源检查落地**：`findAcceleratorDuplicates`，
+ *              并已跑出变异自证（三种引号风格各注入一个 ⌘P → 三次都报红；
+ *              ⇧⌘P 与 ⌘P 判定为不冲突）→ 本组用例随即移除
+ *
+ * [为什么不在此再加一道键位检查 —— 已实测论证，勿重复踩]
+ *   1. **计数式判据有结构盲区**：2026-10-04 修过的 ⌘B 撞键 bug，在 main.go 里
+ *      `⌘B`/`⌘⇧B` 各只出现 1 次、本身完全合法；冲突只存在于
+ *      「App.vue 速查表声称 ⌘B=加粗」与「main.go 里 ⌘B=大纲」之间。
+ *      任何基于「数 main.go 里有几个 ⌘X」的检查都抓不到它 ——
+ *      已用对照实验确认：复现该 bug 时本文件当时**静默放行**，
+ *      而 `verify-shortcuts.mjs` 精确报错。
+ *   2. **重复口径即漂移源**：真源解析器数 43 项 accelerator，本文件数 1 个 ⌘P；
+ *      两套口径并存，main.go 一变就可能只修一边。
+ *   3. 因此：键位问题**请改真源解析器**，不要在测试里另起一套正则。
+ *
+ * 保留本段注释的唯一目的：让后来人知道检查去了哪里、以及**不要重复造轮子**。
  */
-const CMD_P_RE = /keys\.CmdOrCtrl\(\s*["'`]p["'`]\s*\)/
-
-describe('契约 2 · ⌘P 键位唯一性', () => {
+describe('契约 2 · ⌘P 键位唯一性（已职责转移，用例移除）', () => {
   /**
-   * [必须排在本组第一位] 键位唯一性完全依赖「全仓内容在运行期不变」。
-   * 若他人此刻正在改 main.go（变异自证 / 拆分重构），本组会报出
-   * 「⌘P 出现 0 次或 2 次」这类**误导性**结论。
-   * 先确认文件稳定，再谈唯一性。
+   * 本组不再有实际断言，只保留一条「指针」用例：
+   * 确认真源解析器仍然存在且导出唯一性检查 —— 防止有人重构时
+   * 把 `findAcceleratorDuplicates` 删掉，导致键位唯一性**静默失去覆盖**。
+   * 这正是本轮反复踩的那一类：检查消失时没人报错。
    */
-  test('被读文件在测试运行期间未被并发修改（并发守卫）', () => {
-    assertFilesUnchanged()
-  })
-
-  test('全仓 ⌘P 绑定只能出现 1 次（打印）', () => {
-    const files = [
-      ...listFiles(REPO).filter((f) => /\.(go|vue|js|mjs|ts|tsx|jsx)$/.test(f)),
-    ]
-    const hits = []
-    for (const f of files) {
-      // 先剥注释：文档/注释里提到 keys.CmdOrCtrl("p")（例如解析器的 JSDoc 示例）
-      // 不是一次真实绑定，不该计入冲突数 —— 否则会被「说明性文本」误判成冲突。
-      // 这与缺陷 2 同源：解析器不能把「看起来像」当成「是」。
-      const text = stripComments(read(f))
-      const lines = text.split('\n')
-      lines.forEach((line, i) => {
-        if (CMD_P_RE.test(line)) hits.push(`${rel(f)}:${i + 1}`)
-      })
-    }
-    assert.equal(
-      hits.length,
-      1,
-      `⌘P 绑定出现 ${hits.length} 次（${hits.join(', ')}）。` +
-        '⌘P 必须唯一（当前归属：打印）。导出 PDF 应为 ⇧⌘P（keys.Combo）。' +
-        '两处同键会导致行为不确定且不报错。'
-    )
-  })
-
-  test('命中点必须落在 main.go 的「打印」菜单项上', () => {
-    const goSrc = read(join(REPO, 'main.go'))
-    const line = goSrc.split('\n').find((l) => CMD_P_RE.test(l))
-    assert.ok(line, 'main.go 应存在 ⌘P 绑定')
+  test('真源解析器仍在且导出唯一性检查（防键位唯一性静默失去覆盖）', () => {
+    const p = join(REPO, 'scripts', 'verify', 'parse-main-menu.mjs')
     assert.ok(
-      line.includes('打印'),
-      `⌘P 应绑定到「打印」，实际行: ${line.trim()}`
+      existsSync(p),
+      `真源解析器 ${rel(p)} 不存在 —— 若键位唯一性已迁移到别处，请同步更新本段职责说明`
     )
-  })
-
-  test('导出 PDF 必须是 ⇧⌘P（keys.Combo），不得占用 ⌘P', () => {
-    const goSrc = read(join(REPO, 'main.go'))
-    const line = goSrc.split('\n').find((l) => l.includes('menu:export-pdf'))
-    assert.ok(line, 'main.go 应存在导出 PDF 菜单项')
+    const mod = read(p)
     assert.ok(
-      line.includes('keys.Combo("p", keys.CmdOrCtrlKey, keys.ShiftKey)'),
-      `导出 PDF 应为 ⇧⌘P，实际行: ${line.trim()}`
+      /export\s+function\s+findAcceleratorDuplicates/.test(mod),
+      'parse-main-menu.mjs 不再导出 findAcceleratorDuplicates —— ' +
+        'main.go 内部 accelerator 唯一性将失去覆盖，而这种移除**不会有任何报错**。' +
+        '若确实要移除，请先在 verify-shortcuts.mjs 里落地等价检查再改这里。'
     )
+    // 键位语义（跨文件）那一侧也要在
+    const sp = join(REPO, 'scripts', 'verify', 'verify-shortcuts.mjs')
     assert.ok(
-      !line.includes('keys.CmdOrCtrl("p")'),
-      '导出 PDF 不得使用裸 ⌘P'
+      existsSync(sp),
+      `键位语义校验脚本 ${rel(sp)} 不存在（CI job docs-contract 依赖它）`
     )
   })
 })
@@ -915,32 +894,47 @@ const LINE_LIMIT = 300
  */
 const LINE_EXEMPTIONS = {
   'frontend/src/App.vue': {
-    limit: 1368,
+    limit: 1280,
     reason:
-      'Spec §5-C 已列为 C 任务拆分对象（目标 ≤600 行）。当前把 useDialog / ' +
-      'useShortcutsHelp / useFileOps / useDivider 四类职责塞在一个文件里，' +
-      '本轮先建回归网（B）再拆（C），拆分完成后必须下调此阈值。',
+      '1368 → 1280，理由：Wave 2 拆分（useDialog / useShortcutsHelp / useFileOps 三个 ' +
+      'composable 已抽出，commit beec8c8）。拆分前按 Spec §5-C 建好了回归网（B 任务），' +
+      '所以本次下调阈值是「先建网后收紧」而非「拆完就算了」。' +
+      '仍未达 300 红线：useDivider（分栏拖拽）、视图四态、滚动联动、保存编排' +
+      '这四类交互重、当前测试网覆盖不到的部分**刻意未拆**（拆了也没有安全网兜底），' +
+      '留给下一轮 —— 届时须先补相应行为测试再拆。',
   },
   'frontend/src/editor/createEditor.js': {
     limit: 387,
     reason:
       'CodeMirror 6 扩展装配集中地（extensions 数组 + 主题 + 事件绑定），' +
-      '拆分需先有 createEditor 的行为测试网。与 App.vue 同属既有债，' +
-      '待 C 任务一并处理。' +
-      '【下一轮优先目标】Wave 2 把 App.vue 拆到 900 以下后，本文件将成为' +
-      '最接近 300 红线的白名单项，白名单会开始掩盖真实超限文件 —— ' +
-      '届时应优先为 createEditor 建立行为测试网并拆分，而不是继续调阈值。',
+      '拆分需先有 createEditor 的行为测试网（当前无）。与 App.vue 同属既有债。' +
+      '【下一轮优先目标】当前 386 行，距 300 红线还有余量，但白名单里它最接近红线，' +
+      '白名单会开始掩盖真实超限文件 —— 届时应优先为 createEditor 建立行为测试网并拆分，' +
+      '而不是继续调阈值。（本轮实际行数 386，阈值 387 留 1 行余量，' +
+      '因为「只减 1 行」不代表债务已还清。）',
   },
   'frontend/src/editor/commands.js': {
     limit: 341,
     reason:
       '行操作命令集（增删复制移动/缩进/清除格式 + 选区转 HTML），' +
-      '命令数量多且共享同一 selection 上下文，过早拆分易破坏语义。' +
-      '与 App.vue 同属既有债，待 C 任务一并处理。' +
-      '【下一轮优先目标】Wave 2 把 App.vue 拆到 900 以下后，本文件将成为' +
-      '最接近 300 红线的白名单项 —— 与 createEditor.js 同为下一轮优先目标。',
+      '命令数量多且共享同一 selection 上下文，过早拆分易破坏语义（当前无行为测试网）。' +
+      '与 App.vue 同属既有债。' +
+      '【下一轮优先目标】当前 340 行 —— 与 createEditor.js 并列白名单里最接近红线的两项，' +
+      '处理优先级相同。（本轮实际行数 340，阈值 341 留 1 行余量。）',
   },
 }
+
+/**
+ * 非阻断 advisory 的阈值：白名单项行数达到 LINE_LIMIT 的 90% 即提示。
+ *
+ * [为什么需要它] 棘轮只在**超过** 300（或豁免阈值）时才响，于是会出现
+ * 「静默新增一笔白名单债」：一个 297 行的文件（useDocumentPersistence.js）
+ * 距 300 只差 3 行，再加几行就得登记豁免 —— 而登记本身不痛，**不登记才痛**
+ * （白名单一旦开始积累，掩盖的是真实超限文件）。
+ * 这条 advisory 让「即将新增债」在报告里显形，但**不阻断** ——
+ * 避免为了清一条 warning 去拆文件，那正是本轮反复讨论的「白名单掩盖问题」。
+ */
+const LINE_ADVISORY_RATIO = 0.9
 
 describe('契约 5 · 行数门禁（≤300 行）', () => {
   const codeFiles = listFiles(SRC).filter((f) => /\.(vue|js|mjs|ts)$/.test(f))
@@ -1025,5 +1019,64 @@ describe('契约 5 · 行数门禁（≤300 行）', () => {
       'frontend/src/App.vue' in LINE_EXEMPTIONS,
       'App.vue 应保留显式豁免（拆分完成前不摘掉，拆完下调阈值）'
     )
+  })
+
+  /**
+   * [非阻断 advisory] 白名单项接近红线时提示，但**不 fail**。
+   *
+   * 为什么要它：棘轮只在「超过阈值」时才响，所以「再加几行就得登记豁免」
+   * 这件事是**静默**的 —— 而登记本身不痛，**不登记才痛**（白名单一旦开始
+   * 积累，掩盖的是真实超限文件）。让它在报告里显形，是为了让「即将新增债」
+   * 被看见，而不是等它变成既成事实。
+   *
+   * 为什么不阻断：为了清一条 warning 去拆文件，本身就是本轮反复讨论的
+   * 「白名单掩盖问题」—— 拆分需要先有行为测试网，没有就硬拆等于加风险。
+   */
+  test('advisory · 白名单项接近红线时提示（不阻断）', (t) => {
+    const warn = []
+    for (const [r, meta] of Object.entries(LINE_EXEMPTIONS)) {
+      const f = codeFiles.find((x) => rel(x) === r)
+      if (!f) continue
+      const n = countLines(read(f))
+      if (n < LINE_LIMIT * LINE_ADVISORY_RATIO) continue
+      // 已远超红线（如 App.vue 1280）与「刚好逼近红线」是两回事，文案必须分开 ——
+      // 否则 427% 这种数字会让读者以为门禁坏了
+      warn.push(
+        n > LINE_LIMIT
+          ? `${r}：当前 ${n} 行，**已超红线 ${n - LINE_LIMIT} 行**（豁免中，阈值 ${meta.limit}）。` +
+              `作为第一优先目标：拆分前需先有它自己的行为测试网，否则拆不动、也测不了。`
+          : `${r}：当前 ${n} 行，**距 ${LINE_LIMIT} 行红线仅 ${LINE_LIMIT - n} 行**。` +
+              `拆分前需先有它自己的行为测试网，否则拆不动、也测不了。`
+      )
+    }
+    if (warn.length) {
+      t.diagnostic(`\n[advisory] 以下白名单项尚未还清债务：\n  - ` + warn.join('\n  - '))
+    }
+    // 刻意不做 assert —— advisory 的意义就是不阻断
+  })
+
+  /**
+   * [非阻断 advisory] 白名单外的文件也接近红线时同样提示。
+   * 这一条更关键：**它离红线很近，意味着下次改动就可能触发「新增豁免债」**。
+   */
+  test('advisory · 白名单外文件接近红线时提示（不阻断）', (t) => {
+    const warn = []
+    for (const f of codeFiles) {
+      const r = rel(f)
+      if (r in LINE_EXEMPTIONS) continue
+      const n = countLines(read(f))
+      if (n >= LINE_LIMIT * LINE_ADVISORY_RATIO && n <= LINE_LIMIT) {
+        warn.push(
+          `${r}：当前 ${n} 行，距 ${LINE_LIMIT} 行红线仅 ${LINE_LIMIT - n} 行。` +
+            `再加就会变成「新增一笔豁免债」—— **拆分前需先有它自己的行为测试网**。`
+        )
+      }
+    }
+    if (warn.length) {
+      t.diagnostic(
+        `\n[advisory] 以下文件接近 ${LINE_LIMIT} 行红线（尚未超限，故不阻断）：\n  - ` +
+          warn.join('\n  - ')
+      )
+    }
   })
 })
