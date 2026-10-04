@@ -41,7 +41,7 @@ const editorSrc = read('frontend/src/editor/createEditor.js')
  * 详见共享模块顶部注释）。本文件只保留「accelerator ↔ 文档」这一层的校验。
  * ==========================================================================*/
 
-const { parseBuildMenu, canonToken } = await import('./parse-main-menu.mjs')
+const { parseBuildMenu, canonToken, findAcceleratorDuplicates } = await import('./parse-main-menu.mjs')
 
 const menu = parseBuildMenu(goSrc)
 
@@ -221,6 +221,21 @@ for (const [label, why] of NO_SHORTCUT_MUST_BE_LABELED) {
       }
     }
   }
+}
+
+// 检查 5：main.go 内部 accelerator 唯一性（**独立于文档比对**）。
+//         为什么必须单独一道：下游按 accelerator 归并用的是 Map/Set，
+//         重复项会被 Set 静默去重 → 「文档 ↔ main.go」diff 仍显示一致、
+//         门禁报绿，而运行时行为不确定。这是键位 bug 的典型形态，
+//         仓库历史上真发生过（⌘P 曾同时被打印与导出 PDF 占用）。
+for (const dup of findAcceleratorDuplicates(goSrc)) {
+  const where = dup.occurrences
+    .map((o) => `main.go:${o.line} 「${o.label ?? '(动态标签)'}」${o.rawAccelerator}`)
+    .join('\n            ')
+  note('main.go 内 accelerator 重复绑定', dup.accelerator,
+    `该组合被绑了 ${dup.occurrences.length} 次：\n            ${where}\n` +
+    '同键绑定两项会导致点击行为不确定（后注册者可能覆盖前者），且不会报错。' +
+    '修法：改 main.go 让两者不同（注意 ⌘P 与 ⇧⌘P 是不同组合，不算冲突）。')
 }
 
 /* ============================================================================

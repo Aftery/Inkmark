@@ -343,3 +343,51 @@ export function parseBuildMenu(goSrc) {
 
   return { items, warnings, emitted }
 }
+
+/**
+ * main.go 内部 accelerator 唯一性检查。
+ *
+ * 【为什么需要它】
+ * 键位类 bug 的典型形态是「同一个组合在 main.go 里被绑了两次」。这类问题
+ * 靠「文档 ↔ main.go 集合比对」是**看不见**的：下游普遍用 Map/Set 按
+ * accelerator 归并，重复项会被 Set 静默去重，于是 diff 显示「一致」、
+ * 门禁报绿，而运行时行为不确定（macOS 上后注册的 accelerator 可能覆盖前者，
+ * 或两个菜单项共用一个键导致点击行为随平台而异）。
+ * 仓库历史上就有过同类真实事故：⌘P 曾同时被「打印」与「导出 PDF」占用
+ * （现为 ⌘P 打印 / ⇧⌘P 导出 PDF，见 main.go 的注释与 ADR-004 D-4 裁决）。
+ * 故唯一性必须是**独立于文档比对**的一道门禁。
+ *
+ * 【判定语义：规范化后完全相同才算冲突】
+ * keys.CmdOrCtrl("p")（⌘P）与 keys.Combo("p", CmdOrCtrlKey, ShiftKey)（⇧⌘P）
+ * 是**不同**组合，不算冲突——本模块的 parseAccelerator + formatAccelerator
+ * 已按 MOD_ORDER 规范化，⌘P 与 ⇧⌘P 归一后不同，因此天然区分。
+ * 同理 keys.OptionOrAlt("Up")（⌥↑）与 keys.Combo("Up", OptionOrAlt, Shift)
+ * （⇧⌥↑）也不同，不会误报。
+ *
+ * @param {string} goSrc main.go 全文
+ * @returns {{accelerator: string, occurrences: {label: string|null, line: number, kind: string, rawAccelerator: string}[]}[]}}
+ *          每项为一个被绑定多次的 accelerator 及其全部出现位置；无重复时返回 []
+ */
+export function findAcceleratorDuplicates(goSrc) {
+  const { items } = parseBuildMenu(goSrc)
+  /** @type {Map<string, {label: string|null, line: number, kind: string, rawAccelerator: string}[]>} */
+  const byAccel = new Map()
+  for (const it of items) {
+    // 只有「有 accelerator」的项参与唯一性判定；无 accelerator 项不占键位
+    if (!it.hasAccelerator || !it.accelerator) continue
+    if (!byAccel.has(it.accelerator)) byAccel.set(it.accelerator, [])
+    byAccel.get(it.accelerator).push({
+      label: it.label,
+      line: it.line,
+      kind: it.kind,
+      rawAccelerator: it.rawAccelerator,
+    })
+  }
+  const dups = []
+  for (const [accelerator, occurrences] of byAccel) {
+    if (occurrences.length > 1) dups.push({ accelerator, occurrences })
+  }
+  // 按 accelerator 排序，保证输出稳定可比对（避免 Map 插入序影响门禁 diff）
+  dups.sort((a, b) => (a.accelerator < b.accelerator ? -1 : a.accelerator > b.accelerator ? 1 : 0))
+  return dups
+}
