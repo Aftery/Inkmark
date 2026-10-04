@@ -21,7 +21,8 @@
 
 import { describe, test } from 'node:test'
 import assert from 'node:assert/strict'
-import { readFileSync, readdirSync, statSync, existsSync } from 'node:fs'
+import { readFileSync, readdirSync, statSync, existsSync, writeFileSync, rmSync } from 'node:fs'
+import { createHash } from 'node:crypto'
 import { fileURLToPath } from 'node:url'
 import { dirname, join, relative, sep } from 'node:path'
 
@@ -33,7 +34,144 @@ const FRONTEND = join(HERE, '..') // frontend
 const REPO = join(FRONTEND, '..') // 仓库根
 const SRC = join(FRONTEND, 'src')
 
+// ===========================================================================
+// 并发修改守卫（读两次 + 内容哈希比对）
+// ===========================================================================
+/**
+ * [注意] 为什么要这个守卫 —— 一条真实的协作事故链
+ *
+ *   2026-10-04：QA 做变异自证（临时改 main.go 再 git checkout 还原），
+ *   同时前端在跑 npm test（也在读 main.go）→ 读到半写状态 →
+ *   事件数暂时对不上 → 前端报「前端注册了 Go 侧不发出的 menu:new-file」。
+ *
+ *   危害不在这一次 flaky，而在**它污染所有自证结论**：
+ *   QA 报 fail、另一人报 flaky，各说各话，最后没人说得清是代码坏了还是环境在抖。
+ *
+ * 机制：被检查的文件在「读取时」留一份内容哈希，在「断言时」再读一次比对。
+ *   不一致 → 明确报「文件在测试运行期间发生变化」，并给出协作提示
+ *   （变异自证 / git 操作 / 另一个 agent 正在写仓库，要求串行执行）。
+ *
+ * 关键设计：**这类报告必须优先于任何业务差集断言**。否则会出现
+ *   「文件在变」被误报成「前端多注册了事件」—— 归因错，排查方向就废了。
+ */
+const STABILITY_GUARDS = new Map() // 仓库相对路径 -> {hash, size, at}
+
+/** 读文件并登记稳定性守卫（返回内容，供后续解析） */
+function readStable(absPath) {
+  const text = readFileSync(absPath, 'utf8')
+  const buf = readFileSync(absPath) // 再读一次原始字节用于哈希
+  const key = rel(absPath)
+  if (!STABILITY_GUARDS.has(key)) {
+    STABILITY_GUARDS.set(key, {
+      hash: createHash('sha256').update(buf).digest('hex'),
+      size: buf.length,
+      at: new Date().toISOString(),
+    })
+  }
+  return text
+}
+
+/**
+ * 计算指定文件列表中，哪些在登记哈希之后被改动过（返回漂移描述列表）。
+ * 抽成独立函数，便于守卫自检复用同一套逻辑 —— 自检必须走**生产代码路径**，
+ * 否则「测的是另一份实现」，守卫坏了自检也发现不了。
+ */
+function driftedFor(keys) {
+  const drifted = []
+  for (const key of keys) {
+    const snap = STABILITY_GUARDS.get(key)
+    if (!snap) continue
+    const abs = join(REPO, key)
+    if (!existsSync(abs)) {
+      drifted.push(`${key}（已被删除）`)
+      continue
+    }
+    const now = createHash('sha256').update(readFileSync(abs)).digest('hex')
+    if (now !== snap.hash) {
+      drifted.push(`${key}（读取时 size=${snap.size}，现在 size=${statSync(abs).size}）`)
+    }
+  }
+  return drifted
+}
+
+/**
+ * 断言所有已登记的文件在测试运行期间内容未变。
+ * 任何差集类断言之前都必须先过这一关。
+ */
+function assertFilesUnchanged(only) {
+  const targets = only
+    ? [only]
+    : [...STABILITY_GUARDS.keys()]
+  const drifted = driftedFor(targets)
+  assert.deepEqual(
+    drifted,
+    [],
+    drifted.length
+      ? '检测到仓库文件在测试运行期间发生变化：\n  ' +
+          drifted.join('\n  ') +
+          '\n这几乎不是代码缺陷，而是有其他进程正在并发修改仓库' +
+          '（变异自证 / git checkout / 另一个 agent 在写文件）。' +
+          '\n后果：基于半写状态的差集结果是**误导性的**（例如把「文件在变」' +
+          '报成「前端多注册了事件」）。' +
+          '\n请串行执行：一时刻只允许一个人写仓库，变异自证与他人验证必须错开。' +
+          '\n本条刻意排在所有业务差集断言之前，就是为了让归因指向「环境在抖」而非「代码坏了」。'
+      : ''
+  )
+}
+
 const read = (p) => readFileSync(p, 'utf8')
+
+// ===========================================================================
+// 并发守卫自检（证明守卫本身有效 —— 守卫失效等于没装）
+// ===========================================================================
+describe('并发守卫自检 · 守卫本身必须能发现漂移', () => {
+  // 用临时文件做「登记 → 改动 → 断言检出」的完整闭环，
+  // 避免靠真实仓库竞态来验证（竞态不可重复，等于没验证）。
+  test('readStable 登记后文件被改动，assertFilesUnchanged 必须检出并指名道姓', () => {
+    const tmp = join(SRC, '__guard_selftest.tmp')
+    const key = rel(tmp)
+    writeFileSync(tmp, 'original\n', 'utf8')
+    try {
+      readStable(tmp) // 登记哈希
+      // 未改动时不应报漂移
+      assert.deepEqual(
+        driftedFor([key]),
+        [],
+        '未改动时不应报漂移（守卫过于敏感会把正常测试也判红）'
+      )
+      // 改动后必须报漂移，且指名道姓
+      writeFileSync(tmp, 'CHANGED by concurrent writer\n', 'utf8')
+      const drifted = driftedFor([key])
+      assert.equal(drifted.length, 1, `改动后应恰好检出 1 个漂移，实际: ${JSON.stringify(drifted)}`)
+      assert.ok(
+        drifted[0].includes(key),
+        `漂移报告应指名文件 ${key}，实际: ${drifted[0]}`
+      )
+      // 还原后不再报漂移（证明报告不是一次性的）
+      writeFileSync(tmp, 'original\n', 'utf8')
+      assert.deepEqual(driftedFor([key]), [], '还原后不应再报漂移')
+    } finally {
+      rmSync(tmp, { force: true })
+      STABILITY_GUARDS.delete(key)
+    }
+  })
+
+  test('文件被删除也要检出（不能因读不到就静默跳过）', () => {
+    const tmp = join(SRC, '__guard_selftest2.tmp')
+    const key = rel(tmp)
+    writeFileSync(tmp, 'x\n', 'utf8')
+    try {
+      readStable(tmp)
+      rmSync(tmp, { force: true })
+      const drifted = driftedFor([key])
+      assert.equal(drifted.length, 1, '文件被删除应被检出')
+      assert.ok(drifted[0].includes('已被删除'), `应说明是删除: ${drifted[0]}`)
+    } finally {
+      rmSync(tmp, { force: true })
+      STABILITY_GUARDS.delete(key)
+    }
+  })
+})
 
 /** 递归列出目录下所有文件（跳过 node_modules / dist / .git 等噪声） */
 function listFiles(dir, acc = []) {
@@ -149,16 +287,29 @@ const FRONTEND_ONLY_EVENT_WHITELIST = {
 }
 
 describe('契约 1 · 菜单事件双向闭合（AC-03）', () => {
-  const goSrc = read(join(REPO, 'main.go'))
+  // 全部经 readStable 读取并登记哈希 —— 供下方稳定性守卫比对
+  const goSrc = readStable(join(REPO, 'main.go'))
   const emitted = collectGoEmitted(goSrc)
 
   const registered = new Map() // name -> {file, line}
   for (const f of EVENT_SURFACE_FILES) {
     const p = join(FRONTEND, f)
-    for (const [name, line] of collectFrontendRegistered(read(p))) {
+    for (const [name, line] of collectFrontendRegistered(readStable(p))) {
       if (!registered.has(name)) registered.set(name, { file: f, line })
     }
   }
+
+  /**
+   * [必须排在本组第一位] 被读文件在测试运行期间不得变化。
+   *
+   * 排在差集断言之前是关键：文件在变时，事件数会暂时对不上，
+   * 后续差集用例会报出「前端多注册了事件」这类**误导性**结论
+   * （2026-10-04 真实发生过一次并发 flaky）。先把归因钉成「环境在抖」，
+   * 后面的结论才可信。
+   */
+  test('被读文件在测试运行期间未被并发修改（并发守卫）', () => {
+    assertFilesUnchanged()
+  })
 
   test('main.go 确实发出了菜单事件（防止扫描规则本身失效而假通过）', () => {
     // 这条是「扫描器自检」：如果正则写坏了，上面的差集会是空集，测试会假通过
@@ -274,14 +425,28 @@ describe('契约 1 · 菜单事件双向闭合（AC-03）', () => {
 const CMD_P_RE = /keys\.CmdOrCtrl\(\s*["'`]p["'`]\s*\)/
 
 describe('契约 2 · ⌘P 键位唯一性', () => {
+  /**
+   * [必须排在本组第一位] 键位唯一性完全依赖「全仓内容在运行期不变」。
+   * 若他人此刻正在改 main.go（变异自证 / 拆分重构），本组会报出
+   * 「⌘P 出现 0 次或 2 次」这类**误导性**结论。
+   * 先确认文件稳定，再谈唯一性。
+   */
+  test('被读文件在测试运行期间未被并发修改（并发守卫）', () => {
+    assertFilesUnchanged()
+  })
+
   test('全仓 ⌘P 绑定只能出现 1 次（打印）', () => {
     const files = [
       ...listFiles(REPO).filter((f) => /\.(go|vue|js|mjs|ts|tsx|jsx)$/.test(f)),
     ]
     const hits = []
     for (const f of files) {
-      const text = read(f)
-      text.split('\n').forEach((line, i) => {
+      // 先剥注释：文档/注释里提到 keys.CmdOrCtrl("p")（例如解析器的 JSDoc 示例）
+      // 不是一次真实绑定，不该计入冲突数 —— 否则会被「说明性文本」误判成冲突。
+      // 这与缺陷 2 同源：解析器不能把「看起来像」当成「是」。
+      const text = stripComments(read(f))
+      const lines = text.split('\n')
+      lines.forEach((line, i) => {
         if (CMD_P_RE.test(line)) hits.push(`${rel(f)}:${i + 1}`)
       })
     }
@@ -458,8 +623,16 @@ function collectPrintBlocks(vueSrc) {
 }
 
 describe('契约 3 · 打印样式存在性', () => {
-  const appSrc = read(join(SRC, 'App.vue'))
+  const appSrc = readStable(join(SRC, 'App.vue'))
   const appBlocks = collectPrintBlocks(appSrc)
+
+  /**
+   * [必须排在本组第一位] Wave 2 正在拆 App.vue —— 这组读的就是 App.vue。
+   * 拆分期间文件必然在变，若不先拦一道，「遮罩没关」类结论会全是假的。
+   */
+  test('被读文件在测试运行期间未被并发修改（并发守卫）', () => {
+    assertFilesUnchanged()
+  })
 
   test('App.vue 必须有 @media print 块', () => {
     assert.ok(
@@ -771,6 +944,17 @@ const LINE_EXEMPTIONS = {
 
 describe('契约 5 · 行数门禁（≤300 行）', () => {
   const codeFiles = listFiles(SRC).filter((f) => /\.(vue|js|mjs|ts)$/.test(f))
+  // 全量登记哈希：本组要数所有源文件的行数，是最容易被并发写入影响的一组
+  // （Wave 2 正在拆 App.vue / 新建 composables，文件列表与行数都在变）
+  for (const f of codeFiles) readStable(f)
+
+  /**
+   * [必须排在本组第一位] 行数门禁对「文件在变」极其敏感：
+   * 拆分中途读到半成品文件，会同时污染「超限清单」与「豁免阈值」两侧结论。
+   */
+  test('被读文件在测试运行期间未被并发修改（并发守卫）', () => {
+    assertFilesUnchanged()
+  })
 
   test('扫描到足够多的源文件（防扫描规则失效而假通过）', () => {
     assert.ok(
