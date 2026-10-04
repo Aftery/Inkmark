@@ -92,5 +92,34 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # 显式装 Node，不依赖 runner 的隐式预装版本：p0-check-emoji.sh 正被改写为
+      # Node 实现（正则真源移到 scripts/emoji-pattern.mjs），隐式环境一旦漂移
+      # 就会变成「本地绿、CI 静默失败或直接报错」，正是要防的静默失效。
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
       - name: 扫描 emoji
         run: ./scripts/p0-check-emoji.sh frontend/src
+
+  # --------------------------------------------------------------------------
+  # 门禁 4：快捷键文档契约
+  # 卡的是「文档漂移」——2026-10-04 真的发生过两处：
+  #   1) README 写「导出 PDF ⌘P」，而 main.go 的 ⌘P 已是「打印」，导出 PDF 降为 ⌘⇧P；
+  #   2) App.vue 内联速查表把加粗写成 ⌘B，与同一张表里的大纲 ⌘B 撞车、含义冲突。
+  # 两处都是「人肉 review 没发现、用户直接看到」的错误，故固化为机检。
+  # 单独拆 job：失败时要能一眼看出是「文档与代码脱节」而非「测试挂了」。
+  # 脚本零依赖（node 内置 assert 都不用），Node 22 仅为与仓库其余门禁对齐。
+  # --------------------------------------------------------------------------
+  docs-contract:
+    name: 快捷键文档契约
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: 校验 README 与内联速查表的键位
+        run: node scripts/verify/verify-shortcuts.mjs
