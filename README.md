@@ -17,13 +17,26 @@
 | **三主题 + 跟随系统** | 浅 Indigo / 深 Indigo / 纸感赭石（`src/themes/tokens/design-tokens.css`）；`system` 偏好由 `theme.js` 解析为具体主题并写入；切换只改 `<html data-theme>`，**不重建编辑器** |
 | **大纲视图** | `⌘B` 开关（`src/components/Outline.vue` + `outline.js` + `useOutlineSync.js`），从文档提取标题层级、点击跳转 |
 | **历史快照** | `src/components/HistoryPanel.vue`：与自动保存**解耦**——编辑会话每 ≥3 分钟节流一次 + 显式保存 + 切换文件前 + 手动触发；轮转 / 去重由 Go 侧 `SnapshotWrite` 负责 |
-| 自动保存 | 改动后 800ms 防抖覆盖原文件，状态栏显示保存态 |
+| 自动保存 | 改动后 800ms 防抖覆盖原文件，状态栏显示保存态（间隔可配，见「设置面板」） |
 | **未保存关闭拦截** | 脏状态下关闭窗口弹系统确认（取消 → 阻止关闭；不保存退出 → 放行）；`dirty` 由前端同步到 Go（`OnBeforeClose`） |
 | **图片粘贴 / 拖拽插入** | 编辑器内粘贴或拖入图片 → 写入文档同级 `assets/`（`img-<时间戳>-<随机>.<ext>`），并插入 `![](assets/xxx)`（Go 侧 `SaveImage`） |
 | **文件树外部变更监听** | 打开文件夹后监听其**一层**增删改（fsnotify，`watcher.go`），去抖后自动刷新文件树 |
 | **代码块 Enter 跳出** | 光标位于紧邻结束围栏的空行时按 Enter，跳到围栏之后另起一行（`createEditor.js`） |
 | 原生菜单栏 | macOS 顶部系统菜单栏；Windows/Linux 窗口内菜单条（`main.go` 的 `buildMenu`，事件发给前端） |
-| 快捷键 | 文件 / 格式 / 视图三类，见下方「快捷键」 |
+| **设置面板** | `⌘,` 打开（`src/components/SettingsPanel.vue`）：外观 5 项（主题 / 正文字体 / 字号 / 行距 / 行宽）+ 编辑器 2 项（自动保存间隔 / 快照间隔），全部**实时生效**（改完立刻落 CSS 变量，无需重启）、**刷新保持**（`localStorage` 持久化），另有「恢复默认」（二次确认，防误触） |
+| **排版偏好** | 正文字体（系统 / 衬线 / 等宽）、字号（12–20px 六档，编辑区与预览区**成对同步**）、行距（紧凑 / 标准 / 宽松）、行宽（窄 / 标准 / 宽）——真源 `src/themes/prefs.js`，偏好走**文档作用域**变量 `--font-body-user`，不污染工具条 / 侧栏等界面外壳 |
+| **主题 4 档** | 跟随系统 / 浅色 / 深色 / 纸感（设置面板内可选，`⌘⇧L` 循环）；`system` 由 `theme.js` 解析为具体主题后写入，纸感主题不会被系统自动选中 |
+| **打印** | `⌘P` 走系统打印对话框（前端 `window.print()`）；`@media print` 已隐藏工具条 / 侧栏 / 各类遮罩，只输出正文 |
+| **查找 / 替换** | `⌘F` 查找、`⌘⌥F` 查找并替换（CodeMirror `searchKeymap` + 面板） |
+| **跳转到行** | `⌘L` 打开输入框跳转到指定行号（`App.vue` 全局 keydown） |
+| **行操作** | `⌥↑` / `⌥↓` 移动当前行，`⇧⌥↓` 向下复制当前行，`⌘⇧K` 删除当前行（VS Code 惯例） |
+| **视图缩放** | `⌘=` 放大 / `⌘-` 缩小 / `⌘0` 重置，80%~150% 六档；状态栏可点击循环。与基础字号**正交叠加**（`--zoom-scale` 独立变量） |
+| **视图开关（checkbox）** | 滚动联动 / 打字机模式 / 窗口置顶三个勾选项，状态真源在 Go 侧，前端挂载时回读同步 |
+| **最近打开** | 菜单「文件 ▸ 最近打开」子菜单：去重置顶、上限截断、`recents.json` 持久化，可一键清空（`app.go`） |
+| **重命名** | 菜单「文件 ▸ 重命名…」走应用内输入对话框（WKWebView 无 `window.prompt`） |
+| **插入目录** | 菜单「格式 ▸ 插入 ▸ 目录」，按标题层级生成 TOC（`editor/commands.js` 的 `insertToc`） |
+| 快捷键速查 | `⌘/` 打开应用内速查弹层；非 macOS 自动把 `⌘/⌥/⇧` 显示为 `Ctrl+/Alt+/Shift+` |
+| 快捷键 | 文件 / 编辑 / 格式 / 视图 / 帮助五类，**逐条对齐 `main.go` 的 accelerator**，见下方「快捷键」 |
 | 文本导出 | HTML：内联样式模板（46rem 行宽）；PDF：macOS 一键直出（WebKit/PDFKit，dark→light 主题映射，467px 版心），其它平台走系统打印（`src/export/`） |
 | 本地文件管理 | 打开文件 / 打开文件夹，递归懒加载文件树（`app.go` + `src/components/FileTree.vue`） |
 | 编辑/预览滚动联动 | 双栏模式下**标题锚点映射** + 互斥锁（`App.vue` / `useOutlineSync.js`） |
@@ -31,33 +44,66 @@
 
 ## 快捷键
 
+> **本节由 `main.go` 的 `buildMenu()` 逐条抄录生成**，非人工记忆。改菜单 accelerator 时必须同步本节，
+> 否则 README 会与实际键位脱节。标「无快捷键」的项只能走菜单点击（原因见表下说明）。
+> 非 macOS 平台上 `⌘` / `⌥` / `⇧` 分别读作 `Ctrl` / `Alt` / `Shift`。
+
 **文件**
 
 | 操作 | 快捷键 |
 |---|---|
-| 打开文件 | ⌘O |
-| 打开文件夹 | ⌘⇧O |
+| 新建文件 | ⌘N |
+| 打开文件… | ⌘O |
+| 打开文件夹… | ⌘⇧O |
+| 最近打开 ▸ | 无快捷键（子菜单，列表由 `recents.json` 驱动，含「清空最近列表」） |
 | 保存 | ⌘S |
-| 另存为 | ⌘⇧S |
-| 历史快照面板 | 菜单「文件 ▸ 历史快照…」（无快捷键，ADR-004 避免误触） |
-| 导出 HTML | ⌘⇧H |
-| 导出 PDF | ⌘P |
+| 另存为… | ⌘⇧S |
+| 重命名… | 无快捷键（走应用内输入对话框） |
+| 历史快照… | 无快捷键（ADR-004：低频入口，避免误触） |
+| 打印… | ⌘P |
+| 导出 HTML… | ⌘⇧H |
+| 导出 PDF… | ⌘⇧P |
+| 设置… | ⌘, |
+
+> `⌘P` = 打印、`⌘⇧P` = 导出 PDF：对齐 macOS 惯例（系统「打印…」占 ⌘P，导出 PDF 让位为 ⌘⇧P）。
+> 导出 PDF 菜单项在非 macOS 平台文案变为「导出 PDF…（本平台走系统打印）」——一键直出依赖 WebKit/PDFKit（ADR-003）。
+
+**编辑**
+
+macOS 的「编辑」菜单是系统 Role（撤销 / 剪切 / 拷贝 / 粘贴 / 全选 由系统提供 `undo:` / `cut:` 等原生 selector），
+自定义项**追加不进去**（Wails v2.16 实测限制），故下表中除剪贴板类外的键位在 macOS 上由**编辑器 keymap** 承接。
+
+| 操作 | 快捷键 | macOS 承载方式 |
+|---|---|---|
+| 查找… | ⌘F | 编辑器 `searchKeymap` |
+| 查找并替换… | ⌘⌥F | 编辑器 `openSearchPanel` |
+| 跳转到行… | ⌘L | `App.vue` 全局 keydown |
+| 上移行 | ⌥↑ | 编辑器 `moveLineUp` |
+| 下移行 | ⌥↓ | 编辑器 `moveLineDown` |
+| 重复当前行 | ⇧⌥↓ | 编辑器 `copyLineDown`（⇧⌥↑ 为「在上方复制」，仅 keymap） |
+| 删除当前行 | ⌘⇧K | 编辑器 `deleteLine` |
+| 撤销 / 重做 / 剪切 / 拷贝 / 粘贴 / 全选 | 系统 ⌘Z / ⌘⇧Z / ⌘X / ⌘C / ⌘V / ⌘A | 系统 Role（Windows/Linux 下菜单项**刻意不设 accelerator**，让按键直达 WebView） |
+| 复制选区为 HTML | 无快捷键 | 仅菜单入口 |
+
+> 完整入口见菜单「帮助 → 快捷键速查」（⌘/）。
 
 **格式（WYSIWYG 命令）**
 
 | 操作 | 快捷键 |
 |---|---|
+| 标题一 – 标题六 | ⌘⌥1 … ⌘⌥6 |
 | 加粗 | ⌘⇧B |
 | 斜体 | ⌘I |
 | 删除线 | ⌘⇧X |
 | 行内代码 | ⌘` |
 | 链接 | ⌘K |
-| 标题 1–6 | ⌘⌥1 … ⌘⌥6 |
 | 无序列表 | ⌘⇧8 |
 | 有序列表 | ⌘⇧7 |
 | 任务列表 | ⌘⇧9 |
 | 引用块 | ⌘⇧. |
 | 代码块 | ⌘⌥C |
+| 插入 ▸ 图片… / 表格 / 分割线 / 目录 | 无快捷键（仅菜单） |
+| 列表缩进 / 列表反缩进 / 清除格式 | 无快捷键（缩进由编辑器 Tab / Shift+Tab 承接，菜单挂 Tab 会全局吞键） |
 
 > 菜单「格式」各项事件名与前端 `formatCommands` 接线清单严格一致，改名需前后端同步。
 
@@ -69,9 +115,22 @@
 | 预览模式 | ⌘2 |
 | 双栏模式 | ⌘3 |
 | 阅读模式 | ⌘4 |
-| 专注模式 | ⌘⇧F |
+| 专注模式 | ⌘⇧F（Esc 退出） |
 | 显示 / 隐藏大纲 | ⌘B |
+| 滚动联动 | 无快捷键（勾选项，菜单「视图」内） |
+| 打字机模式 | 无快捷键（勾选项） |
+| 放大 / 缩小 / 重置缩放 | ⌘= / ⌘- / ⌘0 |
 | 切换主题 | ⌘⇧L |
+| 窗口置顶 | 无快捷键（勾选项） |
+
+> 三个勾选项（滚动联动 / 打字机 / 窗口置顶）的状态真源在 Go 侧，前端挂载时回读同步。
+
+**帮助**
+
+| 操作 | 快捷键 |
+|---|---|
+| 快捷键速查 | ⌘/ |
+| Markdown 语法示例 | 无快捷键（仅菜单） |
 
 ## 目录结构
 
@@ -84,7 +143,11 @@ inkmark/
 ├── export_pdf_darwin.go # PDF 一键直出（WKWebView/PDFKit）
 ├── export_pdf_other.go  # 非 darwin 平台的降级实现
 ├── wails.json           # Wails 配置（前后端构建命令）
-├── docs/                # 架构决策记录（architecture/ADR-00x）、规格（spec/）、方案（plan/）
+├── scripts/             # 工程门禁脚本
+│   ├── p0-check-emoji.sh    # P0-1 emoji 扫描（零容忍，CI 门禁之一）
+│   └── verify/              # 图标 / 主题契约的 Node 校验脚本
+├── docs/                # 架构决策记录（architecture/ADR-00x）、规格（spec/）、方案（plan/）、
+│                        # 悬而未决登记册（decisions/OPEN-DECISIONS.md）
 └── frontend/
     ├── src/
     │   ├── App.vue          # 主界面：视图四态、顶栏、侧栏、双栏布局、滚动联动、预览防抖
@@ -92,9 +155,12 @@ inkmark/
     │   ├── preview/         # markdown-it 渲染配置（highlight.js core 按需注册）
     │   ├── export/          # HTML / PDF 导出模板与 exporters
     │   ├── composables/     # useDocumentPersistence（保存/快照/导出）/ useOutlineSync（大纲+滚动锚点）
-    │   ├── components/      # FileTree / TreeNode / Outline / HistoryPanel / Toolbar / StatusBar + icons/
-    │   └── themes/          # tokens/design-tokens.css（单文件三主题 Token）+ theme.js + base.css / preview.css
-    └── wailsjs/             # Wails 自动生成的 IPC 绑定（勿手改）
+    │   ├── components/      # FileTree / TreeNode / Outline / HistoryPanel / Toolbar / StatusBar
+    │   │                    # + SettingsPanel（设置面板）/ SegmentedControl（分段控件）/ icons/
+    │   └── themes/          # tokens/design-tokens.css（单文件三主题 Token）+ theme.js（主题解析）
+    │                        # + prefs.js（排版/编辑器偏好唯一真源）/ base.css / preview.css
+    ├── tests/           # node:test 测试网（prefs 行为 + 静态契约），需 Node ≥22
+    └── wailsjs/         # Wails 自动生成的 IPC 绑定（勿手改）
 ```
 
 > **图标与许可**：界面图标几何衍生自 [Lucide](https://github.com/lucide-icons/lucide)（版本 `lucide-static@1.48.0`），
@@ -103,6 +169,10 @@ inkmark/
 > 所有图标统一经 `frontend/src/components/icons/AppIcon.vue` 渲染，几何数据与语义白名单在 `paths.js`。
 
 ## 常用命令
+
+> **前置**：`wails` 命令依赖 PATH 中的 `go`。本机 go 由 Homebrew 安装，**未加入默认 PATH**，
+> 需先自行把 go 的 bin 目录加入 PATH（常见位置 `/usr/local/opt/go/bin` 或 `/usr/local/bin`，
+> 以 `go version` 能否跑通为准），否则报 `exec: "go": executable file not found`。
 
 ```bash
 # 开发（热重载，推荐）
@@ -115,8 +185,34 @@ inkmark/
 ~/go/bin/wails generate module
 ```
 
+### 前端
+
+```bash
+cd frontend
+npm install
+
+npm run dev      # 本地开发服务器
+npm run build    # 生产构建 → frontend/dist
+npm test         # 测试网（prefs 行为 + 静态契约），【需 Node ≥22】
+```
+
+> - `npm test` 用的是 Node **内置** `node:test`（无第三方测试依赖），因此**必须 Node ≥22**；低版本会报 `node --test` 不可用。
+> - `npm run build` 会**删掉被 git 跟踪的 `frontend/dist/.gitkeep`**（构建清空 `dist/` 的副作用）。
+>   该文件是 `main.go` 的 `//go:embed all:frontend/dist` 内嵌目标，**删掉会导致 Go 编译报 "no matching files found"**。
+>   本地每次 build 后请执行 `git checkout -- frontend/dist/.gitkeep` 还原。
+
+### 门禁脚本
+
+```bash
+# P0-1：emoji 扫描（零容忍，CI 同款）
+./scripts/p0-check-emoji.sh frontend/src
+```
+
+> 改了 `prefs.js`、菜单事件或 `App.vue` 结构后，**先跑 `npm test`** 再提交——
+> 测试网里有静态契约检查（菜单事件双向闭合、⌘P 唯一性、打印样式存在性、行数门禁）会拦住静默失效。
+
 > 本机网络需镜像：Go 依赖走 `GOPROXY=https://goproxy.cn,direct`，npm 走 `--registry=https://registry.npmmirror.com`，且先 `unset` 环境里的代理变量。
-> `wails` 命令依赖 PATH 中的 `go`；若报 `exec: "go": executable file not found`，先 `export PATH="/usr/local/bin:$PATH"`。
+
 
 ## 设计要点（为什么这么做）
 
@@ -135,7 +231,18 @@ inkmark/
 
 ## 已知问题与待办
 
-暂无。原历史待办五项（预览渲染防抖 / 代码块 Enter 跳出 / 未保存关闭拦截 / 图片粘贴拖拽 / 文件树外部变更监听）已于 2026-10-02 全部完成。
+> 本节如实登记**未完成**与**未验证**项。原「暂无」说法已移除——README 声称无待办是失真的。
+
+| # | 项 | 状态 / 说明 |
+|---|-----|------------|
+| 1 | **`App.vue` 拆分** | 进行中。`App.vue` 现 1368 行，远超 300 行门禁，「一个文件塞四件事」（视图四态 / 侧栏 / 对话框 / 焦点模式）。计划按职责抽 composable（`useDialog` / `useShortcutsHelp` / `useFileOps` / `useDivider`）到 `frontend/src/composables/`，**要求行为零变更**。拆分完成后本条更新为实际结果，并下调行数门禁豁免阈值。 |
+| 2 | **Windows / Linux 未真机验证** | 菜单分流代码**已写**（`main.go` 中 `GOOS != darwin` 时自建「编辑」菜单，因为非 darwin 的 `processMenu` 不展开 Role，直接 `Append(EditMenu())` 会渲染成空菜单），但**从未在真实 Windows / Linux 上跑过**，该分支的渲染与事件接线均属未验证。导出 PDF 在这些平台降级为系统打印。 |
+| 3 | **原生 accelerator 端到端未自动化验证** | `⌘P` / `⌘,` 等由**原生菜单 accelerator** 承接的键位，需在图形环境**人工点按确认**。本机无 GUI 自动化权限，自动化测试覆盖不到这一层——测试网只能校验「声明与接线一致」，不能证明「按下真的触发」。 |
+| 4 | **导出产物是否跟随正文字体偏好（OPEN）** | 导出 HTML / PDF 仍读主题级 `--font-body`，**不跟随**用户「正文字体」偏好（R4 只把偏好作用域收进编辑区 + 预览区，未动导出链路）。当前倾向**不跟随**（导出物是分发格式，应保持主题级稳定排版），待用户确认。见 [`docs/decisions/OPEN-DECISIONS.md`](docs/decisions/OPEN-DECISIONS.md)。 |
+| 5 | **零多标签页 / 多文档** | 当前一次只开一个文档。ADR-005 已预留 `dirty` 语义的升级路径（`dirty` 现为单一不变量：编辑器内存内容 ≠ 磁盘内容），多文档需重新定义「关闭哪个文档」的判定。 |
+| 6 | **无拼写检查（刻意不做）** | CodeMirror 的 lint 对 CJK 基本无效，中文写作场景是**伪需求**，故不引入。英文拼写需自行接第三方 lint 扩展。 |
+
+历史待办五项（预览渲染防抖 / 代码块 Enter 跳出 / 未保存关闭拦截 / 图片粘贴拖拽 / 文件树外部变更监听）已于 2026-10-02 全部完成。
 
 ## 关于插件系统（现在不做）
 

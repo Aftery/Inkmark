@@ -1,0 +1,96 @@
+# Inkmark CI 门禁
+# ============================================================================
+# 为什么需要这个文件：改动本仓库的人（前端 / Go / 菜单）此前全靠人肉执行门禁，
+# 漏跑一次不会有人知道，直到线上静默失效。本 workflow 把四条门禁固化到每次 push / PR：
+#
+#   1. frontend —— 测试网（npm test）+ 生产构建（npm run build）
+#   2. go       —— 静态检查（go vet）+ 真实编译（go build）
+#   3. p0-emoji —— P0-1 零 emoji 绝对规则
+#
+# 平台锁 macos-latest：本应用的 export_pdf_darwin.go 依赖 WebKit / PDFKit
+# （ADR-003 路线 A′），只有 macOS runner 能编出真实产物；Linux runner 走
+# export_pdf_other.go 降级分支，等于没验证到真正的代码路径。
+# ============================================================================
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  # --------------------------------------------------------------------------
+  # 门禁 1：前端 —— 测试网 + 生产构建
+  # 卡的是「运行时静默失效」：prefs 的受管 CSS 变量契约、菜单事件双向闭合、
+  # ⌘P 唯一性、打印样式存在性、行数门禁都在 npm test 里；build 额外保证
+  # vite 打包不炸（且产物真能生成，main.go 的 //go:embed 才不会拿到空目录）。
+  # Node 必须钉 22：npm test 用的是 Node 内置 node:test，低版本没有该命令。
+  # --------------------------------------------------------------------------
+  frontend:
+    name: 前端测试与构建
+    runs-on: macos-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      # 用 ci 而非 install：严格按 lockfile 装依赖，保证本地与 CI 装出同一棵树
+      - name: 安装依赖
+        run: npm ci
+
+      - name: 运行测试网
+        run: npm test
+
+      - name: 生产构建
+        run: npm run build
+
+  # --------------------------------------------------------------------------
+  # 门禁 2：Go —— 静态检查 + 真实编译
+  # 卡的是「编译期才暴露的问题」：go vet 抓 printf 动词错、不可达代码、
+  # 锁复制等；go build 保证菜单 / app / 快照 / 监听 / 导出五个文件真能编出二进制。
+  # 只 vet 不 build 是不够的——vet 不做链接，cgo 相关的导出代码要 build 才暴露问题。
+  # 版本取 go.mod 的 go 指令（1.25.0）；不写 'stable' 之类会随 runner 漂移的别名，
+  # 避免「昨天能编今天不能编」。这里显式钉住小版本线即可，具体补丁由 setup-go 解析。
+  # --------------------------------------------------------------------------
+  go:
+    name: Go 静态检查与编译
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.25'
+          cache: true
+
+      - name: 静态检查
+        run: go vet ./...
+
+      - name: 编译
+        run: go build -o /dev/null .
+
+  # --------------------------------------------------------------------------
+  # 门禁 3：P0-1 零 emoji
+  # 卡的是专家团 P0 绝对规则：界面不得用 emoji 表情当功能图标（图标必须是
+  # 统一描边、可矢量缩放的 SVG，且统一经 AppIcon.vue 渲染）。
+  # 这条规则靠人眼 review 抓不干净（README / 注释 / 字符串里都可能混进去），
+  # 必须在 CI 里机检。脚本复用仓库内同一份正则，不在 workflow 里另写一份。
+  # 单独拆成 job：它与 build/test 无关，失败时要能一眼看出是「P0 违规」
+  # 而不是「测试挂了」，便于定位。
+  # --------------------------------------------------------------------------
+  p0-emoji:
+    name: P0 emoji 门禁
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 扫描 emoji
+        run: ./scripts/p0-check-emoji.sh frontend/src
