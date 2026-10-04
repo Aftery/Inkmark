@@ -24,6 +24,10 @@ import SettingsPanel from './components/SettingsPanel.vue'
 import AppIcon from './components/icons/AppIcon.vue'
 import { useDocumentPersistence } from './composables/useDocumentPersistence'
 import { useOutlineSync } from './composables/useOutlineSync'
+// Wave 2 拆分（行为零变更）：三个纯逻辑 composable，依赖由调用方注入
+import { useDialog } from './composables/useDialog'
+import { useShortcutsHelp } from './composables/useShortcutsHelp'
+import { useFileOps } from './composables/useFileOps'
 import { getTheme, onThemeChange } from './themes/theme.js'
 import { OpenFileDialog, OpenDirectoryDialog, ReadFile } from '../wailsjs/go/main/App'
 import { EventsOn } from '../wailsjs/runtime/runtime'
@@ -481,76 +485,26 @@ function toggleOutline() {
 }
 
 // ---------- 文件操作 ----------
+// 实现已抽到 composables/useFileOps.js：依赖全部由下方注入，
+// 「打开/切换文件的唯一落点」loadDocument 也由它导出（菜单事件与语法示例共用）。
+// 时序契约（快照先于破坏性、必须走 replaceDocument）见该文件注释。
 
-// 打开 / 切换文件的唯一落点：整份替换文档 + 同步全部派生状态。
-// 必须走 replaceDocument（setState 全量重绘）而非 dispatch —— 原因见 createEditor.js
-// 中对 CM6 tile 增量崩溃的说明，那正是「编辑器还停在旧文件、预览已是新文件」的成因。
-function loadDocument(content, path) {
-  replaceDocument(editor, content)
-  syncAfterDocReplace(content)
-  filePath.value = path
-  persistence.resetSession()
-  // 登记最近打开（Go 侧持久化 + 重建「最近打开」子菜单）；未落盘文档跳过
-  if (path) {
-    try { window.go?.main?.App?.AddRecent?.(path) } catch { /* 浏览器预览无绑定 */ }
-  }
-}
-
-async function openFile() {
-  const path = await OpenFileDialog()
-  if (!path) return
-  await persistence.snapshotBoundary() // 破坏性边界前先留一份快照
-  const content = await ReadFile(path)
-  loadDocument(content, path)
-}
-
-async function openFolder() {
-  const path = await OpenDirectoryDialog()
-  if (!path) return
-  folderPath.value = path
-  // 打开文件夹自动展开侧栏（文件 tab）
-  sidebarOpen.value = true
-  sidebarTab.value = 'files'
-}
-
-async function openTreeFile(path) {
-  if (path === filePath.value) return
-  await persistence.snapshotBoundary()
-  const content = await ReadFile(path)
-  loadDocument(content, path)
-}
-
-// ---------- 文件：新建 / 重命名 ----------
-
-async function newFile() {
-  await persistence.snapshotBoundary() // 破坏性边界前先留一份快照
-  loadDocument('', '')
-  showToast('已新建文件，⌘S 保存到磁盘')
-}
-
-async function renameFile() {
-  if (!filePath.value) {
-    showToast('请先保存文档（⌘S）再重命名', true)
-    return
-  }
-  const api = window.go?.main?.App
-  if (!api?.RenameFile) {
-    showToast('当前环境不支持重命名', true)
-    return
-  }
-  const name = await askInput({ title: '重命名', value: title.value })
-  if (name === null) return
-  const trimmed = name.trim()
-  if (!trimmed || trimmed === title.value) return
-  try {
-    const newPath = await api.RenameFile(filePath.value, trimmed)
-    filePath.value = newPath
-    api.AddRecent?.(newPath)
-    showToast('已重命名')
-  } catch (err) {
-    showToast(`重命名失败：${err?.message || err}`, true)
-  }
-}
+const { loadDocument, openFile, openFolder, openTreeFile, newFile, renameFile } = useFileOps({
+  getEditor: () => editor,
+  replaceDocument,
+  syncAfterDocReplace,
+  filePath,
+  folderPath,
+  title,
+  sidebarOpen,
+  sidebarTab,
+  persistence,
+  showToast,
+  askInput,
+  ReadFile,
+  OpenFileDialog,
+  OpenDirectoryDialog,
+})
 
 // ---------- 查找 / 替换（CM search 面板；⌘F/⌘⌥F） ----------
 
@@ -594,11 +548,12 @@ function copySelectionAsHtml() {
 }
 
 // ---------- 帮助：快捷键速查 / Markdown 语法示例 ----------
+// 速查弹层的状态、fmtKey 与 SHORTCUTS 表已抽到 composables/useShortcutsHelp.js
+// （SHORTCUTS 的正确性由 scripts/verify/verify-shortcuts.mjs 门禁保证，改键位须同步）
 
-const showShortcuts = ref(false)
+const { showShortcuts, fmtKey, SHORTCUTS } = useShortcutsHelp()
 // 设置面板可见性（menu:open-settings ⌘, 打开；Esc / 关闭按钮收起）
 const showSettings = ref(false)
-const IS_MAC = /mac/i.test(navigator.platform || '')
 
 // 关闭设置面板并把焦点交还编辑器（AC-07）。
 // 恢复默认等偏好副作用已在 prefs.js 内实时落地，这里只管可见性与焦点。
@@ -606,34 +561,6 @@ function closeSettings() {
   showSettings.value = false
   editor?.focus()
 }
-
-// 键位展示：mac 用符号，其余平台把 ⌘/⌥/⇧ 替换为 Ctrl/Alt/Shift
-function fmtKey(k) {
-  if (IS_MAC) return k
-  return k.replace(/⌘/g, 'Ctrl+').replace(/⌥/g, 'Alt+').replace(/⇧/g, 'Shift+')
-}
-
-const SHORTCUTS = [
-  ['⌘N', '新建文件'],
-  ['⌘O / ⌘⇧O', '打开文件 / 打开文件夹'],
-  ['⌘S / ⌘⇧S', '保存 / 另存为'],
-  ['⌘P', '打印'],
-  ['⇧⌘P', '导出 PDF'],
-  ['⌘F', '查找（⌘⌥F 查找替换）'],
-  ['⌘L', '跳转到行'],
-  ['⌥↑ / ⌥↓', '上移 / 下移行'],
-  ['⇧⌥↑ / ⇧⌥↓', '在上方 / 下方复制当前行'],
-  ['⌘⇧K', '删除当前行'],
-  ['⌘⇧B / ⌘I', '加粗 / 斜体'],
-  ['⌘K', '插入链接'],
-  ['⌘1 ~ ⌘4', '编辑 / 预览 / 双栏 / 阅读'],
-  ['⌘⇧F', '专注模式（Esc 退出）'],
-  ['⌘B', '显示 / 隐藏大纲'],
-  ['⌘= / ⌘- / ⌘0', '放大 / 缩小 / 重置缩放'],
-  ['⌘⇧L', '切换主题'],
-  ['⌘,', '设置'],
-  ['⌘/', '快捷键速查'],
-]
 
 const SYNTAX_DOC = `# Markdown 语法速览
 
@@ -684,24 +611,9 @@ async function loadSyntaxSample() {
 
 // ---------- 输入对话框（跳转到行 / 重命名共用） ----------
 // WKWebView 不支持 window.prompt（静默返回 null），自己搭一个最小对话框。
+// 实现已抽到 composables/useDialog.js（纯逻辑，无外部依赖）
 
-const dialog = ref({ show: false, title: '', placeholder: '', value: '', _resolve: null })
-const dialogInputEl = ref(null)
-
-function askInput({ title, placeholder = '', value = '' }) {
-  return new Promise((resolve) => {
-    dialog.value = { show: true, title, placeholder, value, _resolve: resolve }
-    nextTick(() => dialogInputEl.value?.focus())
-  })
-}
-
-function closeDialog(result) {
-  const d = dialog.value
-  if (!d.show) return
-  d.show = false
-  d._resolve?.(result)
-  d._resolve = null
-}
+const { dialog, dialogInputEl, askInput, closeDialog } = useDialog()
 
 
 // ---------- 格式化命令（菜单事件 / 工具条共用） ----------

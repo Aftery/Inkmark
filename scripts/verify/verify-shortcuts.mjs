@@ -142,16 +142,37 @@ for (const line of readmeSection.split('\n')) {
   for (const [k, src] of extractKeys(line)) if (!readmeKeys.has(k)) readmeKeys.set(k, src)
 }
 
-// B) App.vue 的 SHORTCUTS 数组（应用内速查弹层的数据源）
-//    按【行】截取到独立的收尾 `]`：不能用 indexOf(']')，数组第一行 ['⌘N', …]
-//    里就含 `]`，会把整段切成 35 字符（第一版踩过，只读到 1 个键位）。
-const shortcutsStart = appVue.indexOf('const SHORTCUTS = [')
-const shortcutsEnd = appVue.indexOf('\n]', shortcutsStart)
-if (shortcutsStart === -1 || shortcutsEnd === -1) {
-  console.error('无法定位 App.vue 的 SHORTCUTS 数组（格式已变？）')
+// B) 应用内速查表 SHORTCUTS（速查弹层的数据源）
+//    Wave 2 起它从 App.vue 移到 frontend/src/composables/useShortcutsHelp.js，
+//    故【按候选列表】找第一个含该数组的文件，而不是写死路径 ——
+//    将来再挪位置只需加一行候选，不必改解析逻辑。
+//    另：按【行】截取到独立的收尾 `]`，不能用 indexOf(']')，数组第一行
+//    ['⌘N', …] 里就含 `]`，会把整段切成 35 字符（第一版踩过，只读到 1 个键位）。
+const SHORTCUTS_CANDIDATES = [
+  'frontend/src/composables/useShortcutsHelp.js',
+  'frontend/src/App.vue',
+]
+let shortcutsFile = null
+let shortcutsBlock = null
+for (const p of SHORTCUTS_CANDIDATES) {
+  let text
+  try { text = read(p) } catch { continue }
+  const s = text.indexOf('const SHORTCUTS = [')
+  if (s === -1) continue
+  const e = text.indexOf('\n]', s)
+  if (e === -1) continue
+  shortcutsFile = p
+  shortcutsBlock = text.slice(s, e + 2)
+  break
+}
+if (!shortcutsBlock) {
+  console.error(
+    `未能定位 SHORTCUTS 数组（已查找：${SHORTCUTS_CANDIDATES.join('、')}）。\n` +
+    '速查表是「用户直接看到的键位副本」，定位失败必须报错——' +
+    '静默跳过会让应用内速查表与 main.go 脱节而无人发现。'
+  )
   process.exit(1)
 }
-const shortcutsBlock = appVue.slice(shortcutsStart, shortcutsEnd + 2)
 const shortcutsKeys = extractKeys(shortcutsBlock)
 
 /* ============================================================================
@@ -163,7 +184,7 @@ const note = (kind, key, detail) => problems.push({ kind, key, detail })
 
 const TARGETS = [
   { name: 'README.md 快捷键节', keys: readmeKeys, requireComplete: true },
-  { name: "App.vue SHORTCUTS（应用内速查表）", keys: shortcutsKeys, requireComplete: false },
+  { name: `${shortcutsFile} SHORTCUTS（应用内速查表）`, keys: shortcutsKeys, requireComplete: false },
 ]
 
 for (const t of TARGETS) {
@@ -215,7 +236,7 @@ for (const [label, why] of NO_SHORTCUT_MUST_BE_LABELED) {
     for (const [k] of extractKeys(keyStr)) {
       if (seen.has(k) && seen.get(k) !== label) {
         note('内联速查表键位冲突（同一键两义）', k,
-          `App.vue SHORTCUTS：「${seen.get(k)}」与「${label}」都绑到 ${k}\n            原文行: ${line.trim()}`)
+          `${shortcutsFile} SHORTCUTS：「${seen.get(k)}」与「${label}」都绑到 ${k}\n            原文行: ${line.trim()}`)
       } else if (!seen.has(k)) {
         seen.set(k, label)
       }
@@ -248,7 +269,7 @@ console.log(`main.go 声明的 accelerator: ${goAccel.size} 项`)
 console.log(`无 accelerator 的菜单项:     ${noAccelLabels.length} 项（须在 README 显式标注）`)
 console.log(`显式豁免:                   系统 Role ${SYSTEM_ROLE.size} 项 + 编辑器 keymap ${KEYMAP.size} 项`)
 console.log(`README 快捷键节键位:         ${readmeKeys.size} 项`)
-console.log(`App.vue SHORTCUTS 键位:      ${shortcutsKeys.size} 项`)
+console.log(`速查表 SHORTCUTS 键位:      ${shortcutsKeys.size} 项（${shortcutsFile}）`)
 console.log('')
 
 if (problems.length === 0) {
@@ -262,5 +283,5 @@ for (const p of problems) {
   console.log(`            ${p.detail}`)
 }
 console.log('')
-console.log('修法：改 main.go 的 accelerator（真源）后，同步 README「快捷键」节与 App.vue SHORTCUTS。')
+console.log('修法：改 main.go 的 accelerator（真源）后，同步 README「快捷键」节与速查表 SHORTCUTS。')
 process.exit(1)
