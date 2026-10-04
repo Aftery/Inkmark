@@ -34,133 +34,26 @@ const editorSrc = read('frontend/src/editor/createEditor.js')
 
 /* ============================================================================
  * 一、解析 main.go 的 buildMenu()，得到 accelerator 真源集合
+ *
+ * 解析逻辑已抽到共享模块 scripts/verify/parse-main-menu.mjs —— 与
+ * frontend/tests/contracts.test.mjs 共用同一份实现，避免两处独立解析
+ * main.go 语法、各自失效（历史上已因实参切分与引号判断出过 3 次静默假绿，
+ * 详见共享模块顶部注释）。本文件只保留「accelerator ↔ 文档」这一层的校验。
  * ==========================================================================*/
 
-// 按【括号 / 引号感知】切分实参。不能用逗号正则：keys.CmdOrCtrl("n") 内部含逗号，
-// 正则会在那里提前截断，产生「静默解析错误」（本脚本第一版就踩过）。
-function splitArgs(argStr) {
-  const out = []
-  let depth = 0
-  let cur = ''
-  let inStr = false
-  let inTick = false
-  for (let i = 0; i < argStr.length; i++) {
-    const c = argStr[i]
-    if (inStr) {
-      cur += c
-      if (c === '\\') { cur += argStr[++i] ?? ''; continue }
-      if (c === '"') inStr = false
-      continue
-    }
-    if (inTick) { cur += c; if (c === '`') inTick = false; continue }
-    if (c === '"') { inStr = true; cur += c; continue }
-    if (c === '`') { inTick = true; cur += c; continue }
-    if (c === '(' || c === '[') { depth++; cur += c; continue }
-    if (c === ')' || c === ']') { depth--; cur += c; continue }
-    if (c === ',' && depth === 0) { out.push(cur.trim()); cur = ''; continue }
-    cur += c
-  }
-  if (cur.trim() !== '') out.push(cur.trim())
-  return out
-}
+const { parseBuildMenu, canonToken } = await import('./parse-main-menu.mjs')
 
-// 找出所有 `.Method(` 调用并返回其实参数组
-function findCalls(text, method) {
-  const res = []
-  const needle = `.${method}(`
-  let i = 0
-  while (true) {
-    const at = text.indexOf(needle, i)
-    if (at === -1) break
-    const argStart = at + needle.length
-    let depth = 1
-    let j = argStart
-    let inStr = false
-    let inTick = false
-    while (j < text.length && depth > 0) {
-      const c = text[j]
-      if (inStr) {
-        if (c === '\\') { j += 2; continue }
-        if (c === '"') inStr = false
-        j++; continue
-      }
-      if (inTick) { if (c === '`') inTick = false; j++; continue }
-      if (c === '"') { inStr = true; j++; continue }
-      if (c === '`') { inTick = true; j++; continue }
-      if (c === '(') depth++
-      else if (c === ')') depth--
-      j++
-    }
-    res.push({ args: splitArgs(text.slice(argStart, j - 1)) })
-    i = j
-  }
-  return res
-}
+const menu = parseBuildMenu(goSrc)
 
-const MOD_CONST = {
-  CmdOrCtrlKey: 'cmd', ShiftKey: 'shift', OptionOrAltKey: 'alt', ControlKey: 'ctrl',
-}
-const KEY_DISPLAY = { Up: '↑', Down: '↓' }
-// 规范修饰键顺序：⌘ → ⇧ → ⌥ → ⌃（README 与代码里书写顺序可能不同，需归一）
-const MOD_ORDER = ['cmd', 'shift', 'alt', 'ctrl']
-const MOD_DISPLAY = { cmd: '⌘', shift: '⇧', alt: '⌥', ctrl: '⌃' }
-
-function parseAccel(expr) {
-  const e = (expr || '').trim()
-  if (e === '' || e === 'nil') return null
-  let m = e.match(/^keys\.CmdOrCtrl\("(.+)"\)$/)
-  if (m) return { mods: ['cmd'], key: m[1] }
-  m = e.match(/^keys\.OptionOrAlt\("(.+)"\)$/)
-  if (m) return { mods: ['alt'], key: m[1] }
-  m = e.match(/^keys\.Combo\("(.+)"(.*)\)$/s)
-  if (m) {
-    const mods = []
-    for (const mm of m[2].matchAll(/keys\.(\w+)/g)) {
-      if (!MOD_CONST[mm[1]]) throw new Error(`未知修饰键常量 keys.${mm[1]}（${e}）`)
-      mods.push(MOD_CONST[mm[1]])
-    }
-    return { mods, key: m[1] }
-  }
-  throw new Error(`未识别的 accelerator 表达式: ${e}`)
-}
-
-const normKey = (k) => KEY_DISPLAY[k] ?? (/^[a-z]$/.test(k) ? k.toUpperCase() : k)
-
-/** 归一为可比字符串：{mods:['shift','cmd'],key:'p'} → '⌘⇧P' */
-function canon(a) {
-  if (!a) return null
-  const mods = MOD_ORDER.filter((x) => a.mods.includes(x)).map((x) => MOD_DISPLAY[x]).join('')
-  return mods + normKey(a.key)
-}
-
-const menuBody = goSrc.slice(goSrc.indexOf('func buildMenu(app *App) *menu.Menu {'))
-
-/** accelerator → 菜单项标签 */
+/** accelerator → 菜单项标签（真源集合） */
 const goAccel = new Map()
 /** 无 accelerator 的菜单项标签（用于「必须显式标注无快捷键」检查） */
 const noAccelLabels = []
 
-// unquote 还原标签字面量；返回 null 表示它是变量（如 exportPDFTitle）或动态标签
-// （如最近打开的 labels[i]，运行期才确定），这类不进无 accelerator 清单。
-const unquote = (s) => (s.startsWith('"') ? JSON.parse(s) : null)
-
-for (const c of findCalls(menuBody, 'AddText')) {
-  const [labelRaw, accelSrc] = c.args
-  const a = canon(parseAccel(accelSrc))
-  if (a) goAccel.set(a, unquote(labelRaw) ?? labelRaw)
-  else {
-    const label = unquote(labelRaw)
-    if (label) noAccelLabels.push(label)
-  }
-}
-for (const c of findCalls(menuBody, 'AddCheckbox')) {
-  const [labelRaw, , accelSrc] = c.args // 第 2 参是 bool 初始态，accelerator 在第 3 参
-  const a = canon(parseAccel(accelSrc))
-  if (a) goAccel.set(a, unquote(labelRaw) ?? labelRaw)
-  else {
-    const label = unquote(labelRaw)
-    if (label) noAccelLabels.push(label)
-  }
+for (const it of menu.items) {
+  if (it.accelerator) goAccel.set(it.accelerator, it.label ?? it.rawAccelerator)
+  // 动态标签（如最近打开的 labels[i]）无法静态枚举，不进「须标注无快捷键」清单
+  else if (it.label && !it.labelIsDynamic) noAccelLabels.push(it.label)
 }
 
 /* ============================================================================
@@ -212,22 +105,11 @@ const KEYCHARS = 'A-Za-z0-9.,`/=↑↓-'
 const TOKEN = new RegExp(`[⌘⇧⌥⌃]+[${KEYCHARS}]`, 'g')
 
 /**
- * 把文档里写的键位归一到与 main.go 相同的规范形式。
- * 必须做：文档可能按习惯写成 '⇧⌘P'，而 main.go 的 canon() 产出 '⌘⇧P'，
+ * 把文档里写的键位归一到与 main.go 相同的规范形式 —— 由共享模块提供。
+ * 必须做：文档可能按习惯写成 '⇧⌘P'，而 main.go 侧产出 '⌘⇧P'，
  * 同一组合却因修饰键顺序不同被判成「捏造键位」的假警报。
- * （macOS 官方书写惯例正是 ⌘⇧P 在前，此处以 main.go 的 MOD_ORDER 为准。）
+ * （macOS 官方书写惯例正是 ⌘⇧P 在前，此处以共享模块的 MOD_ORDER 为准。）
  */
-function canonToken(tok) {
-  const mods = []
-  for (const ch of tok) {
-    if (MOD_DISPLAY.cmd === ch) mods.push('cmd')
-    else if (MOD_DISPLAY.shift === ch) mods.push('shift')
-    else if (MOD_DISPLAY.alt === ch) mods.push('alt')
-    else if (MOD_DISPLAY.ctrl === ch) mods.push('ctrl')
-  }
-  const key = tok.slice(mods.length)
-  return canon({ mods, key })
-}
 
 /** 从一段文本里抽键位（已归一）；区间写法（⌘1 … ⌘4）先展开 */
 function extractKeys(text) {
