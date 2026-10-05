@@ -7,9 +7,12 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io"
+	"net/http"
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -363,4 +366,146 @@ func (a *App) SaveImage(docPath, dataBase64, ext string) (string, error) {
 		return "", fmt.Errorf("写入图片失败: %w", err)
 	}
 	return "assets/" + name, nil
+}
+
+// ---------- 检查更新 ----------
+
+const (
+	// latestReleaseAPI GitHub「最新 Release」接口。仓库尚无 Release 时返回 404。
+	latestReleaseAPI = "https://api.github.com/repos/Aftery/Inkmark/releases/latest"
+	// releasesPageURL 兜底下载页（无 Release / 解析失败时指向 releases 列表）。
+	releasesPageURL = "https://github.com/Aftery/Inkmark/releases"
+	// updateCheckTimeout 网络超时上限，避免离线时界面长时间无响应。
+	updateCheckTimeout = 5 * time.Second
+)
+
+// UpdateInfo 是「检查更新」的返回结构（直接序列化给前端）。
+//
+// 用 Status 做三态判定而非让前端猜 note 文本：
+//   - "update" 发现新版本；"latest" 已是最新；"error" 无法检查。
+// error 覆盖超时 / 网络失败 / 404（仓库无 Release）/ 非 200 / 返回不可解析等情况，
+// 绝不会谎报「已是最新」。
+type UpdateInfo struct {
+	Status    string `json:"status"`
+	Current   string `json:"current"`
+	Latest    string `json:"latest"`
+	HasUpdate bool   `json:"hasUpdate"`
+	URL       string `json:"url"`
+	Note      string `json:"note"`
+}
+
+// semver 只保留比较所需的 major.minor.patch（预发布/构建后缀在解析时丢弃）。
+type semver [3]int
+
+// parseSemver 从版本串取 major.minor.patch：容忍前导 v 与 -/+ 后缀，缺段补 0。
+// 段数超过 3 或含非十进制数字则失败（返回 ok=false，调用方据此走「无法比较」）。
+func parseSemver(s string) (semver, bool) {
+	s = strings.TrimSpace(s)
+	s = strings.TrimPrefix(s, "v")
+	if i := strings.IndexAny(s, "-+"); i >= 0 {
+		s = s[:i]
+	}
+	if s == "" {
+		return semver{}, false
+	}
+	parts := strings.Split(s, ".")
+	if len(parts) > 3 {
+		return semver{}, false
+	}
+	var out semver
+	for i, p := range parts {
+		n, err := strconv.Atoi(p)
+		if err != nil || n < 0 {
+			return semver{}, false
+		}
+		out[i] = n
+	}
+	return out, true
+}
+
+// compareSemver 返回 a 与 b 的大小关系：a>b 为正，a==b 为 0，a<b 为负。
+func compareSemver(a, b semver) int {
+	for i := 0; i < 3; i++ {
+		if a[i] != b[i] {
+			if a[i] > b[i] {
+				return 1
+			}
+			return -1
+		}
+	}
+	return 0
+}
+
+// CheckUpdate 查询 GitHub 最新 Release，与当前 version 做 semver 比较。
+//
+// 全程优雅降级：任何失败都返回 Status="error" + 可读 Note，不抛 panic、不弹窗，
+// 也绝不把「查不到」伪装成「已是最新」。
+// 说明：仓库当前尚无 Release，接口会返回 404 → 本函数返回「无法检查更新：暂无已发布的版本」，
+// 这是预期内的正常降级，打出第一个 Release 后即返回真实结果。
+func (a *App) CheckUpdate() UpdateInfo {
+	info := UpdateInfo{Status: "error", Current: version, URL: releasesPageURL}
+
+	ctx, cancel := context.WithTimeout(context.Background(), updateCheckTimeout)
+	defer cancel()
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, latestReleaseAPI, nil)
+	if err != nil {
+		info.Note = "无法检查更新：请求构造失败"
+		return info
+	}
+	// GitHub API 要求带 User-Agent，缺失会被 403。
+	req.Header.Set("User-Agent", "Inkmark-UpdateCheck")
+	req.Header.Set("Accept", "application/vnd.github+json")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		info.Note = "无法检查更新：网络连接失败"
+		return info
+	}
+	defer resp.Body.Close()
+
+	switch {
+	case resp.StatusCode == http.StatusNotFound:
+		info.Note = "无法检查更新：暂无已发布的版本"
+		return info
+	case resp.StatusCode != http.StatusOK:
+		info.Note = fmt.Sprintf("无法检查更新：服务返回 %d", resp.StatusCode)
+		return info
+	}
+
+	var release struct {
+		TagName string `json:"tag_name"`
+		HTMLURL string `json:"html_url"`
+	}
+	// 限长读取，避免异常响应体撑爆内存。
+	if err := json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&release); err != nil {
+		info.Note = "无法检查更新：返回内容无法解析"
+		return info
+	}
+	latest := strings.TrimSpace(release.TagName)
+	if latest == "" {
+		info.Note = "无法检查更新：发布信息缺少版本号"
+		return info
+	}
+	if release.HTMLURL != "" {
+		info.URL = release.HTMLURL
+	}
+	info.Latest = latest
+
+	cur, curOK := parseSemver(version)
+	lat, latOK := parseSemver(latest)
+	if !curOK || !latOK {
+		info.Note = "无法检查更新：版本号格式无法比较"
+		return info
+	}
+
+	if compareSemver(lat, cur) > 0 {
+		info.Status = "update"
+		info.HasUpdate = true
+		info.Note = fmt.Sprintf("发现新版本 %s（当前 %s）", latest, version)
+		return info
+	}
+	info.Status = "latest"
+	info.Note = fmt.Sprintf("已是最新版本（%s）", version)
+	return info
 }

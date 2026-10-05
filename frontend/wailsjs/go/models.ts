@@ -36,6 +36,28 @@ export namespace main {
 	        this.contentHash = source["contentHash"];
 	    }
 	}
+	export class UpdateInfo {
+	    status: string;
+	    current: string;
+	    latest: string;
+	    hasUpdate: boolean;
+	    url: string;
+	    note: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new UpdateInfo(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.status = source["status"];
+	        this.current = source["current"];
+	        this.latest = source["latest"];
+	        this.hasUpdate = source["hasUpdate"];
+	        this.url = source["url"];
+	        this.note = source["note"];
+	    }
+	}
 
 }
 

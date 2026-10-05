@@ -4,6 +4,8 @@ import {main} from '../models';
 
 export function AddRecent(arg1:string):Promise<void>;
 
+export function CheckUpdate():Promise<main.UpdateInfo>;
+
 export function ClearRecents():Promise<void>;
 
 export function ExportPDF(arg1:string,arg2:string):Promise<string>;
@@ -39,6 +41,8 @@ export function SnapshotList(arg1:string):Promise<Array<main.SnapshotMeta>>;
 export function SnapshotRead(arg1:string,arg2:string):Promise<string>;
 
 export function SnapshotWrite(arg1:string,arg2:string):Promise<void>;
+
+export function Version():Promise<string>;
 
 export function WatchDir(arg1:string):Promise<void>;
 

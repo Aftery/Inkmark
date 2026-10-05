@@ -6,6 +6,10 @@ export function AddRecent(arg1) {
   return window['go']['main']['App']['AddRecent'](arg1);
 }
 
+export function CheckUpdate() {
+  return window['go']['main']['App']['CheckUpdate']();
+}
+
 export function ClearRecents() {
   return window['go']['main']['App']['ClearRecents']();
 }
@@ -76,6 +80,10 @@ export function SnapshotRead(arg1, arg2) {
 
 export function SnapshotWrite(arg1, arg2) {
   return window['go']['main']['App']['SnapshotWrite'](arg1, arg2);
+}
+
+export function Version() {
+  return window['go']['main']['App']['Version']();
 }
 
 export function WatchDir(arg1) {
