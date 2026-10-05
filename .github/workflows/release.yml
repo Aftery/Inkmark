@@ -1,0 +1,207 @@
+# Inkmark 多平台发布 workflow
+# ============================================================================
+# 为什么需要这个文件：本地只能编出当前平台的产物，而 Wails【不支持跨平台编译】
+#   —— macOS 上编不出 Windows 的 .exe（依赖 WebView2），也编不出 Linux 的 ELF
+#   （依赖 webkit2gtk）。要出三平台产物，必须让三个 runner 各自原生编译，
+#   故这里用 matrix 跨 runner，而不是在一个 runner 上加 -platform 硬编。
+#
+# 与既有 ci.yml 的分工：ci.yml 是「每次 push/PR 的门禁」，只验代码正确性；
+# 本文件是「打 tag 才跑的发布线」，负责产出可下载的多平台二进制。
+#
+# 触发：
+#   - push tag `v*`      —— 正式发布（tag 即版本号真源）
+#   - workflow_dispatch  —— 手动试跑（只产 artifact，不建 Release，避免脏 tag）
+#
+# 三个 job 各自卡什么：
+#   version           —— 从 tag 派生版本号（v0.2.0 → 0.2.0），统一注入；
+#                        卡「版本号漂移」：三平台各抄一次，错一个就出一个版本不一致的包。
+#   build（matrix×3） —— 三平台各自原生编译；卡「产物真能在目标平台跑」：
+#       macos-latest   → darwin/universal（Intel+Apple Silicon 通用）→ .app 打包 zip
+#       windows-latest → windows/amd64 → inkmark.exe
+#       ubuntu-latest  → linux/amd64（必须 -tags webkit2_41，见下）→ 二进制 tar.gz
+#   release           —— 汇总三平台产物建 Release；只在 push tag 时执行。
+#
+# Linux 系统依赖（已查 Wails 官方安装文档核准，非凭记忆）：
+#   Wails 默认链接 webkit2gtk-4.0 + libsoup-2.4；但 ubuntu-latest（24.04）已移除
+#   libwebkit2gtk-4.0-dev，只剩 4.1。官方文档明确：Ubuntu 24.04+ 需装
+#   libwebkit2gtk-4.1-dev 并在构建时加 `-tags webkit2_41`。
+#   源码佐证：wails v2.16 的 cgo 指令 `#cgo webkit2_41 pkg-config: webkit2gtk-4.1 libsoup-3.0`，
+#   默认分支则是 `pkg-config: webkit2gtk-4.0 libsoup-2.4`。
+#   故 Linux job 装 libgtk-3-dev + libwebkit2gtk-4.1-dev + libsoup-3.0-dev 并加该 tag。
+# ============================================================================
+
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      version:
+        description: '手动试跑时的版本号（如 0.2.0）；留空则用当前 tag，非 tag 时回落 0.0.0-dev'
+        required: false
+        default: ''
+
+# softprops/action-gh-release 需要写 contents 才能建 Release / 上传附件
+permissions:
+  contents: write
+
+jobs:
+  # --------------------------------------------------------------------------
+  # job 1：派生版本号（唯一真源 = tag）
+  # --------------------------------------------------------------------------
+  version:
+    name: 派生版本号
+    runs-on: ubuntu-latest
+    outputs:
+      value: ${{ steps.derive.outputs.version }}
+    steps:
+      - name: 从 tag / 手动输入派生
+        id: derive
+        shell: bash
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
+        run: |
+          if [ -n "$INPUT_VERSION" ]; then
+            ver="$INPUT_VERSION"
+          elif [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
+            ver="${GITHUB_REF_NAME#v}"
+          else
+            # 手动在分支上试跑：给一个明确占位，避免把分支名当版本号注入
+            ver="0.0.0-dev"
+          fi
+          echo "version=$ver" >> "$GITHUB_OUTPUT"
+          echo "本次发布版本号：$ver"
+
+  # --------------------------------------------------------------------------
+  # job 2：三平台原生编译（matrix 跨 runner）
+  # --------------------------------------------------------------------------
+  build:
+    name: 构建 ${{ matrix.name }}
+    needs: version
+    strategy:
+      # 某个平台失败不取消其余平台，便于一次性看清哪些平台有问题
+      fail-fast: false
+      matrix:
+        include:
+          - name: macOS universal
+            os: macos-latest
+            platform: darwin/universal
+            tags: ''
+            artifact: inkmark-macos-universal
+          - name: Windows amd64
+            os: windows-latest
+            platform: windows/amd64
+            tags: ''
+            artifact: inkmark-windows-amd64
+          - name: Linux amd64
+            os: ubuntu-latest
+            platform: linux/amd64
+            tags: 'webkit2_41' # 见文件头：Ubuntu 24.04 只有 webkit2gtk-4.1
+            artifact: inkmark-linux-amd64
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.25'
+          cache: true
+
+      # wails build 会自动执行 wails.json 里的 frontend:install / frontend:build，
+      # 故 Node 必须先就位（前端产物要喂给 main.go 的 //go:embed all:frontend/dist）。
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      # Wails CLI 钉到与 go.mod 相同的 v2.16.0，避免 @latest 漂移导致「昨天能编今天不能编」
+      - name: 安装 Wails CLI
+        shell: bash
+        run: |
+          go install github.com/wailsapp/wails/v2/cmd/wails@v2.16.0
+          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
+
+      # 仅 Linux：官方文档核准的包名与版本（Ubuntu 24.04 走 webkit2gtk-4.1）
+      - name: 安装 Linux 系统依赖（webkit2gtk-4.1）
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential pkg-config \
+            libgtk-3-dev \
+            libwebkit2gtk-4.1-dev \
+            libsoup-3.0-dev
+
+      - name: 编译（注入 -ldflags 版本号）
+        shell: bash
+        env:
+          APP_VERSION: ${{ needs.version.outputs.value }}
+        run: |
+          wails build \
+            -platform "${{ matrix.platform }}" \
+            -tags "${{ matrix.tags }}" \
+            -ldflags "-X main.version=${APP_VERSION}" \
+            -trimpath
+        # -tags 为空（macOS/Windows）时 wails 的 buildtags.Parse 返回 nil，等价不传
+
+      - name: 打包产物
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          case "${{ matrix.os }}" in
+            macos-*)
+              # ditto 保留 .app 内的符号链接 / 权限位，zip 后仍可正常双击运行
+              ditto -c -k --keepParent build/bin/inkmark.app dist/inkmark-macos-universal.zip
+              ;;
+            windows-*)
+              cp build/bin/inkmark.exe dist/inkmark-windows-amd64.exe
+              ;;
+            ubuntu-*)
+              # 裸二进制 + 运行期依赖说明（运行不需要 4.0 开发包，4.1 运行时库即可）
+              tar -C build/bin -czf dist/inkmark-linux-amd64.tar.gz inkmark
+              printf '%s\n' \
+                'Inkmark Linux (amd64) 运行说明' \
+                '1) 本包用 webkit2gtk-4.1 构建，运行需系统已装 libwebkit2gtk-4.1-0 与 libgtk-3-0。' \
+                '   Debian/Ubuntu: sudo apt install libwebkit2gtk-4.1-0 libgtk-3-0' \
+                '2) 解包并运行：tar -xzf inkmark-linux-amd64.tar.gz && chmod +x inkmark && ./inkmark' \
+                '3) 导出 PDF 在本平台走系统打印（一键直出依赖 macOS WebKit/PDFKit）。' \
+                > dist/inkmark-linux-amd64.txt
+              ;;
+          esac
+          ls -l dist
+
+      - name: 上传产物
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: dist/*
+          if-no-files-found: error
+
+  # --------------------------------------------------------------------------
+  # job 3：汇总并建 Release（仅 push tag 时执行；手动试跑不建 Release）
+  # --------------------------------------------------------------------------
+  release:
+    name: 发布 GitHub Release
+    needs: [version, build]
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    steps:
+      - name: 下载三平台产物
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: 列出待发布文件
+        run: ls -lR dist
+
+      - name: 建 Release 并附加产物
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ needs.version.outputs.value }}
+          name: Inkmark v${{ needs.version.outputs.value }}
+          generate_release_notes: true
+          files: dist/*
