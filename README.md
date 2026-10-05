@@ -48,6 +48,21 @@
 > 否则 README 会与实际键位脱节。标「无快捷键」的项只能走菜单点击（原因见表下说明）。
 > 非 macOS 平台上 `⌘` / `⌥` / `⇧` 分别读作 `Ctrl` / `Alt` / `Shift`。
 
+**应用菜单（Inkmark）**
+
+> 排在菜单栏第一位（Apple HIG）。「关于」改为应用内弹层，版本号取自 Go 单一真源（`App.Version()`）。
+
+| 操作 | 快捷键 |
+|---|---|
+| 关于 Inkmark | 无快捷键 |
+| 设置… | ⌘, |
+| 检查更新… | 无快捷键 |
+| 隐藏 Inkmark | ⌘H |
+| 退出 Inkmark | ⌘Q |
+
+> 「隐藏其他」「显示全部」为 Wails 能力边界所限**未提供**（无 `hideOtherApplications` / `unhideAllApplications` API），
+> 详见下方「已知问题与待办」。
+
 **文件**
 
 | 操作 | 快捷键 |
@@ -63,7 +78,6 @@
 | 打印… | ⌘P |
 | 导出 HTML… | ⌘⇧H |
 | 导出 PDF… | ⌘⇧P |
-| 设置… | ⌘, |
 
 > `⌘P` = 打印、`⌘⇧P` = 导出 PDF：对齐 macOS 惯例（系统「打印…」占 ⌘P，导出 PDF 让位为 ⌘⇧P）。
 > 导出 PDF 菜单项在非 macOS 平台文案变为「导出 PDF…（本平台走系统打印）」——一键直出依赖 WebKit/PDFKit（ADR-003）。
@@ -235,12 +249,14 @@ npm test         # 测试网（prefs 行为 + 静态契约），【需 Node ≥2
 
 | # | 项 | 状态 / 说明 |
 |---|-----|------------|
-| 1 | **`App.vue` 拆分** | 进行中。`App.vue` 现 1368 行，远超 300 行门禁，「一个文件塞四件事」（视图四态 / 侧栏 / 对话框 / 焦点模式）。计划按职责抽 composable（`useDialog` / `useShortcutsHelp` / `useFileOps` / `useDivider`）到 `frontend/src/composables/`，**要求行为零变更**。拆分完成后本条更新为实际结果，并下调行数门禁豁免阈值。 |
+| 1 | **`App.vue` 拆分** | 进行中。`App.vue` 现 1352 行，远超 300 行门禁，「一个文件塞四件事」（视图四态 / 侧栏 / 对话框 / 焦点模式）。计划按职责抽 composable（`useDialog` / `useShortcutsHelp` / `useFileOps` / `useDivider`）到 `frontend/src/composables/`，**要求行为零变更**。拆分完成后本条更新为实际结果，并下调行数门禁豁免阈值。 |
 | 2 | **Windows / Linux 未真机验证** | 菜单分流代码**已写**（`main.go` 中 `GOOS != darwin` 时自建「编辑」菜单，因为非 darwin 的 `processMenu` 不展开 Role，直接 `Append(EditMenu())` 会渲染成空菜单），但**从未在真实 Windows / Linux 上跑过**，该分支的渲染与事件接线均属未验证。导出 PDF 在这些平台降级为系统打印。 |
 | 3 | **原生 accelerator 端到端未自动化验证** | `⌘P` / `⌘,` 等由**原生菜单 accelerator** 承接的键位，需在图形环境**人工点按确认**。本机无 GUI 自动化权限，自动化测试覆盖不到这一层——测试网只能校验「声明与接线一致」，不能证明「按下真的触发」。 |
 | 4 | **导出产物是否跟随正文字体偏好（OPEN）** | 导出 HTML / PDF 仍读主题级 `--font-body`，**不跟随**用户「正文字体」偏好（R4 只把偏好作用域收进编辑区 + 预览区，未动导出链路）。当前倾向**不跟随**（导出物是分发格式，应保持主题级稳定排版），待用户确认。见 [`docs/decisions/OPEN-DECISIONS.md`](docs/decisions/OPEN-DECISIONS.md)。 |
 | 5 | **零多标签页 / 多文档** | 当前一次只开一个文档。ADR-005 已预留 `dirty` 语义的升级路径（`dirty` 现为单一不变量：编辑器内存内容 ≠ 磁盘内容），多文档需重新定义「关闭哪个文档」的判定。 |
 | 6 | **无拼写检查（刻意不做）** | CodeMirror 的 lint 对 CJK 基本无效，中文写作场景是**伪需求**，故不引入。英文拼写需自行接第三方 lint 扩展。 |
+| 7 | **应用菜单缺「隐藏其他 / 显示全部」（Wails 能力边界，非本仓缺陷）** | Wails v2.16 只导出 `AppMenu` / `EditMenu` / `WindowMenu` 三个**整体** Role，不导出 `About` / `Hide` / `HideOthers` / `UnHide` / `Quit` 等**单项** Role（`pkg/menu/menuroles.go` 中全被注释；darwin `appendRole` 的 switch 也只认 1/2/3）。因此应用菜单只能全用自建文本项：`隐藏 Inkmark ⌘H` 走 `runtime.Hide`、`退出 Inkmark ⌘Q` 走 `runtime.Quit`；而 `hideOtherApplications` / `unhideAllApplications` **无对应 API**，故「隐藏其他」「显示全部」两项**直接省略**（未置灰、未用 `runtime.Show` 冒充）。 |
+| 8 | **放弃系统原生「关于」面板（同 7 的连带）** | 因单项 `About` Role 不可用，应用菜单的「关于 Inkmark」改为**应用内自建弹层**（复用既有对话框样式），内容为应用名 / 版本 / 一行描述 / 仓库链接；版本号取自 Go 单一真源 `App.Version()`（`version.go`），前端不另写版本号。 |
 
 历史待办五项（预览渲染防抖 / 代码块 Enter 跳出 / 未保存关闭拦截 / 图片粘贴拖拽 / 文件树外部变更监听）已于 2026-10-02 全部完成。
 

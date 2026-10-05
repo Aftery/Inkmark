@@ -29,8 +29,8 @@ import { useDialog } from './composables/useDialog'
 import { useShortcutsHelp } from './composables/useShortcutsHelp'
 import { useFileOps } from './composables/useFileOps'
 import { getTheme, onThemeChange } from './themes/theme.js'
-import { OpenFileDialog, OpenDirectoryDialog, ReadFile } from '../wailsjs/go/main/App'
-import { EventsOn } from '../wailsjs/runtime/runtime'
+import { OpenFileDialog, OpenDirectoryDialog, ReadFile, CheckUpdate, Version } from '../wailsjs/go/main/App'
+import { EventsOn, BrowserOpenURL } from '../wailsjs/runtime/runtime'
 import './themes/index.css'
 
 // ---------- 状态 ----------
@@ -445,6 +445,7 @@ function onGlobalKeydown(e) {
     // 设置面板是模态弹层：优先级仅次于输入对话框，Esc 关闭并把焦点交还编辑器
     else if (showSettings.value) closeSettings()
     else if (showShortcuts.value) showShortcuts.value = false
+    else if (showAbout.value) closeAbout()
     else if (focusOn.value) toggleFocus()
     else if (persistence.showHistory.value) persistence.showHistory.value = false
     else if (viewMode.value === 'reading') exitReading()
@@ -573,6 +574,45 @@ function closeSettings() {
   editor?.focus()
 }
 
+// ---------- 关于 Inkmark / 检查更新（应用菜单） ----------
+// 版本号【只从 Go 单一真源读】（App.Version() ← version.go 的 var version），
+// 前端不另写一份，避免两处版本号漂移。
+const showAbout = ref(false)
+const aboutVersion = ref('')
+
+async function openAbout() {
+  try { aboutVersion.value = await Version() } catch { aboutVersion.value = '' }
+  showAbout.value = true
+}
+
+function closeAbout() {
+  showAbout.value = false
+  editor?.focus()
+}
+
+const REPO_URL = 'https://github.com/Aftery/Inkmark'
+
+// 检查更新：调 Go 侧 CheckUpdate（超时 / 网络失败 / 仓库无 Release 都返回
+// status="error"，绝不抛错）。按三态提示，error 一律如实说「无法检查更新」，
+// 不得谎报「已是最新」。
+async function checkUpdate() {
+  let info
+  try {
+    info = await CheckUpdate()
+  } catch (err) {
+    showToast(`无法检查更新：${err?.message || err}`, true)
+    return
+  }
+  if (info.status === 'update') {
+    showToast(`发现新版本 ${info.latest}，正在打开下载页…`)
+    if (info.url) BrowserOpenURL(info.url)
+  } else if (info.status === 'latest') {
+    showToast(info.note || `已是最新版本（${info.current}）`)
+  } else {
+    showToast(info.note || '无法检查更新', true)
+  }
+}
+
 const SYNTAX_DOC = `# Markdown 语法速览
 
 一份可玩的速查表：左边是源码，右边看效果。改一改，立刻看到变化。
@@ -696,6 +736,8 @@ safeEventsOn('menu:export-pdf', () => { flushPreview(); persistence.exportPdf() 
 // @media print（App.vue 末尾）已隐藏 chrome、只输出预览区，故无需另做打印视图。
 safeEventsOn('menu:print', () => { flushPreview(); window.print() })
 safeEventsOn('menu:open-settings', () => { showSettings.value = true })
+safeEventsOn('menu:about', () => { openAbout() })
+safeEventsOn('menu:check-update', () => { checkUpdate() })
 safeEventsOn('menu:view-edit', () => setViewMode('edit'))
 safeEventsOn('menu:view-preview', () => setViewMode('preview'))
 safeEventsOn('menu:view-split', () => setViewMode('split'))
@@ -998,6 +1040,22 @@ function onDividerKeydown(e) {
         </div>
       </div>
     </div>
+
+    <!-- 关于 Inkmark（应用菜单；版本号来自 Go 单一真源 App.Version()） -->
+    <div v-if="showAbout" class="dialog-mask" @click.self="closeAbout()">
+      <div class="dialog" role="dialog" aria-modal="true" aria-label="关于 Inkmark">
+        <p class="dialog-title">关于 Inkmark</p>
+        <p class="about-line">一个安静的跨平台 Markdown 写作工具。</p>
+        <p class="about-line">版本 {{ aboutVersion || '未知' }}</p>
+        <p class="about-line">
+          <a class="about-link" href="#" @click.prevent="BrowserOpenURL(REPO_URL)">{{ REPO_URL }}</a>
+        </p>
+        <div class="dialog-actions">
+          <button class="dialog-btn" type="button" @click="BrowserOpenURL(REPO_URL)">打开仓库</button>
+          <button class="dialog-btn primary" type="button" @click="closeAbout()">关闭</button>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -1196,6 +1254,10 @@ function onDividerKeydown(e) {
 .dialog-btn.primary { background: var(--accent); color: var(--accent-on); border-color: var(--accent); }
 .dialog-btn.primary:hover { filter: brightness(1.05); }
 .dialog-btn:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+/* 关于弹层正文（复用对话框外壳，仅补正文与链接的排版） */
+.about-line { margin: var(--space-2) 0 0; font-size: var(--text-sm); color: var(--fg-2); }
+.about-link { color: var(--accent); text-decoration: none; }
+.about-link:hover { text-decoration: underline; }
 .shortcut-table { width: 100%; border-collapse: collapse; font-size: var(--text-sm); }
 .shortcut-table td { padding: 6px 0; border-bottom: 1px solid var(--border-soft); }
 .shortcut-table tr:last-child td { border-bottom: none; }

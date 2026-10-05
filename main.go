@@ -48,17 +48,20 @@ func main() {
 //
 // 注意：一旦设置 options.Menu，Wails 会用它【整体替换】默认菜单
 // （见 internal/frontend/desktop/darwin/window.go 的 UpdateApplicationMenu），
-// 因此必须把 AppMenu / EditMenu / WindowMenu 三个 Role 手动拼回来 ——
-// 尤其 EditMenu：丢了它，编辑器里的 ⌘C/⌘V/⌘X/撤销/全选 会全部失效。
+// 因此必须把仍然可用的 Role 手动拼回来 —— 尤其 EditMenu：
+// 丢了它，编辑器里的 ⌘C/⌘V/⌘X/撤销/全选 会全部失效。
+// 应用菜单（Inkmark）自 v1.1 起改为全自建文本项，不再 Append(AppMenu Role)，
+// 原因见下方 ① 处注释（单项 Role 在 v2.16.0 不导出）。
 //
-// 另一个 Role 陷阱（实测 v2.16.0 源码）：
+// Role 陷阱（实测 v2.16.0 源码）：
 //   - darwin 的 WailsMenu.m 对 EditMenu/WindowMenu 等 Role 是【硬编码】展开，
 //     自定义子项追加到 Role 的 SubMenu 会被无视；
 //   - 非 darwin 的 processMenu 只读 Label/SubMenu，Role 完全不展开 ——
 //     直接 Append(EditMenu()) 在 Windows/Linux 会渲染成空菜单。
 //     所以「编辑」菜单按平台分流：darwin 用系统 Role，其余自建子菜单。
 //
-// 菜单项不在 Go 侧做业务，只向前端发事件（业务逻辑统一在前端，避免两处维护）。
+// 菜单项不在 Go 侧做业务，只向前端发事件（业务逻辑统一在前端，避免两处维护）；
+// 例外：隐藏/退出直接调 Wails runtime（无对应前端行为，绕行只会增加一份事件接线）。
 func buildMenu(app *App) *menu.Menu {
 	// 回调闭包延迟读取 app.ctx：菜单在 wails.Run 之前构建，ctx 要到 startup 才有值
 	emit := func(event string) func(*menu.CallbackData) {
@@ -86,8 +89,40 @@ func buildMenu(app *App) *menu.Menu {
 
 	appMenu := menu.NewMenu()
 
-	// ① AppMenu Role 必须排第一 —— macOS 用第一个子菜单做「应用菜单」（关于/退出）
-	appMenu.Append(menu.AppMenu())
+	// ① 应用菜单（Apple HIG：必须排在第一位，macOS 用第一个子菜单做「应用菜单」）
+	//
+	// 为什么全用自建文本项、不用 Role（实测 v2.16.0，非记忆）：
+	//   Wails 只导出 AppMenu/EditMenu/WindowMenu 三个【整体】Role；
+	//   About/Hide/HideOthers/UnHide/Quit 等【单项】Role 在 pkg/menu/menuroles.go
+	//   里全被块注释掉（`go doc .../pkg/menu About` → no symbol）；且 darwin 的
+	//   appendRole switch 只认 1/2/3，单项 Role 塞进子菜单也不会渲染。
+	//   所以「关于/设置/检查更新/隐藏/退出」无法用 Role 拼，只能自建文本项。
+	//
+	// 由此产生的两个能力边界（Wails 未提供 API，非本仓缺陷，详见 README 已知问题）：
+	//   - 无 hideOtherApplications → 省略「隐藏其他」
+	//   - 无 unhideAllApplications → 省略「显示全部」
+	//   - 同时放弃系统原生「关于」面板，改前端弹层（版本号取 version.go 单一真源）
+	// 非 darwin 平台同样全文本项：processMenu 不展开 Role，Role 只会渲染成空标签。
+	inkmarkMenu := appMenu.AddSubmenu("Inkmark")
+	inkmarkMenu.AddText("关于 Inkmark", nil, emit("menu:about"))
+	inkmarkMenu.AddSeparator()
+	// 「设置…」入口唯一（已从文件菜单移除）；事件名 menu:open-settings 保持不变，前端已接线
+	inkmarkMenu.AddText("设置…", keys.CmdOrCtrl(","), emit("menu:open-settings"))
+	inkmarkMenu.AddText("检查更新…", nil, emit("menu:check-update"))
+	inkmarkMenu.AddSeparator()
+	// 隐藏/退出直接调 Wails runtime（不发事件，少绕一圈）；回调闭包延迟读 app.ctx，
+	// 因为菜单在 wails.Run 之前构建，ctx 要到 startup 才有值。
+	inkmarkMenu.AddText("隐藏 Inkmark", keys.CmdOrCtrl("h"), func(*menu.CallbackData) {
+		if app.ctx != nil {
+			runtime.Hide(app.ctx)
+		}
+	})
+	inkmarkMenu.AddSeparator()
+	inkmarkMenu.AddText("退出 Inkmark", keys.CmdOrCtrl("q"), func(*menu.CallbackData) {
+		if app.ctx != nil {
+			runtime.Quit(app.ctx)
+		}
+	})
 
 	// ② 文件
 	fileMenu := appMenu.AddSubmenu("文件")
@@ -140,11 +175,6 @@ func buildMenu(app *App) *menu.Menu {
 	}
 	// 导出 PDF 让位：⌘P 已给打印，降为 ⇧⌘P（macOS 惯例，与「打印…」区分）
 	fileMenu.AddText(exportPDFTitle, keys.Combo("p", keys.CmdOrCtrlKey, keys.ShiftKey), emit("menu:export-pdf"))
-	fileMenu.AddSeparator()
-	// 设置…：Apple HIG 要求放应用菜单，但 Wails 的 menu.AppMenu() 是硬编码 Role，
-	// 自定义项追加不进去（已实测 v2.16.0）；故按「窗口置顶」先例放文件菜单末尾。
-	// 绝不动 AppMenu Role —— 丢了它，「关于/退出」等系统项会一并消失。
-	fileMenu.AddText("设置…", keys.CmdOrCtrl(","), emit("menu:open-settings"))
 
 	// ③ 编辑（macOS 必需：撤销/剪切/拷贝/粘贴/全选）
 	if goruntime.GOOS == "darwin" {
