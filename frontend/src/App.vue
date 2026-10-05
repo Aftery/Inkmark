@@ -348,19 +348,9 @@ onMounted(() => {
   } catch { /* 浏览器预览无绑定 */ }
 })
 
-// 开发期调试钩子：浏览器（vite dev）下没有 wails 绑定，无法走真实「打开文件」路径，
-// 借此在控制台/自动化里直接驱动编辑器与文件切换。import.meta.env.DEV 为静态常量，
-// 生产构建整块被剔除，不增加产物体积。
-if (import.meta.env.DEV) {
-  window.__inkmark = {
-    get editor() { return editor },
-    get markdown() { return markdown.value },
-    get previewHtml() { return previewHtml.value },
-    get filePath() { return filePath.value },
-    openFile,
-    openTreeFile,
-  }
-}
+// 开发期调试钩子见下方 —— 它引用了 useFileOps 解构出的 openFile / openTreeFile，
+// 因此**必须声明在那之后**（否则 dev 模式下 setup 顶层立即读取会命中 const TDZ → 白屏；
+// 生产构建把 import.meta.env.DEV 静态替换为 false 并剔除整块，所以只有 dev 会暴露）。
 
 // 窗口尺寸变化会重排两栏，锚点 y 全部失效
 window.addEventListener('resize', sync.invalidateAnchors)
@@ -517,6 +507,27 @@ const { loadDocument, openFile, openFolder, openTreeFile, newFile, renameFile } 
   OpenFileDialog,
   OpenDirectoryDialog,
 })
+
+// ---------- 开发期调试钩子 ----------
+// 浏览器（vite dev）下没有 Wails 绑定，无法走真实「打开文件」路径，
+// 借此在控制台/自动化里直接驱动编辑器与文件切换。
+//
+// 【顺序契约，勿动】本块必须声明在 useFileOps({...}) **之后**：
+// 块内 `openFile,` / `openTreeFile,` 是对象字面量的 shorthand，会**立即求值**；
+// 若放到解构之前，dev 模式下 setup 顶层读取会命中 const TDZ →
+//   ReferenceError: Cannot access 'openFile' before initialization → 白屏。
+// （生产构建把 import.meta.env.DEV 静态替换为 false 并剔除整块，所以只有 dev 会暴露——
+//   2026-10-05 真实事故：dist 全绿、dev 白屏，所有只验产物的检查都看不见它。）
+if (import.meta.env.DEV) {
+  window.__inkmark = {
+    get editor() { return editor },
+    get markdown() { return markdown.value },
+    get previewHtml() { return previewHtml.value },
+    get filePath() { return filePath.value },
+    openFile,
+    openTreeFile,
+  }
+}
 
 // ---------- 查找 / 替换（CM search 面板；⌘F/⌘⌥F） ----------
 
