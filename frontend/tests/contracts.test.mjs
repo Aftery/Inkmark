@@ -25,6 +25,7 @@ import { readFileSync, readdirSync, statSync, existsSync, writeFileSync, rmSync 
 import { createHash } from 'node:crypto'
 import { fileURLToPath } from 'node:url'
 import { dirname, join, relative, sep } from 'node:path'
+import { countTotalLines, countEffectiveLines, LINE_METRIC } from './helpers/line-metric.mjs'
 
 // ---------------------------------------------------------------------------
 // 路径解析：全部相对本文件定位，保证从任意 cwd 调用都能跑
@@ -189,15 +190,11 @@ function listFiles(dir, acc = []) {
 const rel = (abs) => relative(REPO, abs).split(sep).join('/')
 
 /**
- * 行数口径：**wc -l**（末尾无换行不计一行）。
- * Node 的 split('\n').length 会把「末尾有换行」多算 1 行，与 Spec §4.2 写的
- * 1368 不符（Node 算 1369，wc -l 算 1368）。这里统一用 wc -l 口径。
+ * 行数口径已迁移到 helpers/line-metric.mjs（唯一真源）：
+ *   - 阻断口径：有效代码行 = 剥注释 + 去空行（2026-10-05 由总行数改来）
+ *   - 总行数：仅作 advisory 展示，不参与判定
+ * 详见该模块顶部的「口径变更登记」。
  */
-function countLines(text) {
-  if (text.length === 0) return 0
-  const n = text.split('\n').length
-  return text.endsWith('\n') ? n - 1 : n
-}
 
 // ===========================================================================
 // 契约 1：菜单事件双向闭合
@@ -889,57 +886,51 @@ const LINE_LIMIT = 300
 
 /**
  * 显式豁免白名单：每条必须写明豁免理由（Spec §4.2）。
- * [注意] 这是「已知既有债」的登记处，不是永久豁免：
- * 拆分完成后应下调或删除对应条目（App.vue 的目标见 Spec §5-C：≤600 行）。
+ * 阈值口径 = **有效代码行**（helpers/line-metric.mjs）；limit 为登记时实际值，
+ * 增长即红（棘轮只许降不许升）。totalAtRegistration 仅供 advisory 展示。
+ * [注意] 这是「已知既有债」的登记处，不是永久豁免：拆分完成后应下调或摘除。
  */
 const LINE_EXEMPTIONS = {
   'frontend/src/App.vue': {
-    limit: 1280,
+    limit: 1142,
+    totalAtRegistration: 1363,
     reason:
-      '1368 → 1280，理由：Wave 2 拆分（useDialog / useShortcutsHelp / useFileOps 三个 ' +
-      'composable 已抽出，commit beec8c8）。拆分前按 Spec §5-C 建好了回归网（B 任务），' +
-      '所以本次下调阈值是「先建网后收紧」而非「拆完就算了」。' +
-      '仍未达 300 红线：useDivider（分栏拖拽）、视图四态、滚动联动、保存编排' +
-      '这四类交互重、当前测试网覆盖不到的部分**刻意未拆**（拆了也没有安全网兜底），' +
-      '留给下一轮 —— 届时须先补相应行为测试再拆。',
+      '有效代码行 1142 / 总行数 1363（2026-10-05 新口径重新登记；旧口径 1280 已作废）。' +
+      '仍是全仓最大单文件：useDivider（分栏拖拽）、视图四态、滚动联动、保存编排' +
+      '这四类交互重、当前测试网覆盖不到的部分**刻意未拆**（拆了也没有安全网兜底）。' +
+      '拆分前须先补相应行为测试。',
   },
   'frontend/src/editor/createEditor.js': {
-    limit: 387,
+    limit: 344,
+    totalAtRegistration: 386,
     reason:
-      'CodeMirror 6 扩展装配集中地（extensions 数组 + 主题 + 事件绑定），' +
-      '拆分需先有 createEditor 的行为测试网（当前无）。与 App.vue 同属既有债。' +
-      '【下一轮优先目标】当前 386 行，距 300 红线还有余量，但白名单里它最接近红线，' +
-      '白名单会开始掩盖真实超限文件 —— 届时应优先为 createEditor 建立行为测试网并拆分，' +
-      '而不是继续调阈值。（本轮实际行数 386，阈值 387 留 1 行余量，' +
-      '因为「只减 1 行」不代表债务已还清。）',
+      '有效代码行 344 / 总行数 386。CodeMirror 6 扩展装配集中地' +
+      '（extensions 数组 + 主题 + 事件绑定），拆分需先有 createEditor 的行为测试网（当前无）。' +
+      '新口径下它是白名单里唯一仍明显超 300 红线者，下一轮优先目标。',
   },
   'frontend/src/editor/commands.js': {
-    limit: 341,
+    limit: 272,
+    totalAtRegistration: 340,
     reason:
-      '行操作命令集（增删复制移动/缩进/清除格式 + 选区转 HTML），' +
-      '命令数量多且共享同一 selection 上下文，过早拆分易破坏语义（当前无行为测试网）。' +
-      '与 App.vue 同属既有债。' +
-      '【下一轮优先目标】当前 340 行 —— 与 createEditor.js 并列白名单里最接近红线的两项，' +
-      '处理优先级相同。（本轮实际行数 340，阈值 341 留 1 行余量。）',
+      '有效代码行 272 / 总行数 340。行操作命令集共享同一 selection 上下文，' +
+      '过早拆分易破坏语义（当前无行为测试网）。' +
+      '新口径下已低于 300 红线，但仍按登记值作更严格的棘轮基线（增长即红），可择机摘除。',
   },
 }
 
 /**
- * 非阻断 advisory 的阈值：白名单项行数达到 LINE_LIMIT 的 90% 即提示。
+ * 非阻断 advisory 的阈值：达到各自阈值的 90% 即提示。
  *
- * [为什么需要它] 棘轮只在**超过** 300（或豁免阈值）时才响，于是会出现
- * 「静默新增一笔白名单债」：一个 297 行的文件（useDocumentPersistence.js）
- * 距 300 只差 3 行，再加几行就得登记豁免 —— 而登记本身不痛，**不登记才痛**
- * （白名单一旦开始积累，掩盖的是真实超限文件）。
- * 这条 advisory 让「即将新增债」在报告里显形，但**不阻断** ——
- * 避免为了清一条 warning 去拆文件，那正是本轮反复讨论的「白名单掩盖问题」。
+ * [为什么需要它] 棘轮只在**超过**阈值时才响，于是「再加几行就触顶」
+ * 这件事是**静默**的 —— 而登记本身不痛，**不登记才痛**（白名单一旦积累，
+ * 掩盖的是真实超限文件）。让它在报告里显形，但**不阻断**：
+ * 为了清一条 warning 去拆文件，正是本轮反复讨论的「白名单掩盖问题」。
  */
 const LINE_ADVISORY_RATIO = 0.9
 
-describe('契约 5 · 行数门禁（≤300 行）', () => {
+describe('契约 5 · 行数门禁（有效代码行 ≤300）', () => {
   const codeFiles = listFiles(SRC).filter((f) => /\.(vue|js|mjs|ts)$/.test(f))
   // 全量登记哈希：本组要数所有源文件的行数，是最容易被并发写入影响的一组
-  // （Wave 2 正在拆 App.vue / 新建 composables，文件列表与行数都在变）
   for (const f of codeFiles) readStable(f)
 
   /**
@@ -954,6 +945,15 @@ describe('契约 5 · 行数门禁（≤300 行）', () => {
     assert.ok(
       codeFiles.length >= 15,
       `只扫到 ${codeFiles.length} 个源文件，预期 15+`
+    )
+  })
+
+  test('行数口径必须被显式登记（防悄悄放水/偷偷改口径）', () => {
+    assert.equal(LINE_METRIC.name, 'effective-code-lines')
+    assert.ok(LINE_METRIC.from && LINE_METRIC.to, '口径变更必须写明 from/to')
+    assert.ok(
+      LINE_METRIC.reason && LINE_METRIC.reason.trim().length >= 20,
+      '口径变更必须写明理由（登记制）'
     )
   })
 
@@ -981,30 +981,30 @@ describe('契约 5 · 行数门禁（≤300 行）', () => {
     )
   })
 
-  test('白名单外的前端源文件必须全部 ≤300 行', () => {
+  test('白名单外的前端源文件必须全部 ≤300 有效代码行', () => {
     const oversized = []
     for (const f of codeFiles) {
       const r = rel(f)
       if (r in LINE_EXEMPTIONS) continue
-      const n = countLines(read(f))
-      if (n > LINE_LIMIT) oversized.push(`${r} (${n} 行)`)
+      const n = countEffectiveLines(read(f))
+      if (n > LINE_LIMIT) oversized.push(`${r} (${n} 有效代码行)`)
     }
     assert.deepEqual(
       oversized,
       [],
-      `以下文件超过 ${LINE_LIMIT} 行且不在豁免白名单里：\n${oversized.join('\n')}\n` +
+      `以下文件超过 ${LINE_LIMIT} 有效代码行且不在豁免白名单里：\n${oversized.join('\n')}\n` +
         '要么拆分，要么在 LINE_EXEMPTIONS 里显式登记并写明理由。'
     )
   })
 
-  test('豁免文件不得超出自己的阈值（防止 App.vue 拆分后反而变大）', () => {
+  test('豁免文件不得超出自己的阈值（有效代码行，只许降不许升）', () => {
     const violations = []
     for (const [r, meta] of Object.entries(LINE_EXEMPTIONS)) {
       const f = codeFiles.find((x) => rel(x) === r)
       if (!f) continue
-      const n = countLines(read(f))
+      const n = countEffectiveLines(read(f))
       if (n > meta.limit) {
-        violations.push(`${r}: ${n} 行 > 豁免阈值 ${meta.limit} 行`)
+        violations.push(`${r}: ${n} 有效代码行 > 豁免阈值 ${meta.limit}`)
       }
     }
     assert.deepEqual(
@@ -1022,35 +1022,30 @@ describe('契约 5 · 行数门禁（≤300 行）', () => {
   })
 
   /**
-   * [非阻断 advisory] 白名单项接近红线时提示，但**不 fail**。
-   *
-   * 为什么要它：棘轮只在「超过阈值」时才响，所以「再加几行就得登记豁免」
-   * 这件事是**静默**的 —— 而登记本身不痛，**不登记才痛**（白名单一旦开始
-   * 积累，掩盖的是真实超限文件）。让它在报告里显形，是为了让「即将新增债」
-   * 被看见，而不是等它变成既成事实。
-   *
-   * 为什么不阻断：为了清一条 warning 去拆文件，本身就是本轮反复讨论的
-   * 「白名单掩盖问题」—— 拆分需要先有行为测试网，没有就硬拆等于加风险。
+   * [非阻断 advisory] 豁免项体量：有效代码行数按阈值报，总行数仅展示。
+   * 口径变更后「总行数」不再阻断，但仍要在报告里可见，避免真实体量被藏起来。
    */
-  test('advisory · 白名单项接近红线时提示（不阻断）', (t) => {
+  test('advisory · 豁免项体量（有效代码行 vs 总行数，不阻断）', (t) => {
+    const info = []
     const warn = []
     for (const [r, meta] of Object.entries(LINE_EXEMPTIONS)) {
       const f = codeFiles.find((x) => rel(x) === r)
       if (!f) continue
-      const n = countLines(read(f))
-      if (n < LINE_LIMIT * LINE_ADVISORY_RATIO) continue
-      // 已远超红线（如 App.vue 1280）与「刚好逼近红线」是两回事，文案必须分开 ——
-      // 否则 427% 这种数字会让读者以为门禁坏了
-      warn.push(
-        n > LINE_LIMIT
-          ? `${r}：当前 ${n} 行，**已超红线 ${n - LINE_LIMIT} 行**（豁免中，阈值 ${meta.limit}）。` +
-              `作为第一优先目标：拆分前需先有它自己的行为测试网，否则拆不动、也测不了。`
-          : `${r}：当前 ${n} 行，**距 ${LINE_LIMIT} 行红线仅 ${LINE_LIMIT - n} 行**。` +
-              `拆分前需先有它自己的行为测试网，否则拆不动、也测不了。`
-      )
+      const eff = countEffectiveLines(read(f))
+      const total = countTotalLines(read(f))
+      info.push(`${r}：有效代码行 ${eff} / 阈值 ${meta.limit}；总行数 ${total}（仅展示，不计入债务）`)
+      if (eff >= meta.limit * LINE_ADVISORY_RATIO) {
+        warn.push(
+          `${r}：有效代码行 ${eff} 已达阈值 ${meta.limit} 的 ` +
+            `${Math.round(LINE_ADVISORY_RATIO * 100)}% —— 增长即红，优先拆分（先补行为测试网）。`
+        )
+      }
+    }
+    if (info.length) {
+      t.diagnostic(`\n[advisory] 豁免项体量：\n  - ` + info.join('\n  - '))
     }
     if (warn.length) {
-      t.diagnostic(`\n[advisory] 以下白名单项尚未还清债务：\n  - ` + warn.join('\n  - '))
+      t.diagnostic(`\n[advisory] 以下豁免项已达阈值警戒线：\n  - ` + warn.join('\n  - '))
     }
     // 刻意不做 assert —— advisory 的意义就是不阻断
   })
@@ -1064,10 +1059,10 @@ describe('契约 5 · 行数门禁（≤300 行）', () => {
     for (const f of codeFiles) {
       const r = rel(f)
       if (r in LINE_EXEMPTIONS) continue
-      const n = countLines(read(f))
+      const n = countEffectiveLines(read(f))
       if (n >= LINE_LIMIT * LINE_ADVISORY_RATIO && n <= LINE_LIMIT) {
         warn.push(
-          `${r}：当前 ${n} 行，距 ${LINE_LIMIT} 行红线仅 ${LINE_LIMIT - n} 行。` +
+          `${r}：当前 ${n} 有效代码行，距 ${LINE_LIMIT} 行红线仅 ${LINE_LIMIT - n} 行。` +
             `再加就会变成「新增一笔豁免债」—— **拆分前需先有它自己的行为测试网**。`
         )
       }

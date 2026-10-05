@@ -1,27 +1,10 @@
 /**
- * js-scan.mjs — tdz-guard 的底层「剥注释 / 括号配平 / 解析 useXxx 注入」原语。
- * 独立成文件是为了让每个测试助手文件都不超 300 行红线（拆分本身不改行为）。
- *
- * 【解析器哲学】先剥注释与字符串/模板字面量，再数括号深度：
- * 只在深度 0（setup 顶层）找声明，避免把函数体里的局部 const 当成外层声明。
- * 模板字面量里的 `${}` 表达式仍按代码处理，其余文本按空白掩掉，
- * 这样 DEFAULT_DOC 里那些 `function foo() {}` 示例不会污染括号计数。
+ * js-scan.mjs — tdz-guard 的解析原语（在 lexer 掩码之上）。
+ * 词法层（注释/字符串/模板/正则感知）在 lexer.mjs；本模块做：
+ *   剥出 <script> 区、括号深度、配平、顶层切分、useXxx({...}) 注入解析。
+ * 独立分层是为了文件不超 300 行红线，且 maskNonCode / stripComments 共用一套词法。
  */
-
-export const ID_RE = /^[A-Za-z_$][\w$]*$/
-const ID_START = /[A-Za-z_$]/
-const ID_PART = /[\w$]/
-// 正则字面量判定：上一个有效记号不是「值」时才可能是正则（否则是除号）。
-const REGEX_PRECEDING_KEYWORDS = new Set([
-  'return', 'typeof', 'instanceof', 'in', 'of', 'new', 'delete', 'void',
-  'case', 'do', 'else', 'yield', 'await', 'throw',
-])
-
-function regexAllowed(lastSig, lastWord) {
-  if (lastSig === '') return true
-  if (lastWord && REGEX_PRECEDING_KEYWORDS.has(lastWord)) return true
-  return !(lastSig === 'ID' || lastSig === 'NUM' || lastSig === ')' || lastSig === ']' || lastSig === '}')
-}
+import { ID_RE } from './lexer.mjs'
 
 /** 取出 <script> 块内容与其在全文中的起始偏移（App.vue 只有一个 script 块）。 */
 export function extractScript(source) {
@@ -32,94 +15,6 @@ export function extractScript(source) {
   const close = source.indexOf('</script>', openEnd)
   if (close < 0) return null
   return { code: source.slice(openEnd + 1, close), baseOffset: openEnd + 1 }
-}
-
-/**
- * 把注释、字符串、模板字面量文本掩成空格（保留换行与原长度，偏移不变）。
- * 模板里的 `${...}` 表达式保留为代码，以便括号深度仍正确。
- */
-export function maskNonCode(src) {
-  const out = src.split('')
-  const n = src.length
-  const blank = (j) => { if (out[j] !== '\n') out[j] = ' ' }
-  const stack = [{ t: 'code', depth: 0 }]
-  let i = 0
-  let lastSig = ''
-  let lastWord = ''
-  while (i < n) {
-    const ctx = stack[stack.length - 1]
-    if (ctx.t === 'template') {
-      if (src[i] === '\\') { blank(i); i++; if (i < n) { blank(i); i++ } continue }
-      if (src[i] === '`') { blank(i); i++; stack.pop(); continue }
-      if (src[i] === '$' && src[i + 1] === '{') {
-        blank(i); blank(i + 1); i += 2; stack.push({ t: 'code', depth: 0 }); continue
-      }
-      blank(i); i++; continue
-    }
-    if (src[i] === '/' && src[i + 1] === '/') {
-      while (i < n && src[i] !== '\n') { blank(i); i++ }
-      continue
-    }
-    if (src[i] === '/' && src[i + 1] === '*') {
-      blank(i); blank(i + 1); i += 2
-      while (i < n && !(src[i] === '*' && src[i + 1] === '/')) { blank(i); i++ }
-      if (i < n) { blank(i); blank(i + 1); i += 2 }
-      continue
-    }
-    if (src[i] === "'" || src[i] === '"') {
-      const q = src[i]; blank(i); i++
-      while (i < n && src[i] !== q) {
-        if (src[i] === '\\') { blank(i); i++; if (i < n) { blank(i); i++ } continue }
-        if (src[i] !== '\n') blank(i)
-        i++
-      }
-      if (i < n) { blank(i); i++ }
-      lastSig = 'STR'; lastWord = ''
-      continue
-    }
-    if (src[i] === '`') { blank(i); i++; stack.push({ t: 'template' }); lastSig = 'TPL'; lastWord = ''; continue }
-    // 正则字面量：字符类里可能有引号 / 斜杠，不识别会把后续代码误当字符串吞掉。
-    if (src[i] === '/' && regexAllowed(lastSig, lastWord)) {
-      blank(i); i++
-      let inClass = false
-      while (i < n) {
-        const c = src[i]
-        if (c === '\\') { blank(i); i++; if (i < n) { blank(i); i++ } continue }
-        if (c === '[') inClass = true
-        else if (c === ']') inClass = false
-        else if (c === '/' && !inClass) { blank(i); i++; break }
-        else if (c === '\n') break
-        blank(i); i++
-      }
-      while (i < n && /[a-z]/i.test(src[i])) { blank(i); i++ }
-      lastSig = 'RE'; lastWord = ''
-      continue
-    }
-    const c = src[i]
-    if (ID_START.test(c)) {
-      let j = i
-      while (j < n && ID_PART.test(src[j])) j++
-      lastWord = src.slice(i, j)
-      lastSig = 'ID'
-      i = j
-      continue
-    }
-    if (/[0-9]/.test(c)) {
-      let j = i
-      while (j < n && /[\w.]/.test(src[j])) j++
-      lastSig = 'NUM'; lastWord = ''
-      i = j
-      continue
-    }
-    if (c === '{') { ctx.depth++; lastSig = '{'; lastWord = ''; i++; continue }
-    if (c === '}') {
-      if (ctx.depth === 0 && stack.length > 1) { blank(i); i++; stack.pop(); lastSig = '}'; lastWord = ''; continue }
-      ctx.depth--; lastSig = '}'; lastWord = ''; i++; continue
-    }
-    if (!/\s/.test(c)) { lastSig = c; lastWord = '' }
-    i++
-  }
-  return out.join('')
 }
 
 /** 每个位置的括号深度（进入该字符前的深度）。掩码串里只剩真实代码括号。 */
@@ -182,9 +77,9 @@ function isLazy(value) {
 }
 
 /**
- * 解析一个对象字面量条目，返回 { key, kind, name }：
+ * 解析一个对象字面量条目（或数组元素），返回 { key, kind, name }：
  *   kind = 'immediate'（立即读取的裸标识符，需查顺序）
- *        | 'lazy'（惰性包装，豁免）
+ *        | 'lazy'（惰性包装 / getter 体，豁免 —— 由 analyzeEntry 的调用方过滤）
  *        | 'complex'（复杂表达式，无法静态判定，跳过）
  *        | 'skip'（不是可识别的属性）
  */

@@ -22,7 +22,7 @@
 // 清理后台进程按端口：lsof -ti:<port> | xargs -r kill，绝不用 pkill -f "..." ——
 // 后者会匹配到发起命令的那条 shell 自身，把执行命令的进程一起杀掉（零输出）。
 import { spawn, execFile } from 'node:child_process'
-import { existsSync, mkdtempSync, rmSync, writeFileSync, mkdirSync } from 'node:fs'
+import { existsSync, mkdtempSync, rmSync, writeFileSync, mkdirSync, readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -32,6 +32,34 @@ import { startStaticServer } from './serve-dist.mjs'
 const HERE = fileURLToPath(new URL('.', import.meta.url))
 const REPO = resolve(HERE, '..', '..')
 const DEFAULT_DIST = join(REPO, 'frontend', 'dist')
+const APP_VUE = join(REPO, 'frontend', 'src', 'App.vue')
+
+/**
+ * 采集有效性的「预期噪声下限」：浏览器预览没有 Wails runtime，每个 safeEventsOn
+ * 都会打印一条 `[menu] SKIP (no runtime)` warning。若一条都没有，说明 console
+ * 采集通道本身坏了（例如被代理拦成 502），此时渲染结论不可信。
+ * 下限从源码里数 safeEventsOn(' 调用数折算（取一半，容忍未来删掉部分诊断），
+ * 源码不可读时退回保守常量。
+ */
+function menuWarnFloor() {
+  try {
+    const src = readFileSync(APP_VUE, 'utf8')
+    const n = (src.match(/safeEventsOn\('/g) || []).length
+    if (n > 0) return Math.max(10, Math.floor(n / 2))
+  } catch { /* 源码不可读则用常量 */ }
+  return 10
+}
+
+/** 子进程环境：剥掉代理变量，避免 127.0.0.1 被 HTTP_PROXY 拦成 502（实测踩过）。 */
+function chromeEnv() {
+  const env = { ...process.env }
+  for (const k of ['HTTP_PROXY', 'HTTPS_PROXY', 'ALL_PROXY', 'http_proxy', 'https_proxy', 'all_proxy']) {
+    delete env[k]
+  }
+  env.NO_PROXY = '127.0.0.1,localhost'
+  env.no_proxy = '127.0.0.1,localhost'
+  return env
+}
 
 const CHROME_CANDIDATES = [
   process.env.CHROME_PATH,
@@ -58,6 +86,19 @@ function getFreePort() {
       s.close(() => res(p))
     })
   })
+}
+
+/** 目标 URL 可达性自检：返回 HTTP 状态码，请求失败返回 0。 */
+async function preflight(url) {
+  try {
+    const ctrl = new AbortController()
+    const timer = setTimeout(() => ctrl.abort(), 5000)
+    const res = await fetch(url, { signal: ctrl.signal, redirect: 'follow' })
+    clearTimeout(timer)
+    return res.status
+  } catch {
+    return 0
+  }
 }
 
 /** 按端口清理残留进程（不用 pkill -f）。 */
@@ -129,11 +170,12 @@ async function runCheck({ chromePath, url, timeoutMs }) {
     '--no-default-browser-check',
     '--disable-extensions',
     '--mute-audio',
+    '--no-proxy-server', // 别让本机注入的 HTTP_PROXY 把 127.0.0.1 拦成 502
     `--remote-debugging-port=${cdpPort}`,
     '--remote-allow-origins=*', // 参数数组不经 shell，星号不会被 zsh 展开
     `--user-data-dir=${userDataDir}`,
     'about:blank',
-  ], { stdio: ['ignore', 'ignore', 'pipe'] })
+  ], { stdio: ['ignore', 'ignore', 'pipe'], env: chromeEnv() })
 
   let ws = null
   const exceptions = []
@@ -184,9 +226,17 @@ async function runCheck({ chromePath, url, timeoutMs }) {
     const strMain = dom.includes('class="main"')
     const strEditor = dom.includes('editor-host')
 
+    const menuWarns = consoleWarns.filter((w) => w.includes('[menu] SKIP')).length
+    const floor = menuWarnFloor()
+    // 采集有效性自检：根节点在、但预期噪声（[menu] SKIP）一条都没有
+    // -> console 采集通道本身坏了（如被代理拦 502），此时不得采信渲染结论。
+    const noiseSuspect = hasMain && menuWarns < floor
     const ok = hasMain && hasEditor && strMain && strEditor &&
-      exceptions.length === 0 && consoleErrors.length === 0
-    return { ok, url, hasMain, hasEditor, strMain, strEditor, exceptions, consoleErrors, consoleWarns }
+      exceptions.length === 0 && consoleErrors.length === 0 && !noiseSuspect
+    return {
+      ok, url, hasMain, hasEditor, strMain, strEditor,
+      exceptions, consoleErrors, consoleWarns, menuWarns, floor, noiseSuspect,
+    }
   } finally {
     try { ws?.close() } catch { /* noop */ }
     try { chrome.kill('SIGKILL') } catch { /* noop */ }
@@ -209,7 +259,11 @@ function report(r) {
     console.log(`[render-check] console.warn（不影响判定）：${r.consoleWarns.length} 条`)
     r.consoleWarns.slice(0, 5).forEach((e) => console.log(`  . ${e}`))
   }
-  console.log(r.ok ? '[render-check] PASS：应用根节点已渲染，setup 期无异常' : '[render-check] FAIL：未渲染出根节点 / 存在异常')
+  console.log(
+    `[render-check] 采集有效性自检：预期 [menu] SKIP 噪声下限 ${r.floor} 条，` +
+    `实际 ${r.menuWarns} 条${r.noiseSuspect ? ' -> 可疑：噪声缺失，console 采集通道可能坏了' : ' -> OK'}`
+  )
+  console.log(r.ok ? '[render-check] PASS：应用根节点已渲染，setup 期无异常' : '[render-check] FAIL：未渲染出根节点 / 存在异常 / 采集可疑')
 }
 
 /** 造一个「必然白屏」的页面用于自证检测器真的能报红（不碰仓库里的 App.vue）。 */
@@ -279,6 +333,15 @@ async function main() {
     url = `http://127.0.0.1:${server.port}/`
   }
   console.log(`[render-check] 服务目录：${url === externalUrl ? '(外部 URL，未起本地服务)' : distDir}`)
+
+  // 服务自检：目标 URL 必须真的返回 200，否则渲染结论无意义（本机代理坑：502）
+  const status = await preflight(url)
+  if (status !== 200) {
+    console.error(`[render-check] 未验证：目标 URL 自检未返回 200（实际 ${status || '请求失败'}）—— 服务或代理有问题。`)
+    await server?.close()
+    process.exit(2)
+  }
+  console.log(`[render-check] 服务自检：HTTP ${status}`)
 
   let r
   try {

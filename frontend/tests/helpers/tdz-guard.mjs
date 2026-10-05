@@ -6,21 +6,26 @@
  *   读取了 `askInput`，但 `const askInput = ...`（经 useDialog 解构）声明在其后。
  *   setup 期读取未初始化的 const -> ReferenceError -> Vue 树不渲染 -> 白屏。
  *
- * 本模块的断言（Spec §2.1）：
- *   App.vue 中每个 `useXxx({ ... })` 调用注入的标识符，其声明行号必须早于调用行号。
- *   - const / let / import 绑定：参与判定
- *   - function 声明：有提升（hoisting），豁免（否则 syncAfterDocReplace 会被误报）
- *   - 惰性包装 `key: () => expr` / `key: function () {}`：函数体调用时才求值，豁免
- *   - 找不到声明：报红「来源不明，可能是 TDZ 风险或漏了 import」
+ * 本模块的断言（Spec §2.1 + 2026-10-05 扩展为通用）：
+ *   1) `useXxx({ ... })` 调用注入的标识符，其声明行号必须早于调用行号。
+ *   2) 通用：setup 顶层（含 `if (...) {}`、对象/数组字面量）里**立即读取**的
+ *      裸标识符，其 const/let 声明必须早于读取点（第二处真实事故 openFile 的类别）。
+ *   - const / let 参与判定；var / function / import 有提升，豁免
+ *   - 惰性包装 `key: () => expr`、getter `get x(){}`、函数体内的读取：豁免
+ *   - useXxx 注入找不到声明：报红「来源不明，可能是 TDZ 风险或漏了 import」
+ *   - 通用读取点找不到声明（全局如 window/localStorage）：跳过，避免误报
  *
  * 底层剥注释 / 括号配平 / 注入解析原语见 js-scan.mjs（拆文件以守住 300 行红线）。
  */
 import {
-  ID_RE, extractScript, maskNonCode, computeDepth, matchPair,
+  extractScript, computeDepth, matchPair,
   splitTopLevel, topLevelColon, findUseCalls,
 } from './js-scan.mjs'
+import { ID_RE, maskNonCode } from './lexer.mjs'
+import { findFunctionBodyRanges, findGenericReadSites } from './tzd-sites.mjs'
 
-export { extractScript, maskNonCode, computeDepth } from './js-scan.mjs'
+export { extractScript, computeDepth } from './js-scan.mjs'
+export { maskNonCode } from './lexer.mjs'
 
 /** 解析 import 绑定（逐语句累积，支持多行 import）。 */
 export function findImportBindings(code) {
@@ -148,6 +153,17 @@ function unknownMessage(name, call) {
   )
 }
 
+function genericMessage(site, decl) {
+  const where = site.site === 'array' ? '数组字面量' : '对象字面量'
+  return (
+    `const 暂时性死区（通用读取点）：${site.name} 在第 ${site.line} 行的 ${where}里被**立即读取**，` +
+    `但其 ${decl.kind} 声明在第 ${decl.line} 行 —— 声明晚于读取点。` +
+    `setup 期读取未初始化的 ${decl.kind} 会抛 ReferenceError: Cannot access '${site.name}' ` +
+    `before initialization，Vue 树不渲染 -> 启动白屏。` +
+    `修法：把声明上移到读取点之前，或把该处改成惰性（getter / 箭头函数体内读取）。`
+  )
+}
+
 /**
  * 主入口：检查源码里的 useXxx({...}) 注入顺序。
  * 返回 { ok, calls, injections, violations }。
@@ -185,5 +201,22 @@ export function checkTdz(source, { file = 'App.vue' } = {}) {
       }
     }
   }
-  return { file, ok: violations.length === 0, calls, injections, violations }
+  // ---- 通用 TDZ：setup 顶层对象 / 数组字面量里的立即读取（含 if 块内）----
+  const functionRanges = findFunctionBodyRanges(masked)
+  const readSites = findGenericReadSites(masked, baseOffset, offsetToLine, functionRanges)
+  const seen = new Set(violations.map((v) => `${v.name}@${v.callLine}`))
+  for (const site of readSites) {
+    const decl = decls.get(site.name)
+    if (!decl) continue // 未在本文件声明（全局 / 外部）：不报，避免误报 window/localStorage 等
+    if (decl.kind === 'function' || decl.kind === 'import' || decl.kind === 'var') continue // 提升豁免
+    if (decl.line > site.line && !seen.has(`${site.name}@${site.line}`)) {
+      violations.push({
+        name: site.name, key: site.key, site: site.site,
+        declLine: decl.line, declKind: decl.kind, callLine: site.line,
+        kind: 'tdz-generic', message: genericMessage(site, decl),
+      })
+    }
+  }
+
+  return { file, ok: violations.length === 0, calls, injections, readSites, functionRanges: functionRanges.length, violations }
 }

@@ -35,6 +35,25 @@ function lazyWrapAskInput(source) {
   return out
 }
 
+/** 把整个 `if (import.meta.env.DEV) {...}` 调试块挪到 useFileOps({...}) 之前。 */
+function moveDevBlockBeforeFileOps(source) {
+  const lines = source.split('\n')
+  const start = lines.findIndex((l) => l.includes('if (import.meta.env.DEV) {'))
+  assert.ok(start > -1, '找不到 DEV 调试块，变异脚本失效')
+  let depth = 0
+  let end = -1
+  for (let i = start; i < lines.length; i++) {
+    for (const ch of lines[i]) { if (ch === '{') depth++; else if (ch === '}') depth-- }
+    if (depth === 0 && i > start) { end = i; break }
+  }
+  assert.ok(end > start, '定位 DEV 块范围失败，变异脚本失效')
+  const block = lines.slice(start, end + 1)
+  const rest = lines.slice(0, start).concat(lines.slice(end + 1))
+  const target = rest.findIndex((l) => l.includes('= useFileOps({'))
+  assert.ok(target > -1, '定位 useFileOps({...}) 失败，变异脚本失效')
+  return rest.slice(0, target).concat(block, rest.slice(target)).join('\n')
+}
+
 test('真实 App.vue：useXxx 注入顺序全部合法（守卫本体）', (t) => {
   const r = checkTdz(SOURCE, { file: 'App.vue' })
   // 先质疑解析器：确认真的解析到了调用与注入，而不是「零结果」蒙混过关
@@ -110,6 +129,52 @@ test('合成用例：找不到声明必须报红且文案含「来源不明」',
 
 test('合成用例：惰性包装指向后声明的 const 仍视为安全', () => {
   const src = '<script setup>\nconst x = useFoo({ getLate: () => late })\nconst late = 1\n</script>'
+  const r = checkTdz(src, { file: 'x.vue' })
+  assert.deepEqual(r.violations, [])
+})
+
+// ---- 通用 TDZ（第二处真实事故 openFile 的类别，含 if 块内的对象/数组字面量） ----
+
+test('通用读取点：DEV 调试块里的 openFile/openTreeFile 被识别（当前顺序合法）', () => {
+  const r = checkTdz(SOURCE, { file: 'App.vue' })
+  const names = r.readSites.map((s) => s.name)
+  assert.ok(
+    names.includes('openFile') && names.includes('openTreeFile'),
+    `通用读取点没识别到 openFile/openTreeFile，解析器可疑：${JSON.stringify(names)}`
+  )
+  assert.deepEqual(r.violations, [], 'App.vue 存在通用 TDZ 违规（声明晚于立即读取点）')
+})
+
+test('变异自证（红·通用）：DEV 块挪到 useFileOps 之前必须指名 openFile/openTreeFile 与两处行号', (t) => {
+  const mutated = moveDevBlockBeforeFileOps(SOURCE)
+  const r = checkTdz(mutated, { file: 'App.vue' })
+  const names = r.violations.map((v) => v.name)
+  if (!names.includes('openFile')) t.diagnostic('变异后未报 openFile，通用守卫漏报：' + JSON.stringify(names))
+  assert.ok(names.includes('openFile'), '通用守卫必须抓到 openFile 的 TDZ（第二处白屏事故）')
+  assert.ok(names.includes('openTreeFile'), '通用守卫必须抓到 openTreeFile 的 TDZ')
+  const v = r.violations.find((x) => x.name === 'openFile')
+  assert.equal(v.kind, 'tdz-generic')
+  assert.ok(v.declLine > v.callLine, `声明行 ${v.declLine} 应晚于读取行 ${v.callLine}`)
+  assert.match(v.message, /openFile/)
+  assert.ok(v.message.includes(String(v.declLine)), '文案必须含声明行号')
+  assert.ok(v.message.includes(String(v.callLine)), '文案必须含读取点行号')
+})
+
+test('合成用例（通用）：对象字面量立即读取后声明的 const 必须报红', () => {
+  const src = '<script setup>\nconst cfg = { value: later }\nconst later = 1\n</script>'
+  const r = checkTdz(src, { file: 'x.vue' })
+  const v = r.violations.find((x) => x.name === 'later')
+  assert.ok(v, '对象字面量立即读取后声明 const 必须报红')
+  assert.equal(v.kind, 'tdz-generic')
+})
+
+test('合成用例（通用）：getter / 箭头体内的读取视为惰性、不报红', () => {
+  const src = [
+    '<script setup>',
+    'const cfg = { get value() { return later }, lazy: () => later }',
+    'const later = 1',
+    '</script>',
+  ].join('\n')
   const r = checkTdz(src, { file: 'x.vue' })
   assert.deepEqual(r.violations, [])
 })
