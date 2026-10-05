@@ -489,14 +489,14 @@ function toggleOutline() {
 // 「打开/切换文件的唯一落点」loadDocument 也由它导出（菜单事件与语法示例共用）。
 // 时序契约（快照先于破坏性、必须走 replaceDocument）见该文件注释。
 //
-// ⚠️ 【顺序契约，勿动】下面的 useDialog() 必须先于本调用声明 ——
+// 【顺序契约，勿动】下面的 useDialog() 必须先于本调用声明 ——
 // 本调用的依赖里注入了 askInput，而它是 const；声明晚了会在 setup 期命中
 // 暂时性死区（TDZ）→ Vue 树不渲染 → 启动白屏（2026-10-05 真实事故）。
 
 // ---------- 输入对话框（跳转到行 / 重命名共用） ----------
 // WKWebView 不支持 window.prompt（静默返回 null），自己搭一个最小对话框。
 // 实现已抽到 composables/useDialog.js（纯逻辑，无外部依赖）。
-// ⚠️ 位置契约：必须留在 useFileOps({...}) 之前（见上方说明）。
+// 位置契约：必须留在 useFileOps({...}) 之前（见上方说明）。
 
 const { dialog, dialogInputEl, askInput, closeDialog } = useDialog()
 
