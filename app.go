@@ -14,14 +14,21 @@ import (
 	"sort"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
-// App 是暴露给前端的核心服务。所有"接触操作系统"的能力都收敛在这里，
+// App 是暴露给前端的核心服务。所有「接触操作系统」的能力都收敛在这里，
 // 前端通过生成的 JS 绑定直接调用这些方法（Wails 自动做 IPC）。
+//
+// 【2026-10-06 单栏重构：菜单态方法已下线】
+// 原本这里有一批「只服务于原生菜单」的状态与方法：scrollSync / typewriter /
+// alwaysOnTop 三个 checkbox 镜像、RefreshMenu、SetLocale、以及 recents 列表
+// （AddRecent / ClearRecents / loadRecents / saveRecents / recentLabels）。
+// 菜单改为前端自绘（TitleBar.vue）后它们全部失去调用方，已删除。
+// 行为本体没有丢：滚动联动随双栏视图一起下线；打字机 / 窗口置顶改由前端直接
+// 调 Wails runtime；界面语言由前端 i18n 单点持有（不再需要两侧同步）。
 type App struct {
 	ctx context.Context
 	// dirty 是前端文档「是否落后于磁盘」状态的镜像：
@@ -30,114 +37,47 @@ type App struct {
 	// 语义定义、生命周期与扩展路径见 docs/architecture/ADR-005-dirty-semantics.md；
 	// 若扩展为多文档，本字段应升级为 docKey→dirty 映射，不得在此布尔量上叠加第二种含义。
 	dirty bool
-
-	// mu 保护下方可变 UI 状态（菜单回调 / 前端 IPC 两个入口并发触碰）。
-	mu sync.Mutex
-	// 滚动联动 / 打字机模式 / 窗口置顶：菜单 checkbox 的初始态真源在 Go。
-	// 行为本体在前端；前端挂载时回读自身 localStorage 后调 Set* 同步到这里，
-	// 菜单切换时 emitChecked 先落这里、再广播事件给前端。
-	scrollSync  bool
-	typewriter  bool
-	alwaysOnTop bool
-	recents     []string // 最近打开的文件（新 → 旧，上限 recentFileLimit）
-	// locale 是 Go 侧菜单语言的唯一真源（SPEC-i18n-v1 §3）。
-	// 为什么语言真源要在 Go 侧也有一份：buildMenu 是纯函数式重建，
-	// RefreshMenu 只重新读 Go 的状态、不接收任何参数 —— 语言不同理。
-	// 前端 prefs.js 另存一份给界面文案用，两边由 SetLocale 单次事务同步
-	// （前端切语言 → SetLocale → 写这里 + RefreshMenu），不允许只改一边。
-	locale string
 }
 
-// recentFileLimit 最近打开列表上限（菜单里超过 10 项的列表没有检索价值）
-const recentFileLimit = 10
-
-// DirEntry 是文件树的一个节点（只展开一层，前端点击目录时再懒加载）
-type DirEntry struct {
-	Name  string `json:"name"`
-	Path  string `json:"path"`
-	IsDir bool   `json:"isDir"`
-	Ext   string `json:"ext"` // 方便前端按类型显示图标
-}
-
-// NewApp 新建 App。locale 取基准语言，与前端 i18n 的默认值一致 —— 两边默认值
-// 不同会在首帧产生「界面英文、菜单中文」的分裂态。
+// NewApp 新建 App。
 func NewApp() *App {
-	return &App{scrollSync: true, locale: defaultLocale} // 滚动联动默认开（历史行为）
+	return &App{}
 }
 
 func (a *App) startup(ctx context.Context) {
 	a.ctx = ctx
-	a.loadRecents()
 }
 
-// ---------- 菜单状态（checkbox / 最近打开） ----------
-
-// SetScrollSync 由前端挂载时回读 localStorage 后调用，同步 checkbox 初始态。
-func (a *App) SetScrollSync(v bool) {
-	a.mu.Lock()
-	a.scrollSync = v
-	a.mu.Unlock()
-}
-
-// SetTypewriter 同上。
-func (a *App) SetTypewriter(v bool) {
-	a.mu.Lock()
-	a.typewriter = v
-	a.mu.Unlock()
-}
-
-// SetAlwaysOnTop 由菜单 checkbox 回调调用：落状态 + 应用到窗口。
-func (a *App) SetAlwaysOnTop(v bool) {
-	a.mu.Lock()
-	a.alwaysOnTop = v
-	a.mu.Unlock()
-	if a.ctx != nil {
-		runtime.WindowSetAlwaysOnTop(a.ctx, v)
-	}
-}
-
-// RefreshMenu 用当前状态整体重建应用菜单。
-// 最近打开列表 / checkbox 状态变化后调用（MenuSetApplicationMenu 是 v2 提供的
-// 唯一菜单更新通道——整体替换，不做增量）。
-func (a *App) RefreshMenu() {
+// CloseWindow 关闭主窗口（自绘标题栏的关闭按钮调用）。
+//
+// 【为什么需要自己实现，以及为什么不用 runtime.Quit】
+// Wails v2.16 的 runtime 包**只有 Quit、没有 WindowClose**（go doc 核实：
+// pkg/runtime 的窗口方法里最小化/最大化/隐藏齐全，唯独没有「正常关闭」）。
+// 而 Quit 是**强制退出**：它不走 OnBeforeClose，于是「文档有未保存更改时弹
+// 确认框」这道保护会被绕过 —— 用户点一下标题栏的 × 就丢稿，且没有任何提示。
+// 原生菜单时代关闭入口在系统菜单（走正常流程），菜单下线后这个缺口才暴露。
+//
+// 故这里自己实现「正常关闭」：先按 OnBeforeClose 同一套逻辑询问用户，
+// 确认后才 Quit；dirty 为假时直接 Quit。
+// 判据用同一份 dirty 镜像（SetDirty 写入），不重复推断语义（ADR-005）。
+func (a *App) CloseWindow() {
 	if a.ctx == nil {
 		return
 	}
-	runtime.MenuSetApplicationMenu(a.ctx, buildMenu(a))
+	if !a.OnBeforeClose(a.ctx) {
+		runtime.Quit(a.ctx)
+	}
 }
 
-// SetLocale 切换菜单语言（前端设置面板切语言后调用）。
-//
-// 【单次事务】写入与刷新必须在同一个不可分割的调用里完成（SPEC §3/§4）：
-// 分成两步（前端先改 UI、再异步刷菜单）会出现「界面已英文、菜单还是中文」的
-// 中间态。这里一次写入 + 一次 RefreshMenu，调用返回时菜单已是新语言。
-//
-// 【为什么校验后静默忽略，而不是报错或纠正】
-//   - 报错：locale 由前端 localStorage 往返而来，一次手改 / 一次旧版本残留
-//     就能让用户彻底打不开菜单，且报错无处可看（这是启动路径，不是用户操作）；
-//   - 纠正成 defaultLocale：会让「我没点切换但菜单变中文了」这类现象无从追溯。
-//
-// 保持原值 + 不刷新是最保守的：未知输入 = 无事发生。
-// 代价是前端拿不到「被拒绝了」的反馈 —— 但前端只从三档固定列表里取值，
-// 走到这里的唯一路径是数据被外部篡改，不值得为它加一条返回码。
-func (a *App) SetLocale(locale string) {
-	if !isSupportedLocale(locale) {
-		return
-	}
-	a.mu.Lock()
-	a.locale = locale
-	a.mu.Unlock()
-	a.RefreshMenu()
-}
+// ---------- 系统剪贴板 ----------
 
 // ClipboardGet 读取系统剪贴板纯文本。
 //
-// 为什么需要它（不是为了"能读剪贴板"，而是为了绕不开的限制）：
-// macOS 的「编辑」菜单若用系统 EditMenu Role，标题与条目被 Wails 源码硬编码为
-// 英文且不可覆盖（见 main.go ③ 注释）；想中文化只能整体自建。而自建项挂的是
-// Wails 的 Go 回调，**挂不上原生的 copy:/paste: selector** —— 于是必须在前端
-// 自行完成剪贴板读写。
-// 而 document.execCommand('paste') 被浏览器安全策略禁用（无用户手势/被 iframe
+// 为什么需要它（不是为了「能读剪贴板」，而是绕不开的限制）：
+// 原生 EditMenu Role 的标题与条目被 Wails 源码硬编码为英文且不可覆盖，
+// 而自建菜单项挂的是 Wails 的 Go 回调、**挂不上原生的 copy:/paste: selector**
+// —— 于是必须在前端自行完成剪贴板读写。
+// 而 document.execCommand('paste') 被浏览器安全策略禁用（无用户手势 / 被 iframe
 // 与权限模型限制），所以粘贴只能走系统 API 再由前端插入文档。
 func (a *App) ClipboardGet() (string, error) {
 	if a.ctx == nil {
@@ -146,7 +86,7 @@ func (a *App) ClipboardGet() (string, error) {
 	return runtime.ClipboardGetText(a.ctx)
 }
 
-// ClipboardSet 写入系统剪贴板纯文本（剪切/拷贝走它）。
+// ClipboardSet 写入系统剪贴板纯文本（剪切 / 拷贝走它）。
 func (a *App) ClipboardSet(text string) error {
 	if a.ctx == nil {
 		return fmt.Errorf("应用尚未初始化")
@@ -154,89 +94,12 @@ func (a *App) ClipboardSet(text string) error {
 	return runtime.ClipboardSetText(a.ctx, text)
 }
 
-// AddRecent 前端成功打开文件后调用：去重置顶、截断上限、持久化并重建菜单。
-func (a *App) AddRecent(path string) {
-	if strings.TrimSpace(path) == "" {
-		return
-	}
-	a.mu.Lock()
-	out := []string{path}
-	for _, p := range a.recents {
-		if p != path && len(out) < recentFileLimit {
-			out = append(out, p)
-		}
-	}
-	a.recents = out
-	a.mu.Unlock()
-	a.saveRecents()
-	a.RefreshMenu()
-}
-
-// ClearRecents 清空最近打开列表（文件菜单入口）。
-func (a *App) ClearRecents() {
-	a.mu.Lock()
-	a.recents = nil
-	a.mu.Unlock()
-	a.saveRecents()
-	a.RefreshMenu()
-}
-
-// recentLabels 生成展示名：默认文件名；重名时追加「 — 上级目录名」消歧。
-func recentLabels(paths []string) []string {
-	counts := make(map[string]int, len(paths))
-	for _, p := range paths {
-		counts[filepath.Base(p)]++
-	}
-	labels := make([]string, len(paths))
-	for i, p := range paths {
-		base := filepath.Base(p)
-		if counts[base] > 1 {
-			labels[i] = base + " — " + filepath.Base(filepath.Dir(p))
-		} else {
-			labels[i] = base
-		}
-	}
-	return labels
-}
-
-// recentsPath 配置文件位置：<UserConfigDir>/inkmark/recents.json；拿不到目录返回空串跳过持久化。
-func (a *App) recentsPath() string {
-	base, err := os.UserConfigDir()
-	if err != nil {
-		return ""
-	}
-	return filepath.Join(base, "inkmark", "recents.json")
-}
-
-func (a *App) loadRecents() {
-	p := a.recentsPath()
-	if p == "" {
-		return
-	}
-	data, err := os.ReadFile(p)
-	if err != nil {
-		return // 首次启动无文件，正常
-	}
-	var list []string
-	if json.Unmarshal(data, &list) == nil {
-		a.recents = list
-	}
-}
-
-func (a *App) saveRecents() {
-	p := a.recentsPath()
-	if p == "" {
-		return
-	}
-	if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
-		return
-	}
-	a.mu.Lock()
-	data, err := json.Marshal(a.recents)
-	a.mu.Unlock()
-	if err == nil {
-		_ = os.WriteFile(p, data, 0o644)
-	}
+// DirEntry 是文件树的一个节点（只展开一层，前端点击目录时再懒加载）
+type DirEntry struct {
+	Name  string `json:"name"`
+	Path  string `json:"path"`
+	IsDir bool   `json:"isDir"`
+	Ext   string `json:"ext"` // 方便前端按类型显示图标
 }
 
 // ---------- 文件重命名 ----------

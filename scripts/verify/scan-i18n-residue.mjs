@@ -101,13 +101,18 @@ const SKIP_DIRS = new Set(['node_modules', 'dist', '.git', '.wails', 'bin'])
  */
 const ALLOW = [
   {
-    kind: '用户内容：Markdown 示例文档正文（DEFAULT_DOC / SYNTAX_DOC）',
+    kind: '用户内容：Markdown 示例文档正文（editor/sampleDocs.js 的 DEFAULT_DOC / SYNTAX_DOC）',
     // Spec §1 明确「文档内容本身的翻译（用户写的 Markdown 不译）」。
     // 它们是文档数据而非 chrome 文案：塞进 t() 会让示例文档跟着界面语言变，
     // 用户看到的就成了「被翻译过的示例」，失去「这就是 Markdown 效果」的意义。
-    test: (f, line) =>
-      /App\.vue$/.test(f) &&
-      /^\s*(#{1,6}\s|\||>\s|[-*+]\s|\d+\.\s|```|\\`|一个安静|它能做什么|代码块|引用与行内|所有操作|打开单个|编辑与预览|标记符|明暗纸|导出 HTML|中间的分隔|左右两栏|行内代码长这样|任务列表|快捷键|全部键位|关于|快速)/.test(line),
+    //
+    // [2026-10-06 第五轮] 判据从 `/App\.vue$/` 改为按本文件整文件豁免：
+    // 两份模板从 App.vue 搬到了 editor/sampleDocs.js（App.vue 瘦身成 ≤150 行
+    // 装配层）。此前那条按「行首形态」过滤的规则其实**漏判**了散文行
+    // （如「一份可玩的速查表。改一改，立刻看到变化。」），靠 App.vue 这个
+    // 粗筛侥幸没报出来 —— 换个文件就暴露了。故改为显式的整文件豁免：
+    // 该文件只有两份文档正文，任何界面文案都不该出现在这里。
+    test: (f) => /editor\/sampleDocs\.js$/.test(f),
   },
   {
     kind: '导出模板文案（exporters.js）—— Spec §1 明确留待后续',
@@ -119,6 +124,14 @@ const ALLOW = [
     // 的文本，不是 chrome 文案。用户文档不随界面语言变（与 DEFAULT_DOC 同理）。
     test: (f, line) =>
       /editor\/commands\.js$/.test(f) && /列一|暂无标题|'## 目录/.test(line),
+  },
+  {
+    kind: 'CJK 字数统计用的字符类正则（码点区间，不是文案）',
+    // [2026-10-06 第五轮] 这行以前住在 App.vue 的 <script> 段里，而本脚本对 .vue
+    // 只扫 <template> 段 —— 搬进 composables/useEditorSession.js（.js 扫全文）
+    // 后第一次被扫到，于是暴露了这个口径差。它是「统计字数要认哪些字符」的
+    // 码点集合，不是任何用户可见文案，故显式豁免（判据写窄：只认变量名）。
+    test: (f, line) => /(const|let)\s+cjkRe\s*=/.test(line),
   },
   {
     kind: '诊断日志（console.*）里的中文：给开发者的调试信息，不是用户界面',

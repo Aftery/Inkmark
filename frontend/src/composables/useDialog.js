@@ -8,24 +8,23 @@
  * 放在 App.vue 里只会让那个文件继续膨胀。
  *
  * 【时序契约，勿改】
- *   askInput() 同步把 dialog.show 置 true 并挂上 Promise 的 resolve，
- *   再 nextTick 聚焦输入框 —— 顺序不能调换：先渲染再聚焦，否则
- *   dialogInputEl 还是 null，焦点不会落进去（WKWebView 下尤其明显）。
+ *   askInput() 同步把 dialog.show 置 true 并挂上 Promise 的 resolve；
+ *   聚焦改由 InputDialog.vue 的 watch(show) + nextTick 完成（输入框 ref 在
+ *   那个组件里）—— 顺序仍是「先渲染再聚焦」，否则 ref 还是 null、焦点不落进去
+ *   （WKWebView 下尤其明显）。
  *
  *   closeDialog() 先置 show=false **再** resolve：反过来的话，
  *   业务方的 .then 会在对话框仍可见时同步执行，UI 会出现一帧闪烁。
  */
-import { ref, nextTick } from 'vue'
+import { ref } from 'vue'
 
 export function useDialog() {
   const dialog = ref({ show: false, title: '', placeholder: '', value: '', _resolve: null })
-  const dialogInputEl = ref(null)
 
   /** 打开输入框；返回 Promise，用户确定时 resolve(输入值)、取消时 resolve(null) */
   function askInput({ title, placeholder = '', value = '' }) {
     return new Promise((resolve) => {
       dialog.value = { show: true, title, placeholder, value, _resolve: resolve }
-      nextTick(() => dialogInputEl.value?.focus())
     })
   }
 
@@ -38,5 +37,5 @@ export function useDialog() {
     d._resolve = null
   }
 
-  return { dialog, dialogInputEl, askInput, closeDialog }
+  return { dialog, askInput, closeDialog }
 }

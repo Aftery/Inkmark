@@ -19,6 +19,8 @@ import { markdown, markdownLanguage } from '@codemirror/lang-markdown'
 import { tags as t } from '@lezer/highlight'
 import codeLanguages from './markdownHighlight'
 import { wysiwygField, wysiwygPlugin, wysiwygAtomicRanges } from './wysiwyg'
+import { slashCommandExtension } from './slashCommand'
+import { imageDropHandlers } from './imageDrop'
 
 // 围栏代码块内按 Enter 跳出（真机反馈：光标在代码块内按 Enter 跳不出围栏）。
 // 规则：光标位于「紧邻结束围栏的空行」时，在结束围栏之后另起一行并把光标移过去。
@@ -188,31 +190,11 @@ export function replaceDocument(view, content) {
 }
 
 // ---------- 图片粘贴 / 拖拽插入 ----------
+// 实现已抽到 editor/imageDrop.js（自成职责的输入通道，且长期占着本文件的行数预算）。
 // 只拦截「文件型图片」；普通文本 / 其它文件一律放行（返回 false 交默认处理）。
 // 真正落盘由上层 onImageFile 回调完成（App.vue 调 Go SaveImage），编辑器只管插入 Markdown。
-function imageFileFromDataTransfer(dt) {
-  if (!dt || !dt.files || dt.files.length === 0) return null
-  for (const f of dt.files) {
-    if (f.type && f.type.startsWith('image/')) return f
-  }
-  return null
-}
 
-function insertImageMarkdown(view, file, pos, onImageFile) {
-  Promise.resolve(onImageFile(file))
-    .then((url) => {
-      if (!url) return
-      const at = Math.max(0, Math.min(pos, view.state.doc.length))
-      const snippet = `![](${url})`
-      view.dispatch({
-        changes: { from: at, insert: snippet },
-        selection: { anchor: at + snippet.length },
-      })
-    })
-    .catch(() => { /* 插入失败静默：上层已给 toast */ })
-}
-
-export function createEditor(parent, { doc = '', onDocChange, onScroll, onUpdate, onImageFile }) {
+export function createEditor(parent, { doc = '', onDocChange, onScroll, onUpdate, onImageFile, slashHost }) {
   // 只监听文档变化。滚动不要在这里监听 —— CM6 的 ViewUpdate 根本没有 scrollChanged
   // 这个属性（真实属性只有 docChanged/selectionSet/focusChanged/viewportChanged/
   // heightChanged/geometryChanged 等），写了永远是 undefined，滚动联动会静默失效。
@@ -233,6 +215,11 @@ export function createEditor(parent, { doc = '', onDocChange, onScroll, onUpdate
     extensions: [
       highlightSpecialChars(),
       history(),
+      // Slash 命令面板：内部自带 Prec.high（须压过 defaultKeymap 的 Enter/Escape）。
+      // 放在 keymap.of([...]) 之前是约定俗成的可读性排序，实际优先级由 Prec 决定。
+      // slashHost 由 App.vue 传入 `() => slashRef.value`（延迟求值：面板组件
+      // 在编辑器之后挂载，构造期取不到实例）。
+      slashCommandExtension(slashHost),
       // 自定义 Enter 键位须排在 defaultKeymap 之前才优先生效（见 exitCodeBlockOnEnter）。
       // searchKeymap：⌘F 查找面板（darwin 无菜单入口，按键直达 WebView）+ Esc 关闭。
       // 行操作键位沿用 VS Code 惯例（⌥↑↓ 移动行、⇧⌥↑↓ 复制行、⌘⇧K 删除行）——
@@ -251,30 +238,7 @@ export function createEditor(parent, { doc = '', onDocChange, onScroll, onUpdate
         indentWithTab,
       ]),
       // 图片粘贴 / 拖拽：仅在拿到图片文件且注册了 onImageFile 时拦截，其余放行
-      EditorView.domEventHandlers({
-        paste(event, view) {
-          const file = imageFileFromDataTransfer(event.clipboardData)
-          if (!file || !onImageFile) return false
-          event.preventDefault()
-          insertImageMarkdown(view, file, view.state.selection.main.head, onImageFile)
-          return true
-        },
-        drop(event, view) {
-          const file = imageFileFromDataTransfer(event.dataTransfer)
-          if (!file || !onImageFile) return false
-          event.preventDefault()
-          const pos = view.posAtCoords({ x: event.clientX, y: event.clientY })
-          insertImageMarkdown(view, file, pos ?? view.state.selection.main.head, onImageFile)
-          return true
-        },
-        dragover(event) {
-          // 文件拖拽需阻止默认，否则浏览器不会派发 drop
-          if (event.dataTransfer && Array.from(event.dataTransfer.types).includes('Files')) {
-            event.preventDefault()
-          }
-          return false
-        },
-      }),
+      EditorView.domEventHandlers(imageDropHandlers(onImageFile)),
       markdown({ base: markdownLanguage, codeLanguages }),
       syntaxHighlighting(mdHighlight, { fallback: true }),
       // 查找/替换面板（⌘F / ⌘⌥F）：面板停靠编辑区顶部

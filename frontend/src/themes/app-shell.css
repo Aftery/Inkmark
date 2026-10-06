@@ -1,0 +1,147 @@
+/* ============================================================================
+ * app-shell.css — 装配层布局（App.vue 的样式部分整体迁出）
+ * ----------------------------------------------------------------------------
+ * 为什么不在 App.vue 里写 scoped 样式：App.vue 是 ≤150 行的纯装配层
+ * （门禁 contracts.test.mjs 契约 5），把 200+ 行布局 CSS 塞回来就等于放弃该铁律。
+ *
+ * 为什么是**全局**选择器（不是 scoped）：这些类名本身就是唯一的
+ * （.main / .pane / .export-preview / .dialog-* / .focus-toast 只此一处），
+ * 不存在样式泄漏面；弹层类另需被三个对话框组件共用（InputDialog /
+ * ShortcutsDialog / AboutDialog），各自复制一份才是真重复。
+ *
+ * 组件私有样式仍留在各自组件内（Sidebar.vue 的侧栏、TitleBar.vue 的标题栏…）。
+ * 打印相关规则的**两份缺一不可**：本文件的全局规则 + 各组件 scoped 内自己的
+ * @media print（Vue scoped 打不到子组件内部，见契约 3）。
+ * ========================================================================== */
+
+/* ---- 应用骨架：纵向 flex（标题栏 / 主区 / 状态栏） ---- */
+.app { display: flex; flex-direction: column; height: 100%; }
+.main { display: flex; flex: 1; min-height: 0; }
+
+/* ---- 单栏正文：居中 + 限宽（--single-measure）----
+   编辑区与预览区共用同一条中轴，两者切换时视线不跳动。 */
+.pane { min-width: 0; overflow: hidden; }
+.editor-pane {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+}
+.editor-host { flex: 1; min-height: 0; }
+
+/* 预览（阅读态 / 打印 / 导出）同样限宽居中 */
+.preview-pane {
+  flex: 1;
+  overflow-y: auto;
+  background: var(--bg);
+}
+.reading-pane .preview-body {
+  max-width: var(--reading-measure);
+  margin: 0 auto;
+  padding: var(--space-16) var(--space-6);
+  font-size: calc(var(--reading-font-size) * var(--zoom-scale, 1));
+  line-height: var(--reading-leading);
+}
+
+/* 导出 / 打印用的第二份渲染：不占布局（position:absolute 移出流），
+   但 DOM 始终存在 —— 导出 HTML / PDF 与 window.print() 直接复用它。 */
+.export-preview {
+  position: absolute;
+  left: -99999px;
+  top: 0;
+  width: var(--single-measure);
+  pointer-events: none;
+}
+
+/* ---- 专注 / 阅读模式的一次性与结果提示 ---- */
+.focus-toast {
+  position: fixed;
+  left: 50%;
+  bottom: var(--space-6);
+  transform: translateX(-50%);
+  max-width: min(80vw, 560px);
+  padding: var(--space-2) var(--space-4);
+  background: var(--surface);
+  color: var(--meta);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-pill);
+  box-shadow: var(--elev-raised);
+  font-size: var(--text-sm);
+  pointer-events: none;
+  z-index: 1300;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.focus-toast.is-err { color: var(--danger); border-color: var(--danger); }
+
+/* ---- 弹层基座（输入框 / 速查 / 关于 三者共用） ----
+   尺寸用 --dialog-width-sm/md（design-tokens.css 是唯一真源），
+   新增弹层禁止写死 min(Npx, Nvw)。 */
+.dialog-mask {
+  position: fixed;
+  inset: 0;
+  background: color-mix(in srgb, var(--fg) 18%, transparent);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1400;
+}
+.dialog {
+  width: var(--dialog-width-sm);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--elev-raised);
+  padding: var(--space-6) var(--space-6) var(--space-4);
+}
+.dialog-wide { width: var(--dialog-width-md); }
+.dialog-title {
+  margin: 0 0 var(--space-3);
+  font-size: var(--text-md);
+  font-weight: var(--weight-emphasize);
+  color: var(--fg);
+}
+.dialog-input {
+  width: 100%;
+  box-sizing: border-box;
+  min-height: 36px;
+  padding: 0 var(--space-3);
+  background: var(--bg);
+  color: var(--fg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  font: inherit;
+  font-size: var(--text-sm);
+}
+.dialog-input:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: var(--focus-ring);
+}
+.dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-2);
+  margin-top: var(--space-4);
+}
+.dialog-btn {
+  min-height: 32px;
+  padding: 0 var(--space-4);
+  background: var(--surface-2);
+  color: var(--fg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  font: inherit;
+  font-size: var(--text-sm);
+  cursor: pointer;
+}
+.dialog-btn:hover { background: var(--accent-soft); border-color: var(--border-strong); }
+.dialog-btn.primary { background: var(--accent); color: var(--accent-on); border-color: var(--accent); }
+.dialog-btn.primary:hover { filter: brightness(1.05); }
+.dialog-btn:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+
+/* ---- 打印兜底：主体不落色（各 chrome 的隐藏规则见 App.vue 与各组件） ---- */
+@media print {
+  .app { background: none; }
+}

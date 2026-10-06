@@ -1,0 +1,50 @@
+/* ============================================================================
+ * platform-darwin.css — macOS 毛玻璃（Vibrant）适配层
+ * ----------------------------------------------------------------------------
+ * Go 侧已在 main.go 打开 WebviewIsTransparent + WindowIsTranslucent
+ * （仅 darwin），窗口与 WebView 因此透明，系统 Vibrant 材质透进来。
+ * CSS 这一侧要做的是「让出底色」：凡是不透明的实色会把材质完全盖住。
+ *
+ * 挂载点：<html data-platform="darwin">（由 composables/usePlatform.js 落，
+ * Environment() 权威确认 + navigator 同步初判）。
+ * 选择器一律带足够特异度压过组件 scoped 样式（.titlebar 的 scoped 规则是
+ * `.titlebar[data-v-x]`，特异度 0,2,0；本文件用 `html[...] .app > .titlebar`
+ * 达 0,3,0，且加载顺序在后）。
+ *
+ * 【刻意不透明的部分】正文写作面（CM 编辑器 + 阅读态预览）保持 --bg 实色：
+ * 长文写作的可读性优先于材质感；毛玻璃只给 chrome（标题栏 / 侧栏 / 状态栏），
+ * 这也正是原生 mac 应用（如备忘录侧栏）的做法。
+ * ========================================================================== */
+
+/* 窗口底色让给系统材质（base.css 里 body 是 --bg 实色，先在这里接管） */
+html[data-platform='darwin'] body { background: transparent; }
+
+html[data-platform='darwin'] .app {
+  background: color-mix(in srgb, var(--bg) 86%, transparent);
+}
+
+/* 标题栏：完全透明，直接吃窗口材质（菜单按钮本身是 no-drag，不影响拖动） */
+html[data-platform='darwin'] .app > .titlebar {
+  background: transparent;
+  border-bottom-color: color-mix(in srgb, var(--border) 55%, transparent);
+}
+
+html[data-platform='darwin'] .main .sidebar {
+  background: color-mix(in srgb, var(--surface) 78%, transparent);
+}
+
+html[data-platform='darwin'] .app > .statusbar {
+  background: color-mix(in srgb, var(--surface) 78%, transparent);
+}
+
+/* 弹层需要不透明底：浮层压在材质上再透字会难以辨读，故显式回到实色 */
+html[data-platform='darwin'] .dialog,
+html[data-platform='darwin'] .tb-dropdown,
+html[data-platform='darwin'] .focus-toast {
+  background: var(--surface);
+}
+
+/* 打印：透明背景会随打印机变白底灰字；显式恢复实色 */
+@media print {
+  html[data-platform='darwin'] .app { background: none; }
+}

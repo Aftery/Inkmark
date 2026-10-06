@@ -1,6 +1,7 @@
 // Markdown 格式化命令（AC-10 toggle 语义 / AC-11 选区包裹保高亮）
 // ----------------------------------------------------------------------------
-// 消费方：App.vue 的菜单事件（menu:format-*）与 Toolbar.vue 按钮统一走这里。
+// 消费方：命令表（useShortcuts.js 的 COMMANDS → App.vue 的 registerCommands）。
+// 单栏重构后顶部工具条已下线，格式命令改由斜杠命令面板与快捷键驱动。
 // 不在 CM keymap 里重复绑定（菜单 accelerator 先于 WebView 消费按键，
 // 同键双绑会静默失效 —— 架构 §7）。
 //

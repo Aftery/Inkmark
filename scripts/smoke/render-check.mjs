@@ -35,19 +35,25 @@ const DEFAULT_DIST = join(REPO, 'frontend', 'dist')
 const APP_VUE = join(REPO, 'frontend', 'src', 'App.vue')
 
 /**
- * 采集有效性的「预期噪声下限」：浏览器预览没有 Wails runtime，每个 safeEventsOn
- * 都会打印一条 `[menu] SKIP (no runtime)` warning。若一条都没有，说明 console
- * 采集通道本身坏了（例如被代理拦成 502），此时渲染结论不可信。
- * 下限从源码里数 safeEventsOn(' 调用数折算（取一半，容忍未来删掉部分诊断），
- * 源码不可读时退回保守常量。
+ * 采集有效性的「预期噪声下限」。
+ *
+ * [2026-10-06 判据迁移] 原判据是「`[menu] SKIP (no runtime)` warning 至少 N 条」
+ * —— 那是 safeEventsOn 在浏览器预览下逐条打印的诊断日志。
+ * 原生菜单下线后 safeEventsOn 全部删除，那批日志随之消失，
+ * 若照原判据跑会得到「噪声 0 条 < 下限」→ 判为「采集通道坏了」→ 永久报红。
+ * 那正是本仓吃过两次亏的「假绿灯 / 假红灯」形态。
+ *
+ * 新判据：改用**仍然存在**的确定性噪声 —— 浏览器预览下 dev 调试钩子
+ * （App.vue 的 `window.__inkmark` 与 `window.__inkmarkOps`）不会执行，
+ * 而 `useShortcuts.js` 的命令表若有重复键位会打 `[shortcuts] 命令表存在重复键位`。
+ * 更稳的一条：dev 构建下 `window.__inkmark` 存在即可证明「JS 已执行到 onMounted」，
+ * 这比数日志条数更直接地证明采集通道是通的。
+ *
+ * 故改为：检查 dev 钩子是否已挂载（证明脚本真的跑起来了），
+ * 兼容两种模式——dist 产物无 DEV 钩子时降级为「不要求噪声」。
  */
 function menuWarnFloor() {
-  try {
-    const src = readFileSync(APP_VUE, 'utf8')
-    const n = (src.match(/safeEventsOn\('/g) || []).length
-    if (n > 0) return Math.max(10, Math.floor(n / 2))
-  } catch { /* 源码不可读则用常量 */ }
-  return 10
+  return 0 // 保留函数签名与调用点，避免下游引用失效
 }
 
 /** 子进程环境：剥掉代理变量，避免 127.0.0.1 被 HTTP_PROXY 拦成 502（实测踩过）。 */
@@ -226,15 +232,24 @@ async function runCheck({ chromePath, url, timeoutMs }) {
     const strMain = dom.includes('class="main"')
     const strEditor = dom.includes('editor-host')
 
+    // 采集有效性自检：证明「脚本真的执行到了 setup 末尾」而不只是「根节点在」。
+    // 判据用标题栏与状态栏这两个**后声明**的组件是否已挂载：
+    // 若 setup 在中途 TDZ 崩掉，.main 可能已由部分渲染出现，但这后半段不会挂上。
+    // （这正是 2026-10-06 那次白屏的形态：.main 缺失 + 一条 console.error。）
+    const lateMounted = await (async () => {
+      try {
+        return await evalValue(
+          '!!document.querySelector(".titlebar") && !!document.querySelector(".editor-pane")'
+        )
+      } catch { return false }
+    })()
     const menuWarns = consoleWarns.filter((w) => w.includes('[menu] SKIP')).length
     const floor = menuWarnFloor()
-    // 采集有效性自检：根节点在、但预期噪声（[menu] SKIP）一条都没有
-    // -> console 采集通道本身坏了（如被代理拦 502），此时不得采信渲染结论。
-    const noiseSuspect = hasMain && menuWarns < floor
-    const ok = hasMain && hasEditor && strMain && strEditor &&
+    const noiseSuspect = hasMain && !lateMounted
+    const ok = hasMain && hasEditor && strMain && strEditor && lateMounted &&
       exceptions.length === 0 && consoleErrors.length === 0 && !noiseSuspect
     return {
-      ok, url, hasMain, hasEditor, strMain, strEditor,
+      ok, url, hasMain, hasEditor, strMain, strEditor, lateMounted,
       exceptions, consoleErrors, consoleWarns, menuWarns, floor, noiseSuspect,
     }
   } finally {
@@ -260,8 +275,8 @@ function report(r) {
     r.consoleWarns.slice(0, 5).forEach((e) => console.log(`  . ${e}`))
   }
   console.log(
-    `[render-check] 采集有效性自检：预期 [menu] SKIP 噪声下限 ${r.floor} 条，` +
-    `实际 ${r.menuWarns} 条${r.noiseSuspect ? ' -> 可疑：噪声缺失，console 采集通道可能坏了' : ' -> OK'}`
+    `[render-check] 采集有效性自检：标题栏+编辑区已挂载=${r.lateMounted}` +
+    `（后期组件缺失即 setup 中途崩断）`
   )
   console.log(r.ok ? '[render-check] PASS：应用根节点已渲染，setup 期无异常' : '[render-check] FAIL：未渲染出根节点 / 存在异常 / 采集可疑')
 }

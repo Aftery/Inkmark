@@ -6,6 +6,8 @@
  *   1) tokens/design-tokens.css —— A1/A2/B/C 四层 Token + 兼容别名层（单文件）
  *   2) base.css                —— 全局重置与 body 基础排版
  *   3) preview.css             —— 预览区排版 + highlight.js token 配色
+ *   4) app-shell.css           —— 装配层布局（App.vue 的样式部分迁出，≤150 行铁律）
+ *   5) platform-darwin.css     —— macOS 毛玻璃适配（挂 <html data-platform>）
  *
  * 使用：App.vue 顶部 `import './themes/index.css'`（main.js 不再单独引 base.css）。
  * ========================================================================== */
@@ -13,3 +15,5 @@
 @import './tokens/design-tokens.css';
 @import './base.css';
 @import './preview.css';
+@import './app-shell.css';
+@import './platform-darwin.css';

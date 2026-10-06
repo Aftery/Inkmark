@@ -197,196 +197,167 @@ const rel = (abs) => relative(REPO, abs).split(sep).join('/')
  */
 
 // ===========================================================================
-// 契约 1：菜单事件双向闭合
+// 契约 1：命令双向闭合（AC-03 · 2026-10-06 起判据迁移）
 // ===========================================================================
 
 /**
- * Go 侧发出的事件名。
- * 覆盖 main.go 里三种发出方式：
- *   emit("x")                    —— 普通菜单项
- *   emitChecked("x", setter)     —— checkbox 菜单项
- *   runtime.EventsEmit(ctx, "x") —— 直接发（最近打开等动态项）
+ * 【判据迁移说明 —— 读这段前务必先看，否则会以为检查「消失」了】
  *
- * [注意] 引号风格无关（`"` / `` ` `` / `'` 都是合法 Go 字符串）——
- * 早先只认双引号，写成反引号会导致扫不到、进而让下游差集检查**静默放行**。
- * 这就是「解析器把『看起来像』当成『是』」那类坑，与 shell grep 静默无输出同源。
+ * 原判据：Go 侧 buildMenu() 发出的 menu:* 事件 ↔ 前端 safeEventsOn 注册，双向闭合。
+ * 迁移原因：原生菜单整体下线（main.go 的 buildMenu 与 locales.go 已删除），
+ * 事件链的**两端同时消失** —— Go 不再 emit，前端也不再 safeEventsOn。
+ * 若照原判据跑，只会得到「两边都空 → 差集为空 → 全部一致」的**假通过**，
+ * 那正是本仓吃过两次亏的失败模式（HANDOFF §5「最危险的失败模式：假绿灯」）。
+ *
+ * 新判据（同一件事的新两端）：
+ *   命令表 frontend/src/composables/useShortcuts.js 的 COMMANDS（id 清单）
+ *     ↔ 命令处理器注册面 composables/useCommands.js 的 registerCommands()
+ * 语义完全等价：原来「Go 有菜单项但前端没接 → 点了没反应」，
+ * 现在「命令表有命令但没注册 → 菜单里点了没反应 / 快捷键按了没反应」。
+ * 故障形态一模一样，防护价值也一模一样。
+ *
+ * [2026-10-06 第五轮] 注册面从 App.vue 移到 useCommands.js：App.vue 瘦身成
+ * 纯装配层后，命令 map 是 App.vue 里最大的一块业务代码。**判据迁移不等于检查
+ * 消失** —— 两端都换了文件，差集断言照旧。
  */
-function collectGoEmitted(goSrc) {
-  const names = new Map() // name -> 首个出现的行号（1-based）
-  // 事件名一律用双引号字面量（Go 社区惯例），但解析不假设引号风格
-  const Q = '["`\']'
-  const patterns = [
-    new RegExp(`\\bemit\\(\\s*${Q}([^"'\`]+)${Q}`, 'g'), // emit("...")
-    new RegExp(`\\bemitChecked\\(\\s*${Q}([^"'\`]+)${Q}`, 'g'), // emitChecked("...")
-    new RegExp(`\\bEventsEmit\\(\\s*[\\w.]+\\s*,\\s*${Q}([^"'\`]+)${Q}`, 'g'), // EventsEmit(ctx, "...")
-  ]
-  for (const re of patterns) {
-    for (const m of goSrc.matchAll(re)) {
-      if (!names.has(m[1])) {
-        names.set(m[1], goSrc.slice(0, m.index).split('\n').length)
-      }
-    }
+
+/** 命令表里的命令 id（唯一真源：useShortcuts.js） */
+function collectCommandIds(src) {
+  const ids = new Map() // id -> 行号
+  for (const m of src.matchAll(/\{\s*id:\s*'([^']+)'\s*,\s*group:/g)) {
+    if (!ids.has(m[1])) ids.set(m[1], src.slice(0, m.index).split('\n').length)
   }
-  return names
+  return ids
 }
 
 /**
- * 统计 main.go 里**字面量形式**的 emit 调用点数量（缺陷 3 的对账基准）。
- *
- * 为什么要这个对账：`collectGoEmitted` 只认「引号紧跟括号」的写法。
- * 若 Go 侧把事件名抽成常量（`const evtNewFile = "menu:new-file"` + `emit(evtNewFile)`，
- * 这是 Go 里常见且推荐的做法），解析器就**扫不到那个事件**了 ——
- * 于是差集变空、误判成「前端多注册了事件」，**报错方向指向前端，真因在解析器**。
- * 有了这个计数，两者不等就能立刻定位到解析器，而不是让人去查前端。
- *
- * 只统计「看起来是 emit 调用点」的：`emit(` / `emitChecked(` / `EventsEmit(`。
- * 函数**声明**本身（`emit := func(...)`）不计。
+ * 前端注册的命令 id。
+ * 认 onCommand('x', …) 与 map 对象的字符串键（useCommands.js 的 registerCommands
+ * 用的是 `map` 字面量 + 末尾 for 循环统一注册，故两种写法都要认）。
  */
-function countGoEmitCallSites(goSrc) {
-  const callSites = goSrc.match(/\b(?:emit|emitChecked|EventsEmit)\s*\(/g) || []
-  // 减去闭包声明：`emit := func(` / `emitChecked := func(` 各计 1 次
-  const decls = goSrc.match(/\b(?:emit|emitChecked)\s*:=\s*func\s*\(/g) || []
-  return callSites.length - decls.length
-}
-
-
-/** 前端侧注册的事件名（safeEventsOn） */
 function collectFrontendRegistered(src) {
   const names = new Map()
-  for (const m of src.matchAll(/safeEventsOn\(\s*'([^']+)'/g)) {
-    if (!names.has(m[1])) {
-      names.set(m[1], src.slice(0, m.index).split('\n').length)
-    }
+  for (const m of src.matchAll(/\bonCommand\(\s*'([^']+)'/g)) {
+    if (!names.has(m[1])) names.set(m[1], src.slice(0, m.index).split('\n').length)
+  }
+  for (const [name, line] of collectMapKeys(src)) {
+    if (!names.has(name)) names.set(name, line)
   }
   return names
 }
 
 /**
- * 前端事件注册面 = App.vue ∪ main.js。
- *
- * [注意] **偏离 Spec 字面，理由如下（已向总监报备）**
- * Spec §4.2 原文写「全部出现在 App.vue 的 safeEventsOn('…')」。
- * 但实测 main.go 发出的 64 个事件里，`menu:toggle-theme` **不在 App.vue**，
- * 而在 `frontend/src/main.js:25` 注册 —— 因为它在 Vue mount 之前注册，
- * 用于主题切换不闪烁（与 prefs.js「首帧前落好内联变量」同一约定）。
- * 这是正确设计，不是漏注册。
- * 若严格只看 App.vue，本检查会因「判据不完整」而假失败。
- * 扩到注册面全集后，AC-03 依然成立：Go 新增一个两端都没注册的事件必失败。
+ * 从 useCommands.js 的 registerCommands 的 map 字面量里取键。
+ * 逐行匹配 `'x.y': handler` 形态；跳过注释行（否则会命中注释里出现的
+ * useFileOps({...}) 之类文本 —— 本仓已因「匹配到注释里的代码」栽过 7 次，
+ * 见 Spec §7 坑 4）。
  */
-const EVENT_SURFACE_FILES = ['src/App.vue', 'src/main.js']
-
-/**
- * 反向白名单：前端注册了、但 Go 侧不通过 `emit*` 发出的事件。
- * 每条必须写明来源，否则将来凭空多出来的注册会被本检查放行。
- */
-const FRONTEND_ONLY_EVENT_WHITELIST = {
-  'fs:changed': 'Wails 文件监听事件，由 Wails runtime 自行派发，不经 main.go 的 emit/emitChecked',
+function collectMapKeys(src) {
+  const keys = new Map()
+  const inFn = src.indexOf('function registerCommands()')
+  if (inFn === -1) return keys
+  const end = src.indexOf('\n}', inFn)
+  if (end === -1) return keys
+  const seg = src.slice(inFn, end)
+  let consumed = 0
+  for (const rawLine of seg.split('\n')) {
+    const lineNo = inFn + consumed
+    consumed += rawLine.length + 1
+    if (/^\s*(\/\/|\*|\/\*)/.test(rawLine)) continue
+    const m = rawLine.match(/^\s*'([^']+)'\s*:/)
+    if (m && !keys.has(m[1])) keys.set(m[1], lineNo)
+  }
+  return keys
 }
 
-describe('契约 1 · 菜单事件双向闭合（AC-03）', () => {
-  // 全部经 readStable 读取并登记哈希 —— 供下方稳定性守卫比对
-  const goSrc = readStable(join(REPO, 'main.go'))
-  const emitted = collectGoEmitted(goSrc)
+/** 注册面 = composables/useCommands.js（命令处理器唯一注册处） */
+const EVENT_SURFACE_FILES = ['src/composables/useCommands.js']
 
-  const registered = new Map() // name -> {file, line}
+describe('契约 1 · 命令双向闭合（AC-03）', () => {
+  const shortcutsSrc = readStable(join(SRC, 'composables', 'useShortcuts.js'))
+  const commands = collectCommandIds(shortcutsSrc)
+
+  const registered = new Map()
   for (const f of EVENT_SURFACE_FILES) {
-    const p = join(FRONTEND, f)
-    for (const [name, line] of collectFrontendRegistered(readStable(p))) {
+    const src = readStable(join(FRONTEND, f))
+    for (const [name, line] of collectFrontendRegistered(src)) {
       if (!registered.has(name)) registered.set(name, { file: f, line })
     }
   }
 
   /**
    * [必须排在本组第一位] 被读文件在测试运行期间不得变化。
-   *
-   * 排在差集断言之前是关键：文件在变时，事件数会暂时对不上，
-   * 后续差集用例会报出「前端多注册了事件」这类**误导性**结论
-   * （2026-10-04 真实发生过一次并发 flaky）。先把归因钉成「环境在抖」，
-   * 后面的结论才可信。
+   * 排在差集断言之前是关键：文件在变时命令数会暂时对不上，
+   * 后续差集用例会报出「前端多注册了命令」这类**误导性**结论
+   * （2026-10-04 真实发生过一次并发 flaky）。
    */
   test('被读文件在测试运行期间未被并发修改（并发守卫）', () => {
     assertFilesUnchanged()
   })
 
-  test('main.go 确实发出了菜单事件（防止扫描规则本身失效而假通过）', () => {
-    // 这条是「扫描器自检」：如果正则写坏了，上面的差集会是空集，测试会假通过
+  test('命令表确实解析出了命令（防止扫描规则本身失效而假通过）', () => {
     assert.ok(
-      emitted.size >= 50,
-      `只扫到 ${emitted.size} 个事件，正则很可能失效（预期 60+）`
+      commands.size >= 40,
+      `只扫到 ${commands.size} 条命令，正则很可能失效（预期 40+）`
     )
-    assert.ok(
-      [...emitted.keys()].every((n) => n.startsWith('menu:')),
-      `扫到了非 menu: 前缀的事件，可能是正则误匹配: ${[...emitted.keys()].filter((n) => !n.startsWith('menu:'))}`
-    )
-  })
-
-  /**
-   * 缺陷 3 的核心守卫：**解析器能力对账**。
-   *
-   * 背景：把事件名抽成常量（`const evtX = "menu:x"` + `emit(evtX)`）会让
-   * `collectGoEmitted` 扫不到该事件。此时差集变空，下游「前端多注册」用例报错 ——
-   * 但**真因在解析器，报错却指向前端**，会让人白查半天。
-   * 我们正要大规模改 main.go，这种假失败的返工代价是实打实的。
-   *
-   * 判据：字面量 emit 调用点数必须等于解析出的事件数。
-   * 不等 = 解析器已覆盖不全 → 直接指向解析器，**先于任何差集断言**。
-   */
-  test('解析器必须覆盖 main.go 全部 emit 调用点（能力对账，防归因错报）', () => {
-    const callSites = countGoEmitCallSites(goSrc)
-    const parsed = emitted.size
-    assert.equal(
-      parsed,
-      callSites,
-      `解析器覆盖不全：main.go 有 ${callSites} 个 emit 调用点，只解析出 ${parsed} 个事件。` +
-        '说明 Go 侧出现了本检查无法解析的写法（最常见：事件名被抽成常量，' +
-        '如 const evtX = "menu:x" 后写成 emit(evtX)）。' +
-        '请更新 collectGoEmitted / countGoEmitCallSites 以支持该写法 —— ' +
-        '不要去改前端，本条报的是**解析器**的账。'
-    )
-  })
-
-  test('Go 发出的每个事件都必须在前端注册面（App.vue ∪ main.js）里有 safeEventsOn', () => {
-    const missing = [...emitted.entries()].filter(([name]) => !registered.has(name))
+    const bad = [...commands.keys()].filter((n) => !/^[a-z]+\.[A-Za-z0-9]+$/.test(n))
     assert.deepEqual(
-      missing.map(([name, line]) => `${name} (main.go:${line})`),
-      [],
-      'Go 侧发出但前端未注册的事件 —— 点了菜单不会有任何反应，也没有报错。' +
-        '修复：在前端补 safeEventsOn 注册，或从 main.go 移除该菜单项。'
+      bad, [],
+      `扫到了不符合 'group.action' 形态的命令 id，解析规则可能变了：${bad.join(', ')}`
     )
   })
 
-  test('前端多注册的每个事件都必须有显式白名单理由（防白名单被无声扩大）', () => {
-    const extra = [...registered.keys()].filter((name) => !emitted.has(name))
-    const unlicensed = extra.filter((name) => !(name in FRONTEND_ONLY_EVENT_WHITELIST))
+  test('命令表的每条命令都必须在前端注册处理器（否则点了没反应且不报错）', () => {
+    const missing = [...commands.entries()].filter(([name]) => !registered.has(name))
     assert.deepEqual(
-      unlicensed,
+      missing.map(([name, line]) => name + ' (useShortcuts.js:' + line + ')'),
       [],
-      '前端注册了 Go 侧不发出的事件，且不在 FRONTEND_ONLY_EVENT_WHITELIST 里。' +
-        '要么是 Go 侧误删了 emit（请恢复），要么是前端注册残留（请删除），' +
-        '确认无误才可显式加入白名单并写明理由。'
+      '命令表里有命令但 useCommands.js 未注册处理器 —— 菜单里点了没反应、快捷键按了没反应，' +
+        '且没有任何报错。修复：在 useCommands.js 的 registerCommands() 里补注册。'
     )
   })
 
-  test('白名单里的每条理由都必须非空（防「留个空字符串占位」）', () => {
-    for (const [name, reason] of Object.entries(FRONTEND_ONLY_EVENT_WHITELIST)) {
-      assert.ok(
-        typeof reason === 'string' && reason.trim().length >= 10,
-        `白名单项 ${name} 缺少充分理由（当前: ${JSON.stringify(reason)}）`
-      )
+  test('前端多注册的每个命令都必须在命令表里（防残留静默积累）', () => {
+    const extra = [...registered.keys()].filter((name) => !commands.has(name))
+    assert.deepEqual(
+      extra,
+      [],
+      'useCommands.js 注册了命令表里不存在的命令 —— 要么命令表漏了该命令，' +
+        '要么 useCommands.js 残留了已下线命令的处理器。'
+    )
+  })
+
+  test('命令表内部不得有重复键位（同一组合绑两项，行为不确定且不报错）', () => {
+    const byAccel = new Map()
+    const dups = []
+    for (const m of shortcutsSrc.matchAll(/\{\s*id:\s*'([^']+)'\s*,\s*group:[^}]*?accel:\s*'([^']*)'/g)) {
+      const id = m[1]
+      const accel = m[2]
+      if (!accel) continue
+      if (byAccel.has(accel)) dups.push(accel + '：「' + byAccel.get(accel) + '」与「' + id + '」')
+      else byAccel.set(accel, id)
     }
+    assert.deepEqual(dups, [], '命令表内键位重复绑定：\n' + dups.join('\n'))
   })
 
-  test('menu:toggle-theme 必须在注册面里（防有人把它从 main.js 挪走导致闪烁回归）', () => {
-    // 专项锁定：它注册在 main.js 而非 App.vue，容易被「统一风格」重构误删
+  test('原生菜单已下线：main.go 不得再出现 buildMenu / menu: 事件', () => {
+    const goSrc = readStable(join(REPO, 'main.go'))
     assert.ok(
-      registered.has('menu:toggle-theme'),
-      'menu:toggle-theme 丢失注册 —— 主题切换会退回闪烁（main.js mount 前注册失效）'
+      !/func\s+buildMenu/.test(goSrc),
+      'main.go 里仍有 buildMenu —— 原生菜单已下线，残留会让 Wails 重新注册系统菜单，' +
+        '与自绘标题栏形成双份入口（且 macOS 上会浮到屏幕顶部脱离窗口）'
     )
-    const where = registered.get('menu:toggle-theme')
-    assert.equal(
-      where.file,
-      'src/main.js',
-      'menu:toggle-theme 应留在 main.js（mount 前注册）；若确需迁移到 App.vue，请同步更新本断言与注释'
+    assert.ok(
+      !/emit\(\s*"menu:/.test(goSrc),
+      'main.go 里仍有 menu:* 事件发射 —— 菜单已下线，残留事件将永远无人接收（静默失效）'
+    )
+  })
+
+  test('locales.go 已随原生菜单下线而删除（Go 侧不再持有菜单文案）', () => {
+    assert.ok(
+      !existsSync(join(REPO, 'locales.go')),
+      'locales.go 仍存在 —— 它的唯一消费方是 buildMenu 的 t(locale, key)，' +
+        '菜单下线后整份语言表无人使用（留着会让人以为 Go 侧仍在管理菜单文案）'
     )
   })
 })
@@ -617,22 +588,30 @@ describe('契约 3 · 打印样式存在性', () => {
     )
   })
 
-  test('App.vue 的 @media print 必须隐藏 .dialog-mask（否则打印出黑色遮罩）', () => {
-    const covering = appBlocks.filter((b) => b.body.includes('.dialog-mask'))
-    assert.ok(
-      covering.length >= 1,
-      'App.vue 的 @media print 未提及 .dialog-mask —— 打印时对话框遮罩会盖住正文'
-    )
-    // 必须真的隐藏，而不是只是提到选择器
-    const hit = covering.find((b) => /display:\s*none/.test(b.body))
+  test('App.vue 的 @media print 必须把 .export-preview 恢复为正常流（否则打印出空白页）', () => {
+    // [2026-10-06 第五轮] 原判据是「App.vue 的打印块必须隐藏 .dialog-mask」。
+    // 弹层拆成独立组件（InputDialog / ShortcutsDialog / AboutDialog）后，
+    // 遮罩元素已不在 App.vue 的 DOM 里，父组件的 scoped 规则**打不到子组件内部**
+    // —— 继续要求 App.vue 写 .dialog-mask 只会留下一条永不生效的死规则。
+    // 遮罩的打印职责已由下方「每个带遮罩的组件必须有自己的 @media print」覆盖；
+    // App.vue 这条改为守**它自己仍然拥有的**打印关键项：隐藏态的 .export-preview
+    // 必须被恢复，否则屏幕上被移到视口外的预览就是白纸。
+    const blocks = appBlocks.filter((b) => b.body.includes('.export-preview'))
+    assert.ok(blocks.length >= 1, 'App.vue 的 @media print 未提及 .export-preview')
+    const hit = blocks.find((b) => /position:\s*static/.test(b.body) && /display:\s*block/.test(b.body))
     assert.ok(
       hit,
-      `App.vue 虽提到 .dialog-mask 但未 display:none。实际块:\n${covering[0].body}`
+      'App.vue 的 @media print 未把 .export-preview 恢复为 position:static + display:block' +
+        `（否则打印出空白页）。实际块:\n${blocks[0].body}`
     )
   })
 
   test('App.vue 的 @media print 必须同时隐藏状态栏与历史面板', () => {
-    const block = appBlocks.find((b) => b.body.includes('.dialog-mask'))
+    // [2026-10-06 第五轮] 定位锚点从 .dialog-mask 改为 .export-preview：
+    // 弹层拆成独立组件后遮罩已不在 App.vue 的 DOM 里（见上一条用例的说明），
+    // 而 .export-preview 是 App.vue 至今仍拥有的打印关键项，用它定位同一块。
+    const block = appBlocks.find((b) => b.body.includes('.export-preview'))
+    assert.ok(block, 'App.vue @media print 未提及 .export-preview')
     assert.ok(
       /display:\s*none/.test(block.body),
       'App.vue @media print 缺少 display:none'
@@ -891,24 +870,14 @@ const LINE_LIMIT = 300
  * [注意] 这是「已知既有债」的登记处，不是永久豁免：拆分完成后应下调或摘除。
  */
 const LINE_EXEMPTIONS = {
-  'frontend/src/App.vue': {
-    limit: 1142,
-    totalAtRegistration: 1363,
-    reason:
-      '有效代码行 1142 / 总行数 1363（2026-10-05 新口径重新登记；旧口径 1280 已作废）。' +
-      '仍是全仓最大单文件：useDivider（分栏拖拽）、视图四态、滚动联动、保存编排' +
-      '这四类交互重、当前测试网覆盖不到的部分**刻意未拆**（拆了也没有安全网兜底）。' +
-      '拆分前须先补相应行为测试。',
-  },
   'frontend/src/editor/createEditor.js': {
-    limit: 299,
-    totalAtRegistration: 386,
+    limit: 260,
+    totalAtRegistration: 350,
     reason:
-      '有效代码行 299 / 总行数 386（2026-10-06 用修好的 stripComments 重新登记；' +
-      '此前登记的 344 是【口径失真】下的虚高值 —— lexer 对含 ${} 插值的模板串失步，' +
-      '导致其后 49 行注释被当成有效代码）。' +
-      '有效行已低于 300 红线，**本条实际可摘除**；暂留作棘轮基线，' +
-      '下一轮整理白名单时优先处理。',
+      '有效代码行 260 / 总行数 350（2026-10-06 单栏重构时重新登记：新增 Slash 面板扩展接入，' +
+      '同时把「图片粘贴 / 拖拽」整块抽到 editor/imageDrop.js —— 该职责与编辑器语法高亮 / ' +
+      '键位无关，却长期占着本文件预算）。已低于 300 红线，**下一轮整理白名单时应摘除**；' +
+      '暂留作棘轮基线。',
   },
   'frontend/src/editor/commands.js': {
     limit: 264,
@@ -1016,10 +985,19 @@ describe('契约 5 · 行数门禁（有效代码行 ≤300）', () => {
     )
   })
 
-  test('App.vue 必须始终在豁免白名单里（它长期超限是已知债，不是新问题）', () => {
+  test('App.vue 是纯装配层：总行数 ≤150（架构铁律，不是可豁免的债）', () => {
+    // [2026-10-06 第五轮] App.vue 曾以 1142 有效行 / 1363 总行的规模登记在
+    // LINE_EXEMPTIONS 里。第五轮把它拆成 composables/ 装配层后，豁免已摘除，
+    // 改为**硬上限**：装配层只许声明依赖、装配、铺模板。
+    // 口径取「总行数」而非「有效代码行」—— 更严（注释与空行也算），
+    // 也更贴近「这个文件看起来是不是还塞着业务」这个真实问题。
+    const src = read(join(SRC, 'App.vue'))
+    const total = countTotalLines(src)
+    const eff = countEffectiveLines(src)
     assert.ok(
-      'frontend/src/App.vue' in LINE_EXEMPTIONS,
-      'App.vue 应保留显式豁免（拆分完成前不摘掉，拆完下调阈值）'
+      total <= 150,
+      `App.vue 总行数 ${total}（有效 ${eff}）已超 150 行装配层上限 —— ` +
+        '新增行为前先问：它属于哪个 composable？（各文件头注即职责索引）'
     )
   })
 

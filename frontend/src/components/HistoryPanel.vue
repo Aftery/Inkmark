@@ -1,13 +1,13 @@
 <script setup>
 /**
- * HistoryPanel — 历史快照面板（从 App.vue 机械搬移，行为零变更）
+ * HistoryPanel — 历史快照面板
  * ----------------------------------------------------------------------------
  * 纯展示组件：快照列表 / 立即快照 / 恢复。数据获取与恢复逻辑在
- * composables/useDocumentPersistence.js，经 props + 事件接入。
- * 可见性由父级 v-if 控制（关闭即卸载，Esc 关闭逻辑在父级 onGlobalKeydown）。
+ * composables/useDocumentState.js（第五轮由 useDocumentPersistence 更名），
+ * 经 props + 事件接入。可见性由父级 v-if 控制（关闭即卸载，Esc 关闭在 useCommands）。
  */
 import AppIcon from './icons/AppIcon.vue'
-import { formatSnapTime, formatSnapSize } from '../composables/useDocumentPersistence'
+import { formatSnapTime, formatSnapSize } from '../composables/useDocumentState'
 import { t } from '../i18n/index.js'
 
 defineProps({

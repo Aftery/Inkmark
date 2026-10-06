@@ -281,9 +281,16 @@
   --ease-out:      cubic-bezier(0.16, 1, 0.3, 1);
 
   /* ---- 布局 ---- */
+  --titlebar-height:        38px;   /* 前端自绘标题栏（无边框窗口，取代系统标题栏） */
   --toolbar-height:      44px;
   --sidebar-width:       232px;
   --editor-gutter-width: 44px;
+
+  /* ---- 单栏正文限宽（单栏居中流式布局）----
+   * 编辑区与预览区共用的正文行宽。46rem ≈ 736px，与既有 --preview-measure 同值，
+   * 独立成 token 是因为「单栏居中」已成为布局主形态，行宽不再是
+   * 「双栏时给预览区用」的次要量。paper 主题可在下方覆写为更窄的纸面行宽。 */
+  --single-measure:      46rem;
 
   /* ---- 图标（内联 SVG：AppIcon.vue + paths.js，全项目一套） ---- */
   --icon-size-inline:     16px;   /* 行内 / 文件树 */

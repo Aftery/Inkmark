@@ -1,18 +1,20 @@
-// verify-shortcuts.mjs — 快捷键文档 / 内联速查表 与 main.go 菜单 accelerator 的一致性门禁
+// verify-shortcuts.mjs — 键位三方一致性门禁（真源 = 前端命令表）
 // ============================================================================
 // 【这个脚本为什么存在】
-// 2026-10-04 真的发生过一次键位漂移，同一天内两处：
-//   1) README.md 写「导出 PDF | ⌘P」，而 main.go 的 ⌘P 早已是「打印」，导出 PDF 降为 ⇧⌘P；
-//   2) App.vue 的内联速查表 SHORTCUTS 写「['⌘B / ⌘I', '加粗 / 斜体']」，
-//      但 main.go 的加粗是 ⌘⇧B（D-4 裁决后 ⌘B 归「大纲」），于是同一张表里 ⌘B
-//      出现两次且含义冲突。
+// 键位漂移是本仓真实发生过两次的错误（2026-10-04，同一天内两处）：
+//   1) README.md 写「导出 PDF | ⌘P」，而命令表里 ⌘P 早已是「打印」，导出 PDF 降为 ⇧⌘P；
+//   2) 应用内速查表写「['⌘B / ⌘I', '加粗 / 斜体']」，但加粗实际是 ⌘⇧B
+//      （D-4 裁决后 ⌘B 归「大纲」），于是同一张表里 ⌘B 出现两次且含义冲突。
 // 两处都是「人肉比对没发现、用户直接看到」的错误。所以这不是过度设计，
 // 是把已经真实发生过的 bug 变成机器门禁。
 //
-// 【校验两个目标】
-//   A. README.md 的「快捷键」节
-//   B. frontend/src/App.vue 的 SHORTCUTS 数组（应用内「帮助 → 快捷键速查」的数据源）
-// 比对的是**源码里的原始字符串**（如 '⌘⇧B'），不是 fmtKey() 在 Windows 上
+// 【真源迁移：2026-10-06】
+// 原生菜单下线前，真源是 main.go 的 buildMenu()；现在真源是
+// frontend/src/composables/useShortcuts.js 的 COMMANDS 表。
+// 校验的两个目标不变：README「快捷键」节 + 应用内速查表（后者已改为从命令表
+// 派生，故实际是三方比对：命令表 ↔ README ↔ 速查表渲染结果）。
+//
+// 比对的是**源码里的原始字符串**（如 '⌘⇧B'），不是 fmtAccel() 在 Windows 上
 // 转译出的显示值（'Ctrl+Shift+B'）——转译值会掩盖真实绑定。
 //
 // 【退出码】0 = 一致；1 = 漂移（输出里给出具体不一致项与原文行，便于直接定位）
@@ -27,63 +29,42 @@ import { dirname, join } from 'node:path'
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..')
 const read = (p) => readFileSync(join(ROOT, p), 'utf8')
 
-const goSrc = read('main.go')
-// v1.2 起菜单标签是 t(locale, "key") 查表形式，语言表在 locales.go。
-// 必须一并传入，否则解析器把全部标签判为「动态标签」，
-// noAccelLabels 计数归零 → 将来「某菜单项丢了快捷键」的报错定位退化。
-let localeSrc = ''
-try {
-  localeSrc = read('locales.go')
-} catch {
-  console.warn('未找到 locales.go：菜单标签将退化为「动态标签」，无键菜单项的定位信息会丢失。')
-}
+// 键位真源：前端命令表
+const SHORTCUTS_SRC = 'frontend/src/composables/useShortcuts.js'
+const shortcutsSrc = read(SHORTCUTS_SRC)
 const readme = read('README.md')
-const appVue = read('frontend/src/App.vue')
-const editorSrc = read('frontend/src/editor/createEditor.js')
+// 应用内速查表的数据源：与命令表同源（useShortcutsHelp.js 读 COMMANDS），
+// 故这里校验的是「派生链路是否完好」—— 命令表里带 descKey 的命令是否都还在。
+const helpSrc = read('frontend/src/composables/useShortcutsHelp.js')
 
 /* ============================================================================
- * 一、解析 main.go 的 buildMenu()，得到 accelerator 真源集合
- *
- * 解析逻辑已抽到共享模块 scripts/verify/parse-main-menu.mjs —— 与
- * frontend/tests/contracts.test.mjs 共用同一份实现，避免两处独立解析
- * main.go 语法、各自失效（历史上已因实参切分与引号判断出过 3 次静默假绿，
- * 详见共享模块顶部注释）。本文件只保留「accelerator ↔ 文档」这一层的校验。
+ * 一、解析命令表，得到 accelerator 真源集合
  * ==========================================================================*/
 
-const { parseBuildMenu, canonToken, findAcceleratorDuplicates } = await import('./parse-main-menu.mjs')
+const { parseCommandTable, canonToken, findAcceleratorDuplicates } =
+  await import('./parse-main-menu.mjs')
 
-const menu = parseBuildMenu(goSrc, localeSrc)
+const { items: commands, warnings: parseWarnings } = parseCommandTable(shortcutsSrc)
 
-/** accelerator → 菜单项标签（真源集合） */
-const goAccel = new Map()
-/** 无 accelerator 的菜单项标签（用于「必须显式标注无快捷键」检查） */
-const noAccelLabels = []
+/** accelerator → 命令 id（真源集合） */
+const srcAccel = new Map()
+/** 无 accelerator 的命令 id（用于「必须显式标注无快捷键」检查） */
+const noAccelIds = []
 
-for (const it of menu.items) {
-  if (it.accelerator) goAccel.set(it.accelerator, it.label ?? it.rawAccelerator)
-  // 动态标签（如最近打开的 labels[i]）无法静态枚举，不进「须标注无快捷键」清单
-  else if (it.label && !it.labelIsDynamic) noAccelLabels.push(it.label)
+for (const c of commands) {
+  if (c.accelerator) srcAccel.set(c.accelerator, c.id)
+  else noAccelIds.push(c.id)
 }
+
+for (const w of parseWarnings) console.warn(`[解析告警] ${w}`)
 
 /* ============================================================================
  * 二、显式豁免白名单（带理由，不靠「扫不到就不管」）
  * ==========================================================================*/
 
-// A) 系统 EditMenu Role：main.go 在 darwin 分支 append(menu.EditMenu())，
-//    这六项由 macOS 原生 selector（undo:/cut:/copy:/paste:/selectAll:）提供，
-//    本仓 main.go 里【没有】对应的 AddText，故不出现在 goAccel 中。
-const SYSTEM_ROLE = new Map([
-  ['⌘Z', '系统 EditMenu Role（原生 undo: selector）'],
-  ['⌘⇧Z', '系统 EditMenu Role（原生 redo: selector）'],
-  ['⌘X', '系统 EditMenu Role（原生 cut: selector）'],
-  ['⌘C', '系统 EditMenu Role（原生 copy: selector）'],
-  ['⌘V', '系统 EditMenu Role（原生 paste: selector）'],
-  ['⌘A', '系统 EditMenu Role（原生 selectAll: selector）'],
-])
-
-// B) 编辑器 keymap 承接：darwin 的 WailsMenu.m 对 EditMenu Role 是硬编码展开，
-//    自定义子项追加进去会被无视（main.go:54-59 注释已记录该实测限制），
-//    所以这些键在 macOS 上由 createEditor.js 的 keymap / App.vue 全局 keydown 承接。
+// A) 编辑器 keymap 承接：这些键不进全局分发表，由 CodeMirror 的 keymap 处理
+//    （编辑器聚焦时 window keydown 也会触发，但编辑器的 keymap 优先且语义更准，
+//    故命令表里不重复登记，避免同一组合两处绑定）。
 //    格式：展示键 → [承载方, 代码里的绑定字面量]
 const KEYMAP = new Map([
   ['⌥↑', ['editor keymap createEditor.js', 'Alt-ArrowUp']],
@@ -92,42 +73,37 @@ const KEYMAP = new Map([
   ['⇧⌥↓', ['editor keymap createEditor.js', 'Shift-Alt-ArrowDown']],
   ['⌘⇧K', ['editor keymap createEditor.js', 'Mod-Shift-k']],
   ['⌘⌥F', ['editor keymap createEditor.js', 'Mod-Alt-f']],
-  ['⌘F', ['App.vue 全局 keydown + CM searchKeymap', "k === 'f'"]],
-  ['⌘L', ['App.vue 全局 keydown', "k === 'l'"]],
+  ['⌘F', ['CM searchKeymap + 全局分发 edit.find', "k === 'f'"]],
+  ['⌘L', ['全局分发 edit.jumpLine', "k === 'l'"]],
 ])
 
 /** 键位是否被显式豁免；返回理由或 null */
 function exemptionReason(k) {
-  if (SYSTEM_ROLE.has(k)) return SYSTEM_ROLE.get(k)
   if (KEYMAP.has(k)) return KEYMAP.get(k)[0]
   return null
 }
 
 /* ============================================================================
- * 三、抽取两个目标的键位集合
+ * 三、抽取目标的键位集合
  * ==========================================================================*/
 
-// 键字符集含 ` ：行内代码的 ⌘` 是真键（main.go keys.CmdOrCtrl("`")）
+// 键字符集含 ` ：行内代码的 ⌘` 是真键（命令表里 inlineCode 就是 ⌘`）
 const KEYCHARS = 'A-Za-z0-9.,`/=↑↓-'
 // 必须【至少一个修饰键】+【恰好一个键字符】：
 // 否则会吞掉正文里的裸字母（如 Esc、Ctrl、Alt 等平台名）造成假键位。
 const TOKEN = new RegExp(`[⌘⇧⌥⌃]+[${KEYCHARS}]`, 'g')
 
 /**
- * 把文档里写的键位归一到与 main.go 相同的规范形式 —— 由共享模块提供。
- * 必须做：文档可能按习惯写成 '⇧⌘P'，而 main.go 侧产出 '⌘⇧P'，
- * 同一组合却因修饰键顺序不同被判成「捏造键位」的假警报。
- * （macOS 官方书写惯例正是 ⌘⇧P 在前，此处以共享模块的 MOD_ORDER 为准。）
+ * 把文档里写的键位归一到与命令表相同的规范形式（MOD_ORDER 排序）。
+ * 区间写法（⌘1 … ⌘6）先展开。
  */
-
-/** 从一段文本里抽键位（已归一）；区间写法（⌘1 … ⌘4）先展开 */
 function extractKeys(text) {
   const expanded = text
     .replace(/⌘⌥1\s*…\s*⌘⌥6/g, '⌘⌥1 ⌘⌥2 ⌘⌥3 ⌘⌥4 ⌘⌥5 ⌘⌥6')
     .replace(/⌘1\s*~\s*⌘4/g, '⌘1 ⌘2 ⌘3 ⌘4')
   const found = new Map() // 归一键 → 原文行
   for (const rawLine of expanded.split('\n')) {
-    // 表格行与数组行都可能有行内代码定界符（如 `⌘`）；偶数个反引号是定界符，剥掉；
+    // 表格行里的行内代码定界符（如 `⌘`）偶数个是定界符，剥掉；
     // 奇数个说明其中一个是真键（`⌘`），保留并按真键解析。
     const ticks = (rawLine.match(/`/g) || []).length
     const line = ticks % 2 === 0 ? rawLine.replace(/`/g, '') : rawLine
@@ -139,7 +115,7 @@ function extractKeys(text) {
   return found
 }
 
-// A) README「快捷键」节 —— 只取表格行（散文里 `⌘` / `Ctrl` 这类单独提及修饰符的
+// A) README「快捷键」节 —— 只取表格行（散文里 `⌘` 这类单独提及修饰符的
 //    行内代码，其闭合反引号会被误读成键字符，产出 ⌥` / ⇧` 之类的假键位）
 const readmeSection = readme.slice(
   readme.indexOf('## 快捷键'),
@@ -151,38 +127,11 @@ for (const line of readmeSection.split('\n')) {
   for (const [k, src] of extractKeys(line)) if (!readmeKeys.has(k)) readmeKeys.set(k, src)
 }
 
-// B) 应用内速查表 SHORTCUTS（速查弹层的数据源）
-//    Wave 2 起它从 App.vue 移到 frontend/src/composables/useShortcutsHelp.js，
-//    故【按候选列表】找第一个含该数组的文件，而不是写死路径 ——
-//    将来再挪位置只需加一行候选，不必改解析逻辑。
-//    另：按【行】截取到独立的收尾 `]`，不能用 indexOf(']')，数组第一行
-//    ['⌘N', …] 里就含 `]`，会把整段切成 35 字符（第一版踩过，只读到 1 个键位）。
-const SHORTCUTS_CANDIDATES = [
-  'frontend/src/composables/useShortcutsHelp.js',
-  'frontend/src/App.vue',
-]
-let shortcutsFile = null
-let shortcutsBlock = null
-for (const p of SHORTCUTS_CANDIDATES) {
-  let text
-  try { text = read(p) } catch { continue }
-  const s = text.indexOf('const SHORTCUTS = [')
-  if (s === -1) continue
-  const e = text.indexOf('\n]', s)
-  if (e === -1) continue
-  shortcutsFile = p
-  shortcutsBlock = text.slice(s, e + 2)
-  break
-}
-if (!shortcutsBlock) {
-  console.error(
-    `未能定位 SHORTCUTS 数组（已查找：${SHORTCUTS_CANDIDATES.join('、')}）。\n` +
-    '速查表是「用户直接看到的键位副本」，定位失败必须报错——' +
-    '静默跳过会让应用内速查表与 main.go 脱节而无人发现。'
-  )
-  process.exit(1)
-}
-const shortcutsKeys = extractKeys(shortcutsBlock)
+// B) 应用内速查表：已改为从命令表派生，故这里校验「派生链路完好」——
+//    useShortcutsHelp.js 必须 import COMMANDS（而不是自带一张表）。
+//    旧实现里那张手写表是漂移源头（2026-06 加粗误写 ⌘B 即由此而来）。
+const helpUsesCommandTable = /import\s*\{[^}]*COMMANDS[^}]*\}\s*from\s*'\.\/useShortcuts\.js'/.test(helpSrc)
+const helpHasHardcodedTable = /const\s+SHORTCUTS\s*=\s*\[/.test(helpSrc)
 
 /* ============================================================================
  * 四、校验
@@ -191,37 +140,30 @@ const shortcutsKeys = extractKeys(shortcutsBlock)
 const problems = []
 const note = (kind, key, detail) => problems.push({ kind, key, detail })
 
-const TARGETS = [
-  { name: 'README.md 快捷键节', keys: readmeKeys, requireComplete: true },
-  { name: `${shortcutsFile} SHORTCUTS（应用内速查表）`, keys: shortcutsKeys, requireComplete: false },
-]
-
-for (const t of TARGETS) {
-  // 检查 1：文档里出现但 main.go 无 accelerator、也不在显式豁免里 → 凭空捏造
-  for (const k of t.keys.keys()) {
-    if (goAccel.has(k) || exemptionReason(k)) continue
-    note('捏造键位（无 accelerator 且不在豁免白名单）', k,
-      `${t.name}\n            原文行: ${t.keys.get(k)}`)
-  }
-  // 检查 2：README 应完整覆盖 main.go 的全部 accelerator（内联速查表是精选子集，不要求）
-  if (t.requireComplete) {
-    for (const [k, label] of goAccel) {
-      if (t.keys.has(k)) continue
-      note('README 漏写该 accelerator', k, `${t.name}  未收录菜单项「${label}」`)
-    }
-  }
+// 检查 1：README 里出现但命令表无 accelerator、也不在显式豁免里 → 凭空捏造
+for (const [k, src] of readmeKeys) {
+  if (srcAccel.has(k) || exemptionReason(k)) continue
+  note('捏造键位（命令表无此键且不在豁免白名单）', k,
+    `README.md 快捷键节\n            原文行: ${src}`)
 }
 
-// 检查 3：README 必须把「无 accelerator」的菜单项显式标注出来，
+// 检查 2：README 应完整覆盖命令表的全部 accelerator
+for (const [k, id] of srcAccel) {
+  if (readmeKeys.has(k)) continue
+  note('README 漏写该键位', k, `未收录命令「${id}」`)
+}
+
+// 检查 3：README 必须把「无 accelerator」的命令显式标注出来，
 //         否则读者会以为漏了快捷键（本次漂移正是这种「静默失真」）。
 const NO_SHORTCUT_MUST_BE_LABELED = [
   ['重命名', '走应用内输入对话框'],
-  ['历史快照', 'ADR-004：低频入口，避免误触'],
   ['复制选区为 HTML', '仅菜单入口'],
-  ['目录', '插入子菜单，无 accelerator'],
-  ['滚动联动', 'checkbox 勾选项'],
-  ['打字机模式', 'checkbox 勾选项'],
-  ['窗口置顶', 'checkbox 勾选项'],
+  // 清单项用**命令表 labelKey 对应的实际文案**，不是命令 id：
+  // 判据是「README 那一行里找得到这个词」，文案不符就会假报缺失。
+  // 「图片…」来自 i18n 的 menu.insertImage（沿用原 Go 侧 locales.go 的 insert.image 文案）。
+  ['图片…', '斜杠命令面板可插入，命令表未分配键位'],
+  ['打字机模式', '开关项，未分配键位'],
+  ['窗口置顶', '开关项，未分配键位'],
   ['Markdown 语法示例', '仅菜单'],
 ]
 for (const [label, why] of NO_SHORTCUT_MUST_BE_LABELED) {
@@ -233,56 +175,53 @@ for (const [label, why] of NO_SHORTCUT_MUST_BE_LABELED) {
   }
 }
 
-// 检查 4：内联速查表自身的键位冲突（同一个键在同一张表里出现两次）——
-//         2026-06 加粗写成 ⌘B 就撞上了大纲的 ⌘B，此检查即为此设。
-{
-  const seen = new Map() // 键 → 标签
-  for (const line of shortcutsBlock.split('\n')) {
-    const m = line.match(/\[\s*'([^']*)'\s*,\s*'([^']*)'\s*\]/)
-    if (!m) continue
-    const keyStr = m[1]
-    const label = m[2]
-    for (const [k] of extractKeys(keyStr)) {
-      if (seen.has(k) && seen.get(k) !== label) {
-        note('内联速查表键位冲突（同一键两义）', k,
-          `${shortcutsFile} SHORTCUTS：「${seen.get(k)}」与「${label}」都绑到 ${k}\n            原文行: ${line.trim()}`)
-      } else if (!seen.has(k)) {
-        seen.set(k, label)
-      }
-    }
-  }
+// 检查 4：应用内速查表必须从命令表派生（不得自带第二份）
+if (!helpUsesCommandTable) {
+  note('速查表未从命令表派生', 'useShortcutsHelp.js',
+    'useShortcutsHelp.js 没有 import COMMANDS —— 速查表可能又变成了一份手写副本，' +
+    '而手写副本正是 2026-06「加粗误写 ⌘B」漂移的根源。')
+}
+if (helpHasHardcodedTable) {
+  note('速查表仍存在硬编码表', 'SHORTCUTS',
+    'useShortcutsHelp.js 里仍有 `const SHORTCUTS = [` —— 该常量必须删除，' +
+    '速查表一律从命令表的 descKey 派生。')
 }
 
-// 检查 5：main.go 内部 accelerator 唯一性（**独立于文档比对**）。
-//         为什么必须单独一道：下游按 accelerator 归并用的是 Map/Set，
-//         重复项会被 Set 静默去重 → 「文档 ↔ main.go」diff 仍显示一致、
-//         门禁报绿，而运行时行为不确定。这是键位 bug 的典型形态，
-//         仓库历史上真发生过（⌘P 曾同时被打印与导出 PDF 占用）。
-for (const dup of findAcceleratorDuplicates(goSrc)) {
+// 检查 5：命令表内部键位唯一性（**独立于文档比对**，理由见 parse-main-menu 注释）
+for (const dup of findAcceleratorDuplicates(shortcutsSrc)) {
   const where = dup.occurrences
-    .map((o) => `main.go:${o.line} 「${o.label ?? '(动态标签)'}」${o.rawAccelerator}`)
+    .map((o) => `useShortcuts.js:${o.line} 「${o.id}」`)
     .join('\n            ')
-  note('main.go 内 accelerator 重复绑定', dup.accelerator,
+  note('命令表内键位重复绑定', dup.accelerator,
     `该组合被绑了 ${dup.occurrences.length} 次：\n            ${where}\n` +
-    '同键绑定两项会导致点击行为不确定（后注册者可能覆盖前者），且不会报错。' +
-    '修法：改 main.go 让两者不同（注意 ⌘P 与 ⇧⌘P 是不同组合，不算冲突）。')
+    '同键绑定两项会导致触发行为不确定（且不会报错）。' +
+    '修法：改其中一条的 accel，或设为 null（表示仅菜单入口）。')
+}
+
+// 检查 6：原生菜单已下线，main.go 不得再有菜单构建（防双份入口复活）
+const goSrc = read('main.go')
+if (/func\s+buildMenu/.test(goSrc)) {
+  note('原生菜单残留', 'main.go buildMenu',
+    'main.go 里仍有 buildMenu —— 原生菜单已下线，残留会与自绘标题栏形成双份入口' +
+    '（且 macOS 上菜单会浮到屏幕顶部脱离窗口）。')
 }
 
 /* ============================================================================
  * 五、报告
  * ==========================================================================*/
 
-console.log('快捷键契约校验（真源 = main.go buildMenu()）')
+console.log('快捷键契约校验（真源 = useShortcuts.js COMMANDS）')
 console.log('='.repeat(64))
-console.log(`main.go 声明的 accelerator: ${goAccel.size} 项`)
-console.log(`无 accelerator 的菜单项:     ${noAccelLabels.length} 项（须在 README 显式标注）`)
-console.log(`显式豁免:                   系统 Role ${SYSTEM_ROLE.size} 项 + 编辑器 keymap ${KEYMAP.size} 项`)
-console.log(`README 快捷键节键位:         ${readmeKeys.size} 项`)
-console.log(`速查表 SHORTCUTS 键位:      ${shortcutsKeys.size} 项（${shortcutsFile}）`)
+console.log(`命令表命令数:                 ${commands.length} 条`)
+console.log(`其中有 accelerator:           ${srcAccel.size} 项`)
+console.log(`无 accelerator（仅菜单入口）:  ${noAccelIds.length} 项（须在 README 显式标注）`)
+console.log(`显式豁免（编辑器 keymap 承接）: ${KEYMAP.size} 项`)
+console.log(`README 快捷键节键位:          ${readmeKeys.size} 项`)
+console.log(`速查表数据源:                 ${helpUsesCommandTable ? '命令表派生（COMMANDS）' : '未知（未从命令表派生！）'}`)
 console.log('')
 
 if (problems.length === 0) {
-  console.log('一致：0 处漂移。README 与内联速查表的键位均与 main.go 对齐。')
+  console.log('一致：0 处漂移。README 与命令表的键位已对齐，速查表同源派生。')
   process.exit(0)
 }
 
@@ -292,5 +231,5 @@ for (const p of problems) {
   console.log(`            ${p.detail}`)
 }
 console.log('')
-console.log('修法：改 main.go 的 accelerator（真源）后，同步 README「快捷键」节与速查表 SHORTCUTS。')
+console.log('修法：改 useShortcuts.js 的 COMMANDS（真源）后，同步 README「快捷键」节。')
 process.exit(1)

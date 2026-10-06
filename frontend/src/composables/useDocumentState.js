@@ -1,19 +1,25 @@
-// useDocumentPersistence — 自动保存 / 历史快照 / 导出（HTML + PDF）的唯一落点
+// useDocumentState — 文档状态机：dirty / 自动保存 / 快照 / 导出 / 历史
 // ----------------------------------------------------------------------------
-// 从 App.vue 机械搬移（行为零变更，搬移基线：Phase C 编辑器轨道交付版）。
+// 【2026-10-06 由 useDocumentPersistence.js 演化更名（第五轮架构闭环）】
+// 更名原因：App.vue 瘦身后本模块成为「文档状态」的完整实现层，
+// 旧名只描述了「持久化」这一半职责。
 //
-// 职责边界：
-//   - 自动保存：800ms 防抖覆盖原文件（AC-13）
+// 职责边界（四块，全部只关乎「这一份文档」）：
+//   - dirty 语义：唯一含义 = 内存内容 ≠ 磁盘内容（含从未落盘的新文档）。
+//     真源在此；Go 侧（app.go 的 App.dirty / SetDirty）只是镜像。
+//     watch(dirty) 把每次翻转同步给 Go —— OnBeforeClose 的未保存确认框
+//     读的就是那面镜子，于是「关闭守卫」永远拿得到最新值，不存在异步竞态。
+//   - 自动保存：800ms 防抖覆盖原文件（AC-13；间隔由 prefs.autosave 驱动，
+//     0 = 关闭）。未落盘（filePath 为空）不自动保存 —— 无处可写。
 //   - 历史快照：与自动保存**解耦**（AC-14）——触发源只有 ①有效编辑会话节流
-//     （距上次 ≥3 分钟且在编辑）②显式保存 ③文件切换等破坏性边界前 ④手动。
-//     轮转/去重由 Go 侧 SnapshotWrite 负责（AC-15）。
-//   - 导出：HTML（46rem 屏幕行宽）与 PDF 一键直出（AC-16~AC-19c，含 dark→light
-//     主题映射与 467px 版心）；window.go 不可用时退回 window.print()（AC-19b）。
+//     ②显式保存 ③switchFile 等破坏性边界 ④手动。轮转 / 去重归 Go 侧。
+//   - 导出：HTML（46rem 屏幕行宽）与 PDF 一键直出（AC-16~AC-19c，
+//     含 dark→light 主题映射与 467px 版心）；window.go 不可用时退 window.print()。
 //
-// editor 以 getter 注入：编辑器实例在 App.vue 的 onMounted 才创建，
-// composable 需在 setup 同步实例化（状态栏初始态先于编辑器存在）。
+// editor 以 getter 注入：编辑器实例在 onMounted 才创建，
+// 本模块需在 setup 同步实例化（状态栏初始态先于编辑器存在）。
 
-import { ref, onBeforeUnmount } from 'vue'
+import { ref, watch, onBeforeUnmount } from 'vue'
 import { SaveFileDialog, WriteFile } from '../../wailsjs/go/main/App'
 import { buildHtmlDocument } from '../export/exporters'
 import { replaceDocument } from '../editor/createEditor'
@@ -32,7 +38,7 @@ export function formatSnapSize(bytes) {
   return bytes >= 1024 ? `${(bytes / 1024).toFixed(1)} KB` : `${bytes} B`
 }
 
-//错误文案兜底：空 message（如 new Error()）会让 toast 变成「保存失败：」这种空洞结尾
+// 错误文案兜底：空 message（如 new Error()）会让 toast 变成「保存失败：」这种空洞结尾
 function errText(err) {
   const s = typeof err === 'string' ? err : err?.message || ''
   return s.slice(0, 120) || t('toast.unknownError')
@@ -49,7 +55,7 @@ function errText(err) {
  * @param {Function} deps.onDocReplaced (content) => void 整份替换文档后的外部状态同步
  *                   （replaceDocument 走 setState，不触发 updateListener）
  */
-export function useDocumentPersistence({ getEditor, filePath, title, previewHtml, theme, notify, onDocReplaced }) {
+export function useDocumentState({ getEditor, filePath, title, previewHtml, theme, notify, onDocReplaced }) {
   // 状态机：unsaved（有改动未落盘）→ saving（写入中）→ saved；写入失败 → error。
   // 四态在状态栏用「图标形状 + 文案 + 颜色」三重表达（AC-20）。
   const saveState = ref('unsaved')
@@ -61,6 +67,13 @@ export function useDocumentPersistence({ getEditor, filePath, title, previewHtml
   const showHistory = ref(false)
   const snapshots = ref([])
   const historyLoading = ref(false)
+
+  // dirty → Go 镜像：OnBeforeClose / CloseWindow 的关闭守卫读它弹「未保存」确认。
+  // Go 侧只接收不推断（ADR-005）；try/catch 是浏览器预览无绑定的正常降级，
+  // 不掩盖代码错误 —— watch 回调内的异常本来就与 TDZ 类问题无关。
+  watch(dirty, (d) => {
+    try { window.go?.main?.App?.SetDirty?.(d) } catch { /* 预览环境无绑定 */ }
+  })
 
   let saveTimer = null
   // 自动保存延时 / 快照间隔改由用户偏好驱动（themes/prefs.js 唯一真源）。
@@ -77,14 +90,14 @@ export function useDocumentPersistence({ getEditor, filePath, title, previewHtml
   })
   onBeforeUnmount(() => offPrefs())
 
-  // Go 绑定直调（wailsjs 生成文件未再生成，且浏览器预览下不存在）
+  // Go 绑定直调（wailsjs 生成文件，浏览器预览下不存在）
   function getAppApi() {
     return window.runtime && window.go ? window.go.main.App : null
   }
 
   const docText = () => getEditor()?.state.doc.toString() ?? ''
 
-  // ---------- 自动保存（防抖延时由偏好驱动，默认 800ms，AC-13）----------
+  // ---------- 自动保存（800ms 防抖，AC-13；未落盘文档不自动保存）----------
 
   function markDirty() {
     dirty.value = true
@@ -99,7 +112,7 @@ export function useDocumentPersistence({ getEditor, filePath, title, previewHtml
     saveState.value = 'saving'
     try {
       await WriteFile(filePath.value, docText())
-      dirty.value = false
+      dirty.value = false // 落盘成功解除标脏（watch 同步 SetDirty(false) 给 Go）
       saveState.value = 'saved'
     } catch (err) {
       saveState.value = 'error' // 只读目录等失败：状态栏明示，不静默
@@ -125,9 +138,15 @@ export function useDocumentPersistence({ getEditor, filePath, title, previewHtml
     } catch { /* 快照失败不打扰写作，保存主链路不受影响 */ }
   }
 
-  // 打开/切换文件等破坏性边界前先留一份快照
-  async function snapshotBoundary() {
-    if (filePath.value) await writeSnapshot(true)
+  /**
+   * 文件会话切换边界（打开 / 新建 / 载入语法示例前调用）：
+   * 当前文档为脏 → 先强行写一份快照留底（旧稿内容此刻还在编辑器里，
+   * 错过这一刻就永远写不回去了）；随后复位保存会话（清防抖计时器、
+   * 保存态归零、快照时钟重新起算）。
+   */
+  async function switchFile() {
+    if (dirty.value) await writeSnapshot(true)
+    resetSession()
   }
 
   // 文件会话切换：清防抖计时器、保存态复位、快照时钟重新起算
@@ -289,8 +308,8 @@ export function useDocumentPersistence({ getEditor, filePath, title, previewHtml
   return {
     // 状态
     saveState, dirty, showHistory, snapshots, historyLoading,
-    // 自动保存 / 快照
-    markDirty, maybeSnapshot, snapshotBoundary, resetSession,
+    // 自动保存 / 快照 / 会话边界
+    markDirty, maybeSnapshot, switchFile, resetSession,
     // 保存 / 导出
     saveFile, saveFileAs, exportHtml, exportPdf,
     // 历史面板

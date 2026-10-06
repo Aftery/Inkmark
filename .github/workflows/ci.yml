@@ -7,6 +7,10 @@
 #   2. go       —— 静态检查（go vet）+ 真实编译（go build）
 #   3. p0-emoji —— P0-1 零 emoji 绝对规则
 #
+# 【2026-10-06 单栏重构后的真源】键位唯一真源是前端命令表
+# frontend/src/composables/useShortcuts.js 的 COMMANDS；原生菜单（main.go 的
+# buildMenu）已整体下线，故 docs-contract 门禁解析该表而非 main.go。
+#
 # 平台锁 macos-latest：本应用的 export_pdf_darwin.go 依赖 WebKit / PDFKit
 # （ADR-003 路线 A′），只有 macOS runner 能编出真实产物；Linux runner 走
 # export_pdf_other.go 降级分支，等于没验证到真正的代码路径。
@@ -99,14 +103,16 @@ jobs:
         with:
           node-version: '22'
 
+      # 扫 Go 源码：单栏重构后菜单文案已迁到前端字典，但 P0 规则本身
+      # 不该因为「某个目录碰巧没有 emoji」就缩小覆盖面。
       - name: 扫描 emoji
-        run: ./scripts/p0-check-emoji.sh frontend/src
+        run: ./scripts/p0-check-emoji.sh frontend/src main.go app.go
 
   # --------------------------------------------------------------------------
   # 门禁 4：快捷键文档契约
   # 卡的是「文档漂移」——2026-10-04 真的发生过两处：
-  #   1) README 写「导出 PDF ⌘P」，而 main.go 的 ⌘P 已是「打印」，导出 PDF 降为 ⌘⇧P；
-  #   2) App.vue 内联速查表把加粗写成 ⌘B，与同一张表里的大纲 ⌘B 撞车、含义冲突。
+  #   1) README 写「导出 PDF ⌘P」，而命令表的 ⌘P 已是「打印」，导出 PDF 降为 ⌘⇧P；
+  #   2) 应用内速查表把加粗写成 ⌘B，与同一张表里的大纲 ⌘B 撞车、含义冲突。
   # 两处都是「人肉 review 没发现、用户直接看到」的错误，故固化为机检。
   # 单独拆 job：失败时要能一眼看出是「文档与代码脱节」而非「测试挂了」。
   # 脚本零依赖（node 内置 assert 都不用），Node 22 仅为与仓库其余门禁对齐。
@@ -121,7 +127,9 @@ jobs:
         with:
           node-version: '22'
 
-      - name: 校验 README 与内联速查表的键位
+      # 真源 = frontend/src/composables/useShortcuts.js 的 COMMANDS 表
+      # （2026-10-06 起：原生菜单下线，键位真源由 main.go 的 buildMenu 迁到前端）
+      - name: 校验 README 与命令表、速查表的键位
         run: node scripts/verify/verify-shortcuts.mjs
 
   # --------------------------------------------------------------------------
