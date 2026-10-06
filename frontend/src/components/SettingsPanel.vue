@@ -6,8 +6,11 @@
  * themes/theme.js（既有 4 档 API）。可见性由父级 v-if 控制（关闭即卸载）。
  * 关闭与焦点回收在父级（App.vue 的 onGlobalKeydown Esc 分支）。
  *
- * 布局：居中弹层（宽 min(560,92vw) / 高 ≤72vh），左侧 120px 分类栏 + 右内容区；
- * 每项一行：左标题 + 灰字说明，右分段控件；项间 1px --border-soft 分隔。
+ * 布局：居中弹层（宽 --dialog-width-lg / 稳定高 --dialog-min-height，上限 72vh），
+ * 左侧 120px 分类栏 + 右内容区；每项一行：左标题 + 灰字说明，右分段控件；
+ * 项间 1px --border-soft 分隔。
+ * 弹层尺寸全部引用 themes/tokens/design-tokens.css 的 --dialog-* 契约，
+ * 禁止在本组件内写死 min(Npx, Nvw)（scoped 样式无法跨组件复用 .dialog）。
  * 视觉全部走 Token：底 --surface / 描边 --border / 圆角 --radius-lg /
  * 阴影 --elev-raised / 焦点环 --focus-ring。
  */
@@ -163,7 +166,11 @@ onMounted(() => {
   z-index: 1400; /* 对话框层（history 1200 / toast 1300 之上） */
 }
 .settings-panel {
-  width: min(560px, 92vw);
+  width: var(--dialog-width-lg);
+  /* 稳定高度：切换「外观」（5 项）/「编辑器」（2 项）时面板不再整体跳变。
+   * 用 min-height 而非 height —— 条目多时内容区（.settings-content）自身滚动，
+   * 面板不会被内容撑得更高，两种分类下外框尺寸完全一致。 */
+  min-height: var(--dialog-min-height);
   max-height: 72vh;
   display: flex;
   flex-direction: column;

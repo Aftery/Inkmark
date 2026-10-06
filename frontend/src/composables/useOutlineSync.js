@@ -99,6 +99,31 @@ export function useOutlineSync({ getEditor, previewEl, viewMode, sidebarOpen, ou
     return dst[i - 1] + ((t - s0) / (s1 - s0)) * (dst[i] - dst[i - 1])
   }
 
+  // 边界吸附：把「源侧已到顶/底」直接翻译成「对侧到顶/底」，绕过锚点插值。
+  //
+  // 为什么必须有（真实缺陷，2026-10-06 用户截图）：
+  // 尾锚点是 Math.max(最后标题文档y, maxScroll)。当末尾标题恰好落在最后一屏内时
+  // （最后标题y > maxScroll，很常见——文末表格/说明往往填不满一屏前的位置），
+  // 尾锚点被抬到 maxScroll **之上**，于是源侧滚到底时 t = maxScroll 只是
+  // 末段的一个内部点，插值结果落在 dst[last] 之前 → 「左边到底、右边还剩一截」。
+  // 而且末段长度在两栏通常不等（预览的表格有 cell padding 与边框，实际更高），
+  // 所以偏差不是固定比例，肉眼看就是「有时对有时不对」。
+  //
+  // 为什么吸附是正确的语义：用户对「滚到底」的预期就是「对侧也到底」，
+  // 锚点插值只负责中间区间的平滑过渡，两端本来就该精确对齐。
+  // 顺带在触底时作废锚点缓存：CM6 的 scrollHeight 是渐进实测的估算值
+  // （见上方 isSyncEcho 注释），触底正是它刚量到真实高度的时刻。
+  function mapScroll(srcTop, srcMax, dstMax, anchors) {
+    if (srcTop <= 0) return 0
+    if (srcTop >= srcMax - 1) {
+      invalidateAnchors()
+      return dstMax
+    }
+    return anchors
+      ? mapByAnchors(srcTop, anchors.src, anchors.dst)
+      : (srcTop / Math.max(1, srcMax)) * dstMax
+  }
+
   // 联动写入记录：识别「联动引发的回声滚动」，断掉 编辑→预览→编辑 的放大循环。
   // 为什么 rAF 互斥锁不够：scroll 事件的派发晚于 rAF 回调（锁已释放）。
   // 正常位置锚点映射可逆（来回映射值相同、不触发事件、自然收敛），所以平时没事；
@@ -125,9 +150,8 @@ export function useOutlineSync({ getEditor, previewEl, viewMode, sidebarOpen, ou
     const pane = previewEl.value
     const a = getAnchors()
     const pvMax = pane.scrollHeight - pane.clientHeight
-    const target = a
-      ? mapByAnchors(cm.scrollTop, a.ed, a.pv)
-      : (cm.scrollTop / Math.max(1, cm.scrollHeight - cm.clientHeight)) * pvMax
+    const cmMax = cm.scrollHeight - cm.clientHeight
+    const target = mapScroll(cm.scrollTop, cmMax, pvMax, a ? { src: a.ed, dst: a.pv } : null)
     // clamp 到真实可达值：写入被钳制会让「写入值 ≠ 实际值」，回声识别失效
     lastSyncWrite = { el: pane, value: Math.max(0, Math.min(target, pvMax)) }
     pane.scrollTop = lastSyncWrite.value
@@ -143,11 +167,10 @@ export function useOutlineSync({ getEditor, previewEl, viewMode, sidebarOpen, ou
     syncingScroll = true
     const cm = getEditor().scrollDOM
     const a = getAnchors()
-    const edMax = cm.scrollHeight - cm.clientHeight
-    const target = a
-      ? mapByAnchors(pane.scrollTop, a.pv, a.ed)
-      : (pane.scrollTop / Math.max(1, pane.scrollHeight - pane.clientHeight)) * edMax
-    lastSyncWrite = { el: cm, value: Math.max(0, Math.min(target, edMax)) }
+    const pvMax = pane.scrollHeight - pane.clientHeight
+    const cmMax = cm.scrollHeight - cm.clientHeight
+    const target = mapScroll(pane.scrollTop, pvMax, cmMax, a ? { src: a.pv, dst: a.ed } : null)
+    lastSyncWrite = { el: cm, value: Math.max(0, Math.min(target, cmMax)) }
     cm.scrollTop = lastSyncWrite.value
     requestAnimationFrame(() => (syncingScroll = false))
   }

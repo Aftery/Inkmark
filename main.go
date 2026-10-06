@@ -52,6 +52,10 @@ func main() {
 // 丢了它，编辑器里的 ⌘C/⌘V/⌘X/撤销/全选 会全部失效。
 // 应用菜单（Inkmark）自 v1.1 起改为全自建文本项，不再 Append(AppMenu Role)，
 // 原因见下方 ① 处注释（单项 Role 在 v2.16.0 不导出）。
+// 窗口菜单（窗口）自 v1.2 起同样改为自建中文项（原 WindowMenu Role 标题与条目
+// 硬编码英文、无法中文化；其三项均有 runtime API 等价实现）—— 见 ⑥ 处注释。
+// 编辑菜单（Edit）是【唯一保留的英文 Role】：其条目挂原生 selector，
+// 自建会让 ⌘C/⌘V 静默失效 —— 见 ③ 处注释。
 //
 // Role 陷阱（实测 v2.16.0 源码）：
 //   - darwin 的 WailsMenu.m 对 EditMenu/WindowMenu 等 Role 是【硬编码】展开，
@@ -177,8 +181,21 @@ func buildMenu(app *App) *menu.Menu {
 	fileMenu.AddText(exportPDFTitle, keys.Combo("p", keys.CmdOrCtrlKey, keys.ShiftKey), emit("menu:export-pdf"))
 
 	// ③ 编辑（macOS 必需：撤销/剪切/拷贝/粘贴/全选）
+	//
+	// ⚠ 这里【必须】保留系统 EditMenu Role，是全仓唯一未中文化的菜单，且不可替换：
+	//   1) Role 的标题与条目硬编码为英文（WailsMenu.m appendRole：
+	//      `initWithNSTitle:@"Edit"` + Undo/Redo/Cut/Copy/Paste/Select All），
+	//      Wails 未导出单项 Role，也没有标签覆盖接口 —— 想中文只能整体自建；
+	//   2) 但自建会丢功能：这些条目挂的是原生 selector（undo:/cut:/copy:/paste:/
+	//      selectAll:），走 macOS responder 链作用于 first responder。
+	//      Wails 的 MenuItem.Click 是 Go 回调，只能 emit 事件给前端，
+	//      【挂不上 selector】—— 换成文本项后按 ⌘C/⌘V 不会报错，但会没反应
+	//      （WebView 收不到 copy:/paste:），属于静默失效，比英文标题更糟。
+	//   3) 对照：窗口菜单的三项（最小化/缩放/全屏）都有 runtime API 等价实现，
+	//      所以 ⑥ 换成了自建中文菜单；编辑菜单没有这个条件。
+	//   结论：此处保留英文 Role 是【有意识的取舍】，不是漏改。
+	//   若将来 Wails 支持标签覆盖（或改用支持 selector 的菜单库）再一并中文化。
 	if goruntime.GOOS == "darwin" {
-		// macOS：系统 EditMenu Role 提供原生 undo:/cut:/paste: selector；
 		// 新增的查找/跳转/行操作不在菜单展示（Role 硬编码加不进去），
 		// 改由编辑器 keymap 承担（⌘F 查找、⌘L 跳转行、⌥↑↓ 移动行…），
 		// 入口统一收在「帮助 → 快捷键速查」。
@@ -270,8 +287,43 @@ func buildMenu(app *App) *menu.Menu {
 	viewMenu.AddCheckbox("窗口置顶", app.alwaysOnTop, nil,
 		emitChecked("menu:toggle-always-on-top", app.SetAlwaysOnTop))
 
-	// ⑥ 窗口（最小化/缩放）
-	appMenu.Append(menu.WindowMenu())
+	// ⑥ 窗口（自建中文菜单）
+	//
+	// 为什么不用 menu.WindowMenu()：该 Role 的标题与全部条目在 Wails 源码里
+	// 硬编码为英文（WailsMenu.m 的 appendRole：`initWithNSTitle:@"Window"` +
+	// "Minimize"/"Zoom"/"Full Screen"），既无法中文化，也不接受追加自定义项。
+	// 这三项都有精确等价的 runtime API，故自建可完整中文化且不丢功能。
+	//
+	// 与 EditMenu 的关键区别：Window 三项都不是原生 selector，自建安全；
+	// Edit 的 undo:/cut:/copy:/paste:/selectAll: 依赖系统 responder 链，
+	// 自建文本项挂不上，替换会让 ⌘C/⌘V 失效 —— 所以 Edit 必须保留 Role（见 ③）。
+	windowMenu := appMenu.AddSubmenu("窗口")
+	windowMenu.AddText("最小化", keys.CmdOrCtrl("m"), func(*menu.CallbackData) {
+		if app.ctx != nil {
+			runtime.WindowMinimise(app.ctx)
+		}
+	})
+	windowMenu.AddText("缩放", nil, func(*menu.CallbackData) {
+		// 系统「缩放」是适配内容尺寸，Wails 无对应 API；
+		// 用最大化/还原切换近似（WindowIsMaximised 可判定当前态，不会来回抖）。
+		if app.ctx != nil {
+			if runtime.WindowIsMaximised(app.ctx) {
+				runtime.WindowUnmaximise(app.ctx)
+			} else {
+				runtime.WindowMaximise(app.ctx)
+			}
+		}
+	})
+	windowMenu.AddSeparator()
+	windowMenu.AddText("全屏", keys.Combo("f", keys.CmdOrCtrlKey, keys.ControlKey), func(*menu.CallbackData) {
+		if app.ctx != nil {
+			if runtime.WindowIsFullscreen(app.ctx) {
+				runtime.WindowUnfullscreen(app.ctx)
+			} else {
+				runtime.WindowFullscreen(app.ctx)
+			}
+		}
+	})
 
 	// ⑦ 帮助
 	helpMenu := appMenu.AddSubmenu("帮助")

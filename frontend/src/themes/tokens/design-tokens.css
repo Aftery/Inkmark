@@ -258,6 +258,18 @@
   --elev-ring:   0 0 0 1px var(--border);
   --elev-raised: 0 1px 2px rgba(16, 17, 22, 0.05), 0 4px 12px rgba(16, 17, 22, 0.07);
 
+  /* ---- 弹层尺寸（唯一真源；2026-10-06 起取代各组件内的散落硬编码）----
+   * 起因：设置面板（560）与 .dialog（360）/ .dialog-wide（480）三套宽度并存，
+   * 且高度随内容条目数变化 —— 切换「外观/编辑器」时面板整体高度会跳变。
+   * 契约：三档宽度 + 一个稳定高度，使所有居中弹层视觉一致、切换不跳动。
+   * 新增弹层必须引用这里，禁止再写 min(Npx, Nvw)。 */
+  --dialog-width-sm: min(360px, 86vw);  /* 输入类：单行问答（跳转到行 / 重命名） */
+  --dialog-width-md: min(480px, 92vw);  /* 表格类：快捷键速查 */
+  --dialog-width-lg: min(560px, 92vw);  /* 多栏类：设置面板 */
+  /* 稳定高度：条目少的面板（编辑器 2 项）与条目多的（外观 5 项）不再跳变。
+   * 用 min-height 而非 height：条目多时内容区自身滚动，面板不再继续变高。 */
+  --dialog-min-height: min(420px, 62vh);
+
   /* ---- 焦点 ---- */
   --focus-ring: 0 0 0 3px color-mix(in srgb, var(--accent) 32%, transparent);
 

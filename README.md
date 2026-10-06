@@ -139,6 +139,16 @@ macOS 的「编辑」菜单是系统 Role（撤销 / 剪切 / 拷贝 / 粘贴 / 
 
 > 三个勾选项（滚动联动 / 打字机 / 窗口置顶）的状态真源在 Go 侧，前端挂载时回读同步。
 
+**窗口**
+
+| 操作 | 快捷键 |
+|---|---|
+| 最小化 | ⌘M |
+| 缩放 | 无快捷键（仅菜单；Wails 无「适配内容尺寸」API，以最大化/还原近似） |
+| 全屏 | ⌃⌘F |
+
+> 「缩放」用最大化近似是 Wails 的能力边界：系统该项是「适配窗口内容」，runtime 未提供对应 API。
+
 **帮助**
 
 | 操作 | 快捷键 |
@@ -257,6 +267,8 @@ npm test         # 测试网（prefs 行为 + 静态契约），【需 Node ≥2
 | 6 | **无拼写检查（刻意不做）** | CodeMirror 的 lint 对 CJK 基本无效，中文写作场景是**伪需求**，故不引入。英文拼写需自行接第三方 lint 扩展。 |
 | 7 | **应用菜单缺「隐藏其他 / 显示全部」（Wails 能力边界，非本仓缺陷）** | Wails v2.16 只导出 `AppMenu` / `EditMenu` / `WindowMenu` 三个**整体** Role，不导出 `About` / `Hide` / `HideOthers` / `UnHide` / `Quit` 等**单项** Role（`pkg/menu/menuroles.go` 中全被注释；darwin `appendRole` 的 switch 也只认 1/2/3）。因此应用菜单只能全用自建文本项：`隐藏 Inkmark ⌘H` 走 `runtime.Hide`、`退出 Inkmark ⌘Q` 走 `runtime.Quit`；而 `hideOtherApplications` / `unhideAllApplications` **无对应 API**，故「隐藏其他」「显示全部」两项**直接省略**（未置灰、未用 `runtime.Show` 冒充）。 |
 | 8 | **放弃系统原生「关于」面板（同 7 的连带）** | 因单项 `About` Role 不可用，应用菜单的「关于 Inkmark」改为**应用内自建弹层**（复用既有对话框样式），内容为应用名 / 版本 / 一行描述 / 仓库链接；版本号取自 Go 单一真源 `App.Version()`（`version.go`），前端不另写版本号。 |
+| 9 | **「编辑」菜单仍是英文（刻意保留，非漏改）** | 该菜单用系统 `EditMenu` Role，标题与条目在 Wails 源码里**硬编码为英文**（`WailsMenu.m` 的 `appendRole`），且未导出单项 Role、没有标签覆盖接口。想中文化只能整体自建，但它的条目挂的是**原生 selector**（`undo:` / `cut:` / `copy:` / `paste:` / `selectAll:`），走 macOS responder 链；Wails 的 `MenuItem.Click` 只是 Go 回调、**挂不上 selector**，换成文本项后按 ⌘C/⌘V 不会报错但**会没反应**（静默失效，比英文标题更糟）。对照：「窗口」菜单的三项都有 runtime API 等价实现，已在 v1.2 换成自建中文菜单（见下条）。待 Wails 支持标签覆盖或改用支持 selector 的菜单库后再处理。 |
+| 10 | **「窗口 → 缩放」用最大化近似** | 系统该项是「适配窗口内容尺寸」，Wails runtime 无对应 API。已用 `WindowIsMaximised` 判定并在最大化/还原间切换（不会来回抖），视觉上与系统「缩放」不完全等价。最小化（⌘M）与全屏（⌃⌘F）均为精确等价实现。 |
 
 历史待办五项（预览渲染防抖 / 代码块 Enter 跳出 / 未保存关闭拦截 / 图片粘贴拖拽 / 文件树外部变更监听）已于 2026-10-02 全部完成。
 

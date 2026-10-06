@@ -1213,14 +1213,14 @@ function onDividerKeydown(e) {
   z-index: 1400; /* 高于 toast 层 1300（DESIGN §6 阶梯之上加一层） */
 }
 .dialog {
-  width: min(360px, 86vw);
+  width: var(--dialog-width-sm);
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
   box-shadow: var(--elev-raised);
   padding: var(--space-6) var(--space-6) var(--space-4);
 }
-.dialog-wide { width: min(480px, 92vw); }
+.dialog-wide { width: var(--dialog-width-md); }
 .dialog-title {
   margin: 0 0 var(--space-3);
   font-size: var(--text-md);
