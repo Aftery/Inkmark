@@ -1,3 +1,0 @@
-# 占位文件：main.go 里用 //go:embed all:frontend/dist 内嵌前端产物，
-# 目录必须存在否则 Go 编译报 "pattern all:frontend/dist: no matching files found"。
-# 真实产物由 `wails build` 生成，已被 .gitignore 排除，仅此占位文件入库。

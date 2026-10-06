@@ -268,5 +268,6 @@ export default {
   'menu.alwaysOnTop': '常に手前に表示',
   'menu.minimize': '最小化',
   'menu.zoom': '拡大',
+  'menu.settings': '設定…',
   'help.syntax': 'Markdown 記法の例',
 }

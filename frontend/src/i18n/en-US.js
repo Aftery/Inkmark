@@ -267,5 +267,6 @@ export default {
   'menu.alwaysOnTop': 'Always on Top',
   'menu.minimize': 'Minimize',
   'menu.zoom': 'Zoom',
+  'menu.settings': 'Settings…',
   'help.syntax': 'Markdown Syntax Examples',
 }
