@@ -66,6 +66,10 @@ export function SetDirty(arg1) {
   return window['go']['main']['App']['SetDirty'](arg1);
 }
 
+export function SetLocale(arg1) {
+  return window['go']['main']['App']['SetLocale'](arg1);
+}
+
 export function SetScrollSync(arg1) {
   return window['go']['main']['App']['SetScrollSync'](arg1);
 }

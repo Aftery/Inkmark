@@ -34,6 +34,8 @@ export function SetAlwaysOnTop(arg1:boolean):Promise<void>;
 
 export function SetDirty(arg1:boolean):Promise<void>;
 
+export function SetLocale(arg1:string):Promise<void>;
+
 export function SetScrollSync(arg1:boolean):Promise<void>;
 
 export function SetTypewriter(arg1:boolean):Promise<void>;

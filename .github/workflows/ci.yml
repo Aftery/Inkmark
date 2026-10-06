@@ -123,3 +123,26 @@ jobs:
 
       - name: 校验 README 与内联速查表的键位
         run: node scripts/verify/verify-shortcuts.mjs
+
+  # --------------------------------------------------------------------------
+  # 门禁 5：i18n 文案残留
+  # 卡的是「新增/改文案时漏了 t()」——国际化（zh-CN/en-US/ja-JP）落地后，
+  # 任何新写的用户可见文案若硬编码中文，切到英文/日文界面就会露出中文。
+  # 这类漂移人眼 review 抓不到（尤其 aria-label、title 这类不显眼的位置），
+  # 且「漏一个」就是用户可见的缺陷，故固化为机检。
+  # 单独拆 job：失败时要能一眼看出是「文案没走 t()」而非「测试挂了」。
+  # 脚本自带剥注释器与逐条白名单（每条写明理由），行尾注释不计残留。
+  # 退出码：0=干净 / 1=有残留 / 2=扫描器自身失效（不可采信）。
+  # --------------------------------------------------------------------------
+  i18n-residue:
+    name: i18n 文案残留
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: 扫描未走 t() 的用户可见文案
+        run: node scripts/verify/scan-i18n-residue.mjs
