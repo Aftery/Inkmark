@@ -28,6 +28,15 @@ const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..')
 const read = (p) => readFileSync(join(ROOT, p), 'utf8')
 
 const goSrc = read('main.go')
+// v1.2 起菜单标签是 t(locale, "key") 查表形式，语言表在 locales.go。
+// 必须一并传入，否则解析器把全部标签判为「动态标签」，
+// noAccelLabels 计数归零 → 将来「某菜单项丢了快捷键」的报错定位退化。
+let localeSrc = ''
+try {
+  localeSrc = read('locales.go')
+} catch {
+  console.warn('未找到 locales.go：菜单标签将退化为「动态标签」，无键菜单项的定位信息会丢失。')
+}
 const readme = read('README.md')
 const appVue = read('frontend/src/App.vue')
 const editorSrc = read('frontend/src/editor/createEditor.js')
@@ -43,7 +52,7 @@ const editorSrc = read('frontend/src/editor/createEditor.js')
 
 const { parseBuildMenu, canonToken, findAcceleratorDuplicates } = await import('./parse-main-menu.mjs')
 
-const menu = parseBuildMenu(goSrc)
+const menu = parseBuildMenu(goSrc, localeSrc)
 
 /** accelerator → 菜单项标签（真源集合） */
 const goAccel = new Map()

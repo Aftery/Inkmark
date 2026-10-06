@@ -220,6 +220,119 @@ export function unquote(raw) {
   return null
 }
 
+/**
+ * 解析 locales.go 的语言表，返回 zh-CN（基准语言）的 key → 文案映射。
+ *
+ * 为什么需要：v1.2 起菜单标签改成 t(locale, "key") 查表，若不回查语言表，
+ * 每个菜单项都会被判成「动态标签」，丢掉可读的定位信息。
+ *
+ * ⚠ 语言表在**另一个文件**（locales.go），不在 main.go 里 —— 调用方必须
+ * 一并传入，否则解析出 0 条、所有 key 都会被报成「缺失」。
+ *
+ * 容忍实现细节上的两种写法（都是 Go 合法语法）：
+ *   - 缩进/换行自由：用「找 locale 块的起止大括号」而非逐行正则；
+ *   - 注释块内出现同名字符串也不受影响（先剥注释）。
+ * @param {string} localeSrc locales.go 全文
+ * @returns {Map<string,string>} zh-CN 的 key → 文案；解析不到时返回空 Map
+ */
+export function parseLocaleTable(localeSrc) {
+  const table = new Map()
+  if (!localeSrc) return table
+  // ⚠ 这里【刻意不做完整的注释剥离】——试过，状态机在 Go 的 \ 转义、
+  //   字符串内 // 等边界上反复出错（实测把整张表解析成 0 条）。
+  //   本仓已在「剥注释」这件事上栽过 5 次（shell grep 静默 / @media print
+  //   注释误判 / JSDoc 示例误判 / menuLabels 匹配到注释 / 反斜杠转义），
+  //   收益不值得再投。改用最笨但可控的方式：逐行解析 + 显式跳过整行注释。
+  //
+  // 定位 menuLabels：找不以 // 开头、且含 'var menuLabels' 的行。
+  const lines = localeSrc.split('\n')
+  let inTable = false
+  let depth = 0
+  let started = false
+  for (const line of lines) {
+    const trimmed = line.trim()
+    const isComment = trimmed.startsWith('//') || trimmed.startsWith('*') || trimmed.startsWith('/*')
+    if (!inTable) {
+      if (isComment) continue
+      if (/^var\s+menuLabels\b/.test(trimmed)) { inTable = true }
+      continue
+    }
+    if (isComment) continue
+    // zh-CN 块开始之前的行（"zh-CN": { 之前）只累计深度，不取值
+    for (const m of line.matchAll(/("(?:[^"\\]|\\.)*")\s*:\s*("(?:[^"\\]|\\.)*")/g)) {
+      const k = unquote(m[1])
+      const v = unquote(m[2])
+      if (k === null || v === null) continue
+      // 只收 zh-CN 块内的：进入该块后 started=true
+      if (!started) continue
+      if (!table.has(k)) table.set(k, v)
+    }
+    if (!started && /"zh-CN"\s*:\s*\{/.test(line)) started = true
+    // 大括号配平跟踪（逐字符，跳过字符串内的括号）
+    for (let i = 0; i < line.length; i++) {
+      const ch = line[i]
+      if (ch === '"') {
+        i++
+        while (i < line.length && line[i] !== '"') { if (line[i] === '\\') i++; i++ }
+        continue
+      }
+      if (ch === '{') { depth++; started = started || false }
+      else if (ch === '}') {
+        depth--
+        if (depth === 0 && started) return table // zh-CN 块闭合 → 收工
+      }
+    }
+    if (started && depth === 0) return table
+  }
+  return table
+}
+
+/**
+ * 剥 Go 注释（行注释与块注释），保持长度不变（用空格替换）以维持行号。
+ * 与本仓其他解析器（contracts.test.mjs 的 stripComments）同一原则：
+ * 匹配前必须剥注释，否则注释里的示例代码会被当成真代码
+ * —— 本仓已因此踩坑 4 次（shell grep 静默 / @media print 注释误判 /
+ * JSDoc 示例误判 / 这次的 Go 注释）。
+ */
+function stripGoComments(src) {
+  let out = ''
+  let i = 0
+  const n = src.length
+  while (i < n) {
+    const two = src.slice(i, i + 2)
+    if (two === '//') {
+      while (i < n && src[i] !== '\n') { out += ' '; i++ }
+    } else if (two === '/*') {
+      while (i < n && src.slice(i, i + 2) !== '*/') {
+        out += src[i] === '\n' ? '\n' : ' '
+        i++
+      }
+      out += '  '
+      i += 2
+    } else {
+      // 字符串字面量内的注释符号不是注释（t(l, "http://x") 这类）
+      if (src[i] === '"' || src[i] === '`') {
+        const q = src[i]
+        out += src[i]
+        i++
+        while (i < n && src[i] !== q) {
+          // ⚠ 这里必须与【单个】反斜杠字符比较（'\\' 即一个 \）。
+          // 若误写成 '\\\\'（两个 \ 的比较），转义序列 \"] 就不会闭合字符串，
+          // 后面整段会被当注释吃掉 —— 实测踩过：语言表解析出 0 条。
+          if (src[i] === '\\' && q === '"') { out += src.slice(i, i + 2); i += 2; continue }
+          out += src[i] === '\n' ? '\n' : ' '
+          i++
+        }
+        if (i < n) { out += q; i++ }
+      } else {
+        out += src[i]
+        i++
+      }
+    }
+  }
+  return out
+}
+
 /** 源码中第 index 个字符所在的 1-based 行号 */
 function lineAt(text, index) {
   return text.slice(0, index).split('\n').length
@@ -229,6 +342,9 @@ function lineAt(text, index) {
  * 解析 buildMenu() 里的全部菜单项。
  *
  * @param {string} goSrc main.go 全文
+ * @param {string} [localeSrc] locales.go 全文。v1.2 起菜单标签是
+ *   t(locale, "key") 查表形式，不传则所有标签退化为「动态标签」，
+ *   noAccelLabels 计数归零、报错定位信息丢失（门禁判定不受影响，但排查变难）。
  * @returns {{
  *   items: Array<{
  *     kind: 'AddText'|'AddCheckbox',
@@ -244,7 +360,7 @@ function lineAt(text, index) {
  * }}
  * @throws {Error} 找不到 buildMenu 函数体时抛出（返回空数组会让下游假通过）
  */
-export function parseBuildMenu(goSrc) {
+export function parseBuildMenu(goSrc, localeSrc) {
   const marker = 'func buildMenu(app *App) *menu.Menu {'
   const start = goSrc.indexOf(marker)
   if (start === -1) {
@@ -262,6 +378,18 @@ export function parseBuildMenu(goSrc) {
   for (const m of goSrc.matchAll(/(\w+)\s*:?=\s*("(?:[^"\\]|\\.)*")/g)) {
     if (!varLabels.has(m[1])) varLabels.set(m[1], unquote(m[2]))
   }
+
+  // i18n（v1.2 起）：标签改成 t(locale, "key") 查表形式。
+  // 没有这一步的话，parseAddLabel 会把每个菜单项都判成「动态表达式」，
+  // 于是 noAccelLabels 从 18 项掉到 0 项 —— 门禁判定不受影响（accelerator
+  // 解析走另一条路），但「某菜单项丢了快捷键」的报错定位会退化成
+  // “(动态标签)”而失去真实标题，失去排查价值。
+  //
+ // 回查 locales.go 的 zh-CN 表（基准语言）：既恢复了可读的定位信息，
+  // 也能顺带发现「Go 引用了语言表里不存在的 key」——那会是运行时显示原始
+  // key 的真 bug（缺 key 回退），属于门禁该拦的东西。
+  const i18nLabels = parseLocaleTable(localeSrc)
+  const i18nMissing = new Set()
 
   // emit/emitChecked 的事件名：引号风格无关（Go 三种字符串字面量都合法）。
   // 注意：字符类里同时要匹配反引号，而反引号在模板字符串中需转义 —— 故这里用
@@ -282,7 +410,24 @@ export function parseBuildMenu(goSrc) {
     const labelRaw = call.args[0]
     let label = unquote(labelRaw)
     let labelIsDynamic = false
-    if (label === null) {
+    // i18n：t(locale, "key") / t(l, "key") / t(currentLocale(), "key")
+    // → 回查语言表拿 zh-CN 文案；key 不在表里要显式记为缺失（那是真 bug，
+    //   运行时会显示原始 key 而不是文案）
+    if (label === null && labelRaw && /^\s*t\s*\(/.test(labelRaw)) {
+      const km = labelRaw.match(/t\s*\([^,]+,\s*("(?:[^"\\]|\\.)*")\s*\)/)
+      const key = km ? unquote(km[1]) : null
+      if (key !== null) {
+        if (i18nLabels.has(key)) {
+          label = i18nLabels.get(key)
+        } else {
+          i18nMissing.add(key)
+          label = key // 保留 key 原文作为定位线索
+        }
+      } else {
+        labelIsDynamic = true
+      }
+    }
+    if (label === null && !labelIsDynamic) {
       // 变量标签（exportPDFTitle）：回查赋值表；仍是 null 则为动态表达式（labels[i]）
       const varName = labelRaw.trim()
       if (varLabels.has(varName)) {
@@ -341,7 +486,15 @@ export function parseBuildMenu(goSrc) {
   }
   void emitted // emitted 供调用方需要「全量事件集合」时使用，此处仅保证逻辑完整
 
-  return { items, warnings, emitted }
+  // i18n 缺失 key 是真 bug（运行时会显示原始 key 而非文案）→ 升级为 warning
+  for (const key of i18nMissing) {
+    warnings.push(
+      `菜单引用了语言表里不存在的 key：「${key}」。` +
+        '运行时 t() 会回退成显示原始 key（用户看到的是 "file.new" 这种字面量）。' +
+        '请在 locales.go 的三档表里补上该 key。'
+    )
+  }
+  return { items, warnings, emitted, i18nMissing: [...i18nMissing] }
 }
 
 /**
