@@ -29,7 +29,7 @@ import { useDialog } from './composables/useDialog'
 import { useShortcutsHelp } from './composables/useShortcutsHelp'
 import { useFileOps } from './composables/useFileOps'
 import { getTheme, onThemeChange } from './themes/theme.js'
-import { OpenFileDialog, OpenDirectoryDialog, ReadFile, CheckUpdate, Version } from '../wailsjs/go/main/App'
+import { OpenFileDialog, OpenDirectoryDialog, ReadFile, CheckUpdate, Version, ClipboardGet, ClipboardSet } from '../wailsjs/go/main/App'
 import { EventsOn, BrowserOpenURL } from '../wailsjs/runtime/runtime'
 import './themes/index.css'
 
@@ -808,12 +808,61 @@ safeEventsOn('menu:toggle-always-on-top', () => { /* 窗口行为已在 Go 侧�
 // 帮助
 safeEventsOn('menu:help-shortcuts', () => { showShortcuts.value = true })
 safeEventsOn('menu:help-syntax', loadSyntaxSample)
-// 非 darwin 自建「编辑」菜单（剪贴板类：按键已由 WebView 原生承接，这里只接点击）
+// ---- 编辑菜单（main.go buildMenu ③ 发出） ----
+// 撤销/重做/全选直接走 CM6 命令。剪切/拷贝/粘贴走系统剪贴板 + CM6 事务：
+// 原生 EditMenu Role 已弃用（标题与条目硬编码英文、不可中文化），自建项挂的是
+// Wails 的 Go 回调而非原生 copy:/paste: selector，所以剪贴板要前端自己做。
+// 为什么不用 document.execCommand('paste')：被浏览器安全策略禁用（无用户手势
+// 且非可编辑上下文），实测不生效 —— 故改用 Wails 的 ClipboardGet/Set。
+// ⚠ 顺序契约：粘贴必须【先 ClipboardGet 拿到文本、再插入】，异步读取期间
+// 焦点/选区可能变化，故先捕获选区快照，读取成功后再用该快照插入。
+async function doCopy({ cut = false } = {}) {
+  if (!editor) return
+  const view = editor
+  const { from, to } = view.state.selection.main
+  const text = view.state.sliceDoc(from, to)
+  if (!text) {
+    showToast('没有选中的内容')
+    return
+  }
+  try {
+    await ClipboardSet(text)
+  } catch (e) {
+    console.error('[clipboard] write failed:', e)
+    showToast('写入剪贴板失败')
+    return
+  }
+  if (cut) {
+    view.dispatch({ changes: { from, to, insert: '' }, selection: { anchor: from } })
+    view.focus()
+  }
+}
+
+async function doPaste() {
+  if (!editor) return
+  const view = editor
+  const { from, to } = view.state.selection.main // 快照：异步期间选区可能变
+  let text = ''
+  try {
+    text = await ClipboardGet()
+  } catch (e) {
+    console.error('[clipboard] read failed:', e)
+    showToast('读取剪贴板失败')
+    return
+  }
+  if (!text) {
+    showToast('剪贴板为空')
+    return
+  }
+  view.dispatch({ changes: { from, to, insert: text }, selection: { anchor: from + text.length } })
+  view.focus()
+}
+
 safeEventsOn('menu:undo', () => execCmd(undo))
 safeEventsOn('menu:redo', () => execCmd(redo))
-safeEventsOn('menu:cut', () => document.execCommand?.('cut'))
-safeEventsOn('menu:copy', () => document.execCommand?.('copy'))
-safeEventsOn('menu:paste', () => showToast('请使用 Ctrl+V 粘贴（剪贴板权限由系统管理）'))
+safeEventsOn('menu:cut', () => doCopy({ cut: true }))
+safeEventsOn('menu:copy', () => doCopy())
+safeEventsOn('menu:paste', () => doPaste())
 safeEventsOn('menu:select-all', () => execCmd(selectAll))
 
 // ---------- 左右分栏拖拽 ----------

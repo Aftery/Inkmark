@@ -52,17 +52,17 @@ func main() {
 // 丢了它，编辑器里的 ⌘C/⌘V/⌘X/撤销/全选 会全部失效。
 // 应用菜单（Inkmark）自 v1.1 起改为全自建文本项，不再 Append(AppMenu Role)，
 // 原因见下方 ① 处注释（单项 Role 在 v2.16.0 不导出）。
-// 窗口菜单（窗口）自 v1.2 起同样改为自建中文项（原 WindowMenu Role 标题与条目
-// 硬编码英文、无法中文化；其三项均有 runtime API 等价实现）—— 见 ⑥ 处注释。
-// 编辑菜单（Edit）是【唯一保留的英文 Role】：其条目挂原生 selector，
-// 自建会让 ⌘C/⌘V 静默失效 —— 见 ③ 处注释。
+// 窗口菜单（窗口）自 v1.2 起同样改为自建中文项；编辑菜单（编辑）自 v1.2 起
+// 也改为自建中文项，三平台统一 —— 见 ③ 与 ⑥ 处注释。
+// 结果：全仓【不再使用任何系统 Role 菜单】，所有标签均可中文化（并可随语言切换）。
 //
-// Role 陷阱（实测 v2.16.0 源码）：
+// Role 陷阱（实测 v2.16.0 源码，即使现已不用 Role 仍需记录，避免后人重犯）：
 //   - darwin 的 WailsMenu.m 对 EditMenu/WindowMenu 等 Role 是【硬编码】展开，
-//     自定义子项追加到 Role 的 SubMenu 会被无视；
+//     自定义子项追加到 Role 的 SubMenu 会被无视；标题与条目也已硬编码为英文；
 //   - 非 darwin 的 processMenu 只读 Label/SubMenu，Role 完全不展开 ——
 //     直接 Append(EditMenu()) 在 Windows/Linux 会渲染成空菜单。
-//     所以「编辑」菜单按平台分流：darwin 用系统 Role，其余自建子菜单。
+//   - 核实「某 API/Role 是否可用」必须用 go doc 或读源码，不能用 grep 的输出下结论
+//     （grep 会匹配到被 /* */ 注释掉的声明，本仓已因此写错两次 Spec）。
 //
 // 菜单项不在 Go 侧做业务，只向前端发事件（业务逻辑统一在前端，避免两处维护）；
 // 例外：隐藏/退出直接调 Wails runtime（无对应前端行为，绕行只会增加一份事件接线）。
@@ -180,50 +180,45 @@ func buildMenu(app *App) *menu.Menu {
 	// 导出 PDF 让位：⌘P 已给打印，降为 ⇧⌘P（macOS 惯例，与「打印…」区分）
 	fileMenu.AddText(exportPDFTitle, keys.Combo("p", keys.CmdOrCtrlKey, keys.ShiftKey), emit("menu:export-pdf"))
 
-	// ③ 编辑（macOS 必需：撤销/剪切/拷贝/粘贴/全选）
+	// ③ 编辑（三平台统一自建中文菜单）
 	//
-	// ⚠ 这里【必须】保留系统 EditMenu Role，是全仓唯一未中文化的菜单，且不可替换：
-	//   1) Role 的标题与条目硬编码为英文（WailsMenu.m appendRole：
-	//      `initWithNSTitle:@"Edit"` + Undo/Redo/Cut/Copy/Paste/Select All），
-	//      Wails 未导出单项 Role，也没有标签覆盖接口 —— 想中文只能整体自建；
-	//   2) 但自建会丢功能：这些条目挂的是原生 selector（undo:/cut:/copy:/paste:/
-	//      selectAll:），走 macOS responder 链作用于 first responder。
-	//      Wails 的 MenuItem.Click 是 Go 回调，只能 emit 事件给前端，
-	//      【挂不上 selector】—— 换成文本项后按 ⌘C/⌘V 不会报错，但会没反应
-	//      （WebView 收不到 copy:/paste:），属于静默失效，比英文标题更糟。
-	//   3) 对照：窗口菜单的三项（最小化/缩放/全屏）都有 runtime API 等价实现，
-	//      所以 ⑥ 换成了自建中文菜单；编辑菜单没有这个条件。
-	//   结论：此处保留英文 Role 是【有意识的取舍】，不是漏改。
-	//   若将来 Wails 支持标签覆盖（或改用支持 selector 的菜单库）再一并中文化。
-	if goruntime.GOOS == "darwin" {
-		// 新增的查找/跳转/行操作不在菜单展示（Role 硬编码加不进去），
-		// 改由编辑器 keymap 承担（⌘F 查找、⌘L 跳转行、⌥↑↓ 移动行…），
-		// 入口统一收在「帮助 → 快捷键速查」。
-		appMenu.Append(menu.EditMenu())
-	} else {
-		// Windows/Linux：自建编辑菜单。剪贴板/撤销类【不设 accelerator】——
-		// 让按键直达 WebView 走原生行为（保持既有行为），菜单项仅作鼠标点击入口；
-		// 查找/行操作类设 accelerator（由前端 CM 命令承接）。
-		editMenu := appMenu.AddSubmenu("编辑")
-		editMenu.AddText("撤销", nil, emit("menu:undo"))
-		editMenu.AddText("重做", nil, emit("menu:redo"))
-		editMenu.AddSeparator()
-		editMenu.AddText("剪切", nil, emit("menu:cut"))
-		editMenu.AddText("拷贝", nil, emit("menu:copy"))
-		editMenu.AddText("粘贴", nil, emit("menu:paste"))
-		editMenu.AddText("全选", nil, emit("menu:select-all"))
-		editMenu.AddSeparator()
-		editMenu.AddText("查找…", keys.CmdOrCtrl("f"), emit("menu:find"))
-		editMenu.AddText("查找并替换…", keys.Combo("f", keys.CmdOrCtrlKey, keys.OptionOrAltKey), emit("menu:find-replace"))
-		editMenu.AddText("跳转到行…", keys.CmdOrCtrl("l"), emit("menu:jump-line"))
-		editMenu.AddSeparator()
-		editMenu.AddText("上移行", keys.OptionOrAlt("Up"), emit("menu:move-line-up"))
-		editMenu.AddText("下移行", keys.OptionOrAlt("Down"), emit("menu:move-line-down"))
-		editMenu.AddText("重复当前行", keys.Combo("Down", keys.OptionOrAltKey, keys.ShiftKey), emit("menu:dup-line"))
-		editMenu.AddText("删除当前行", keys.Combo("k", keys.CmdOrCtrlKey, keys.ShiftKey), emit("menu:delete-line"))
-		editMenu.AddSeparator()
-		editMenu.AddText("复制选区为 HTML", nil, emit("menu:copy-as-html"))
-	}
+	// 为什么不用系统 EditMenu Role（2026-10-06 修正此前判断）：
+	//   Role 的标题与条目在 Wails 源码里硬编码为英文（WailsMenu.m appendRole：
+	//   `initWithNSTitle:@"Edit"` + Undo/Redo/Cut/Copy/Paste/Select All/Speech），
+	//   Wails 不导出单项 Role、也没有标签覆盖接口 → 想中文化只能整体自建。
+	//
+	// 此前我判断「自建会让 ⌘C/⌘V 失效」，那次结论是错的，纠正依据（源码实测）：
+	//   - 自建项经 AddMenuItem（darwin/menu.go:62-64）把 Accelerator 转成
+	//     key + modifier，最终走 newMenuItem:...:keyEquivalent: 与
+	//     setKeyEquivalentModifierMask: —— 即 accelerator 会正常注册为系统快捷键；
+	//   - 代价只是 action 变成 Wails 的 handleClick（Go 回调）而非原生
+	//     copy:/paste: selector。为此前端补齐了剪贴板读写（App.ClipboardGet /
+	//     ClipboardSet + CM6 事务插入），因为 document.execCommand('paste')
+	//     被浏览器安全策略禁用、不能作为实现途径。
+	//   即：功能不丢，只是「谁执行」从系统 responder 链换成前端。
+	//
+	// 三平台统一自建还消除了原先 GOOS 分流：非 darwin 的 processMenu 根本不展开
+	// Role（直接 Append(EditMenu()) 会渲染成空菜单），此前那条分支是必需的，
+	// 现在不需要了。
+	editMenu := appMenu.AddSubmenu("编辑")
+	editMenu.AddText("撤销", keys.CmdOrCtrl("z"), emit("menu:undo"))
+	editMenu.AddText("重做", keys.Combo("z", keys.CmdOrCtrlKey, keys.ShiftKey), emit("menu:redo"))
+	editMenu.AddSeparator()
+	editMenu.AddText("剪切", keys.CmdOrCtrl("x"), emit("menu:cut"))
+	editMenu.AddText("拷贝", keys.CmdOrCtrl("c"), emit("menu:copy"))
+	editMenu.AddText("粘贴", keys.CmdOrCtrl("v"), emit("menu:paste"))
+	editMenu.AddText("全选", keys.CmdOrCtrl("a"), emit("menu:select-all"))
+	editMenu.AddSeparator()
+	editMenu.AddText("查找…", keys.CmdOrCtrl("f"), emit("menu:find"))
+	editMenu.AddText("查找并替换…", keys.Combo("f", keys.CmdOrCtrlKey, keys.OptionOrAltKey), emit("menu:find-replace"))
+	editMenu.AddText("跳转到行…", keys.CmdOrCtrl("l"), emit("menu:jump-line"))
+	editMenu.AddSeparator()
+	editMenu.AddText("上移行", keys.OptionOrAlt("Up"), emit("menu:move-line-up"))
+	editMenu.AddText("下移行", keys.OptionOrAlt("Down"), emit("menu:move-line-down"))
+	editMenu.AddText("重复当前行", keys.Combo("Down", keys.OptionOrAltKey, keys.ShiftKey), emit("menu:dup-line"))
+	editMenu.AddText("删除当前行", keys.Combo("k", keys.CmdOrCtrlKey, keys.ShiftKey), emit("menu:delete-line"))
+	editMenu.AddSeparator()
+	editMenu.AddText("复制选区为 HTML", nil, emit("menu:copy-as-html"))
 
 	// ④ 格式（WYSIWYG 命令；事件名与前端 formatCommands 接线清单严格一致，不得改名）
 	formatMenu := appMenu.AddSubmenu("格式")

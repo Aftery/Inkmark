@@ -8,6 +8,10 @@ export function CheckUpdate():Promise<main.UpdateInfo>;
 
 export function ClearRecents():Promise<void>;
 
+export function ClipboardGet():Promise<string>;
+
+export function ClipboardSet(arg1:string):Promise<void>;
+
 export function ExportPDF(arg1:string,arg2:string):Promise<string>;
 
 export function ListDir(arg1:string):Promise<Array<main.DirEntry>>;

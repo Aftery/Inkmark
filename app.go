@@ -36,10 +36,10 @@ type App struct {
 	// 滚动联动 / 打字机模式 / 窗口置顶：菜单 checkbox 的初始态真源在 Go。
 	// 行为本体在前端；前端挂载时回读自身 localStorage 后调 Set* 同步到这里，
 	// 菜单切换时 emitChecked 先落这里、再广播事件给前端。
-	scrollSync   bool
-	typewriter   bool
-	alwaysOnTop  bool
-	recents      []string // 最近打开的文件（新 → 旧，上限 recentFileLimit）
+	scrollSync  bool
+	typewriter  bool
+	alwaysOnTop bool
+	recents     []string // 最近打开的文件（新 → 旧，上限 recentFileLimit）
 }
 
 // recentFileLimit 最近打开列表上限（菜单里超过 10 项的列表没有检索价值）
@@ -47,10 +47,10 @@ const recentFileLimit = 10
 
 // DirEntry 是文件树的一个节点（只展开一层，前端点击目录时再懒加载）
 type DirEntry struct {
-	Name    string `json:"name"`
-	Path    string `json:"path"`
-	IsDir   bool   `json:"isDir"`
-	Ext     string `json:"ext"` // 方便前端按类型显示图标
+	Name  string `json:"name"`
+	Path  string `json:"path"`
+	IsDir bool   `json:"isDir"`
+	Ext   string `json:"ext"` // 方便前端按类型显示图标
 }
 
 func NewApp() *App {
@@ -96,6 +96,30 @@ func (a *App) RefreshMenu() {
 		return
 	}
 	runtime.MenuSetApplicationMenu(a.ctx, buildMenu(a))
+}
+
+// ClipboardGet 读取系统剪贴板纯文本。
+//
+// 为什么需要它（不是为了"能读剪贴板"，而是为了绕不开的限制）：
+// macOS 的「编辑」菜单若用系统 EditMenu Role，标题与条目被 Wails 源码硬编码为
+// 英文且不可覆盖（见 main.go ③ 注释）；想中文化只能整体自建。而自建项挂的是
+// Wails 的 Go 回调，**挂不上原生的 copy:/paste: selector** —— 于是必须在前端
+// 自行完成剪贴板读写。
+// 而 document.execCommand('paste') 被浏览器安全策略禁用（无用户手势/被 iframe
+// 与权限模型限制），所以粘贴只能走系统 API 再由前端插入文档。
+func (a *App) ClipboardGet() (string, error) {
+	if a.ctx == nil {
+		return "", fmt.Errorf("应用尚未初始化")
+	}
+	return runtime.ClipboardGetText(a.ctx)
+}
+
+// ClipboardSet 写入系统剪贴板纯文本（剪切/拷贝走它）。
+func (a *App) ClipboardSet(text string) error {
+	if a.ctx == nil {
+		return fmt.Errorf("应用尚未初始化")
+	}
+	return runtime.ClipboardSetText(a.ctx, text)
 }
 
 // AddRecent 前端成功打开文件后调用：去重置顶、截断上限、持久化并重建菜单。
@@ -383,6 +407,7 @@ const (
 //
 // 用 Status 做三态判定而非让前端猜 note 文本：
 //   - "update" 发现新版本；"latest" 已是最新；"error" 无法检查。
+//
 // error 覆盖超时 / 网络失败 / 404（仓库无 Release）/ 非 200 / 返回不可解析等情况，
 // 绝不会谎报「已是最新」。
 type UpdateInfo struct {
