@@ -40,6 +40,12 @@ type App struct {
 	typewriter  bool
 	alwaysOnTop bool
 	recents     []string // 最近打开的文件（新 → 旧，上限 recentFileLimit）
+	// locale 是 Go 侧菜单语言的唯一真源（SPEC-i18n-v1 §3）。
+	// 为什么语言真源要在 Go 侧也有一份：buildMenu 是纯函数式重建，
+	// RefreshMenu 只重新读 Go 的状态、不接收任何参数 —— 语言不同理。
+	// 前端 prefs.js 另存一份给界面文案用，两边由 SetLocale 单次事务同步
+	// （前端切语言 → SetLocale → 写这里 + RefreshMenu），不允许只改一边。
+	locale string
 }
 
 // recentFileLimit 最近打开列表上限（菜单里超过 10 项的列表没有检索价值）
@@ -53,8 +59,10 @@ type DirEntry struct {
 	Ext   string `json:"ext"` // 方便前端按类型显示图标
 }
 
+// NewApp 新建 App。locale 取基准语言，与前端 i18n 的默认值一致 —— 两边默认值
+// 不同会在首帧产生「界面英文、菜单中文」的分裂态。
 func NewApp() *App {
-	return &App{scrollSync: true} // 滚动联动默认开（历史行为）
+	return &App{scrollSync: true, locale: defaultLocale} // 滚动联动默认开（历史行为）
 }
 
 func (a *App) startup(ctx context.Context) {
@@ -96,6 +104,30 @@ func (a *App) RefreshMenu() {
 		return
 	}
 	runtime.MenuSetApplicationMenu(a.ctx, buildMenu(a))
+}
+
+// SetLocale 切换菜单语言（前端设置面板切语言后调用）。
+//
+// 【单次事务】写入与刷新必须在同一个不可分割的调用里完成（SPEC §3/§4）：
+// 分成两步（前端先改 UI、再异步刷菜单）会出现「界面已英文、菜单还是中文」的
+// 中间态。这里一次写入 + 一次 RefreshMenu，调用返回时菜单已是新语言。
+//
+// 【为什么校验后静默忽略，而不是报错或纠正】
+//   - 报错：locale 由前端 localStorage 往返而来，一次手改 / 一次旧版本残留
+//     就能让用户彻底打不开菜单，且报错无处可看（这是启动路径，不是用户操作）；
+//   - 纠正成 defaultLocale：会让「我没点切换但菜单变中文了」这类现象无从追溯。
+//
+// 保持原值 + 不刷新是最保守的：未知输入 = 无事发生。
+// 代价是前端拿不到「被拒绝了」的反馈 —— 但前端只从三档固定列表里取值，
+// 走到这里的唯一路径是数据被外部篡改，不值得为它加一条返回码。
+func (a *App) SetLocale(locale string) {
+	if !isSupportedLocale(locale) {
+		return
+	}
+	a.mu.Lock()
+	a.locale = locale
+	a.mu.Unlock()
+	a.RefreshMenu()
 }
 
 // ClipboardGet 读取系统剪贴板纯文本。
