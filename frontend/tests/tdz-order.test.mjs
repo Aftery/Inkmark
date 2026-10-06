@@ -82,11 +82,18 @@ test('惰性包装豁免：getEditor: () => editor 不参与判定、不误报',
 
 test('function 声明豁免：提升让其声明虽在后也不报红', () => {
   const r = checkTdz(SOURCE, { file: 'App.vue' })
-  // syncAfterDocReplace 是函数声明，声明在第 313 行，但被第 160 行的 useDocumentPersistence 注入
+  // syncAfterDocReplace 是函数声明，声明在后面，但被前面的 useDocumentPersistence 注入
   const rec = r.injections.find((i) => i.name === 'syncAfterDocReplace')
   assert.ok(rec, '没解析到 syncAfterDocReplace 注入')
   assert.equal(rec.declKind, 'function')
-  assert.equal(rec.callLine, 160)
+  // 动态定位调用点，不写死行号：写死会在任何人往 App.vue 顶部加一行 import
+  // 时把测试打红，而它红的原因与「函数声明是否正确豁免」毫无关系
+  // （本项目已因此踩过：加一行 import → 160 变 161 → 只能靠合并 import 顶回去）。
+  const fileOpsCall = SOURCE.indexOf('useDocumentPersistence(')
+  const realCallLine = SOURCE.slice(0, fileOpsCall).split('\n').length
+  assert.equal(rec.callLine, realCallLine,
+    `callLine 应等于 useDocumentPersistence( 的真实行号 ${realCallLine}；` +
+    '若不一致说明解析器定位错了，那才是真问题')
   assert.ok(rec.declLine > rec.callLine, '该用例应覆盖「声明在后」的场景，否则豁免没被检验')
   assert.ok(!r.violations.some((v) => v.name === 'syncAfterDocReplace'), '函数声明豁免失效，误报了')
   // showToast 同理（函数声明注入给 useDocumentPersistence）

@@ -20,6 +20,10 @@
 import { ViewPlugin, Decoration, WidgetType, EditorView } from '@codemirror/view'
 import { StateField, StateEffect } from '@codemirror/state'
 import { syntaxTree } from '@codemirror/language'
+// 任务列表 checkbox 的无障碍标签要随界面语言走 —— 它是 span[role=checkbox] 的
+// aria-label，屏幕阅读器会读出来，属于货真价实的用户可见文案。
+// （此文件此前未被 i18n 覆盖，是 Spec §5 组件清单的一处遗漏，已补上。）
+import { t } from '../i18n/index.js'
 
 // ---------- 开关：StateField + StateEffect（与 createEditor.js 的 setFocusMode 同构） ----------
 // 默认开启：即时模式是 D-2 的默认编辑形态。
@@ -54,7 +58,7 @@ class TaskCheckboxWidget extends WidgetType {
     s.className = 'cm-md-task-box' + (this.checked ? ' checked' : '')
     s.setAttribute('role', 'checkbox')
     s.setAttribute('aria-checked', this.checked ? 'true' : 'false')
-    s.setAttribute('aria-label', this.checked ? '已完成任务' : '未完成任务')
+    s.setAttribute('aria-label', t(this.checked ? 'task.done' : 'task.unchecked'))
     return s
   }
   ignoreEvent() { return false }

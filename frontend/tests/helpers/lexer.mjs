@@ -130,7 +130,7 @@ export function stripComments(src) {
     if (ctx.t === 'template') {
       if (src[i] === '\\') { i += 2; continue }
       if (src[i] === '`') { i++; stack.pop(); continue }
-      if (src[i] === '$' && src[i + 1] === '{') { i += 2; stack.push({ t: 'code' }); continue }
+      if (src[i] === '$' && src[i + 1] === '{') { i += 2; stack.push({ t: 'code', inInterp: true }); continue }
       i++; continue
     }
     if (src[i] === '/' && src[i + 1] === '/') { while (i < n && src[i] !== '\n') { blank(i); i++ } continue }
@@ -169,6 +169,14 @@ export function stripComments(src) {
       continue
     }
     const c = src[i]
+    // [注意] 模板插值闭合：${ … } 里的 '}' 必须弹回 template 态。
+    //   漏了这一步会怎样（实测踩过）：stack 只进不出 → 越堆越深 →
+    //   之后所有字符都被当作 code 里的普通内容，**注释再也不会被识别**
+    //   （createEditor.js 剥前 72 行含中文，剥后仍剩 49 行）。
+    //   症状是「行数门禁把注释算成有效代码行」，棘轮基线虚高。
+    //   注意只在 code 态且处于插值里才弹；不能写成见到 '}' 就弹 ——
+    //   对象字面量 `const a = { b: 1 }` 的 '}' 也在 code 态。
+    if (c === '}' && ctx.t === 'code' && ctx.inInterp) { stack.pop(); i++; continue }
     if (ID_START.test(c)) { let j = i; while (j < n && ID_PART.test(src[j])) j++; lastWord = src.slice(i, j); lastSig = 'ID'; i = j; continue }
     if (/[0-9]/.test(c)) { let j = i; while (j < n && /[\w.]/.test(src[j])) j++; lastSig = 'NUM'; lastWord = ''; i = j; continue }
     if (!/\s/.test(c)) { lastSig = c; lastWord = '' }

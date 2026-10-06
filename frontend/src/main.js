@@ -1,6 +1,7 @@
 import { createApp } from 'vue'
 import App from './App.vue'
 import { EventsOn } from '../wailsjs/runtime/runtime'
+import { SetLocale } from '../wailsjs/go/main/App'
 import { initTheme, getTheme, setPreference } from './themes/theme.js'
 import { initPrefs } from './themes/prefs.js'
 import { initI18n, setLocale, getLocale, onLocaleChange } from './i18n/index.js'
@@ -25,13 +26,17 @@ initI18n()
 // 必须放在 initI18n 之后：initI18n 会用当前偏好对齐一次 ref，但那不构成
 // 「用户切换」，无需重建菜单。
 //
-// 为什么走 window.go 而不是静态 import：SetLocale 绑定由 Wails 在 Go 侧编译后
-// 生成到 wailsjs/，若Go 侧尚未重新生成，静态 import 会拿到 undefined 并在
-// 调用处抛错 —— setup 期抛错就是白屏（本项目已因 TDZ 犯过一次）。
-// 故这里做可选链 + try/catch：绑定缺失时静默跳过，界面语言仍然立即生效，
-// 只是原生菜单要等下次重新构建后才跟着变。
+// 为什么用静态 import 而非 window.go —— 生成绑定本身就是
+// window['go']['main']['App'][...] 的薄封装（wailsjs/go/main/App.js），
+// 两者指向同一个对象，但静态 import 的失败模式更好：绑定缺失时会在
+// 模块加载阶段就暴露，而不是 `window.go?.App?.SetLocale?.()` 静默跳过
+// → 出现「界面已换语言、原生菜单没换、无人察觉」的隐性问题。
+//
+// try/catch 仍必须保留：浏览器预览（npm run dev + 无头浏览器）下
+// window.go 确实不存在，静态 import 的函数体执行会抛 —— 而这里在
+// Vue mount 之前，抛错就是白屏（本项目已因 const TDZ 犯过一次）。
 onLocaleChange((locale) => {
-  try { window.go?.main?.App?.SetLocale?.(locale) } catch { /* 浏览器预览 / 绑定未生成 */ }
+  try { SetLocale(locale) } catch { /* 浏览器预览：窗口侧无 runtime */ }
 })
 
 // 菜单「切换主题」（⌘⇧L）：在当前已解析主题的循环顺序 light → dark → paper → light 上

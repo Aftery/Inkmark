@@ -192,4 +192,6 @@ export default {
   'toast.restored': '{time} の内容に戻しました（⌘Z で取り消し）',
   'toast.restoreFailed': '復元に失敗しました：{error}',
   'toast.unknownError': '不明なエラー',
+  'task.done': '完了したタスク',
+  'task.unchecked': '未完了のタスク',
 }

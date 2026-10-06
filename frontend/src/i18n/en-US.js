@@ -192,4 +192,6 @@ export default {
   'toast.restored': 'Restored to {time} — ⌘Z to undo',
   'toast.restoreFailed': 'Restore failed: {error}',
   'toast.unknownError': 'Unknown error',
+  'task.done': 'Completed task',
+  'task.unchecked': 'Uncompleted task',
 }

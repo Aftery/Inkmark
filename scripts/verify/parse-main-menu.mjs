@@ -226,7 +226,7 @@ export function unquote(raw) {
  * 为什么需要：v1.2 起菜单标签改成 t(locale, "key") 查表，若不回查语言表，
  * 每个菜单项都会被判成「动态标签」，丢掉可读的定位信息。
  *
- * ⚠ 语言表在**另一个文件**（locales.go），不在 main.go 里 —— 调用方必须
+ * [注意] 语言表在**另一个文件**（locales.go），不在 main.go 里 —— 调用方必须
  * 一并传入，否则解析出 0 条、所有 key 都会被报成「缺失」。
  *
  * 容忍实现细节上的两种写法（都是 Go 合法语法）：
@@ -238,7 +238,7 @@ export function unquote(raw) {
 export function parseLocaleTable(localeSrc) {
   const table = new Map()
   if (!localeSrc) return table
-  // ⚠ 这里【刻意不做完整的注释剥离】——试过，状态机在 Go 的 \ 转义、
+  // [注意] 这里【刻意不做完整的注释剥离】——试过，状态机在 Go 的 \ 转义、
   //   字符串内 // 等边界上反复出错（实测把整张表解析成 0 条）。
   //   本仓已在「剥注释」这件事上栽过 5 次（shell grep 静默 / @media print
   //   注释误判 / JSDoc 示例误判 / menuLabels 匹配到注释 / 反斜杠转义），

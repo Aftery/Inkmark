@@ -207,4 +207,6 @@ export default {
   'toast.restored': '已恢复到 {time}，可 ⌘Z 撤销',
   'toast.restoreFailed': '恢复失败：{error}',
   'toast.unknownError': '未知错误',
+  'task.done': '已完成任务',
+  'task.unchecked': '未完成任务',
 }
