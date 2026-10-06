@@ -18,75 +18,101 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
 import SegmentedControl from './SegmentedControl.vue'
 import { getPref, getPrefs, setPref, resetPrefs, onPrefsChange } from '../themes/prefs.js'
 import { getPreference, setPreference, onThemeChange } from '../themes/theme.js'
+import { t, setLocale, LOCALE_OPTIONS } from '../i18n/index.js'
 
 const emit = defineEmits(['close'])
 
 const panelEl = ref(null)
 
 // 主题偏好走 theme.js；其余走 prefs.js。两者各自订阅，外部改动（⌘⇧L / 恢复默认）都能回显。
+// locale 也走 prefs.js（第 7 项），故切语言会触发 onPrefsChange → 面板与全站一起重渲染。
 const prefs = ref(getPrefs())
 const themePref = ref(getPreference())
 const offPrefs = onPrefsChange((p) => (prefs.value = p))
 const offTheme = onThemeChange(() => (themePref.value = getPreference()))
 onBeforeUnmount(() => { offPrefs(); offTheme() })
 
+// 分类名存 i18n key、在模板里 t() 求值：模块级常量在 setup 只求值一次，
+// 直接存译文会让分类栏在切语言后停在初始语言。
 const CATEGORIES = [
-  { id: 'appearance', label: '外观' },
-  { id: 'editor', label: '编辑器' },
+  { id: 'appearance', key: 'settings.cat.appearance' },
+  { id: 'editor', key: 'settings.cat.editor' },
 ]
 const tab = ref('appearance')
 
 // ---- 控件选项（值与 prefs.js / theme.js 白名单严格一致） ----
+// 各项label 存 i18n key 而非译文：这些表是模块级常量，不参与 Vue 响应式重算，
+// 存译文就等于把该语言永久固化。统一由 withLabels() 在 computed 里补label。
 const THEME_OPTIONS = [
-  { value: 'system', label: '跟随系统' },
-  { value: 'light', label: '浅色' },
-  { value: 'dark', label: '深色' },
-  { value: 'paper', label: '纸感' },
+  { value: 'system', key: 'settings.theme.system' },
+  { value: 'light', key: 'settings.theme.light' },
+  { value: 'dark', key: 'settings.theme.dark' },
+  { value: 'paper', key: 'settings.theme.paper' },
 ]
 const FONT_FAMILY_OPTIONS = [
-  { value: 'system', label: '系统' },
-  { value: 'serif', label: '衬线' },
-  { value: 'mono', label: '等宽' },
+  { value: 'system', key: 'settings.fontFamily.system' },
+  { value: 'serif', key: 'settings.fontFamily.serif' },
+  { value: 'mono', key: 'settings.fontFamily.mono' },
 ]
 const FONT_SIZE_OPTIONS = [12, 14, 15, 16, 18, 20].map((n) => ({ value: n, label: String(n) }))
 const LINE_HEIGHT_OPTIONS = [
-  { value: 'compact', label: '紧凑' },
-  { value: 'standard', label: '标准' },
-  { value: 'loose', label: '宽松' },
+  { value: 'compact', key: 'settings.lineHeight.compact' },
+  { value: 'standard', key: 'settings.lineHeight.standard' },
+  { value: 'loose', key: 'settings.lineHeight.loose' },
 ]
 const MEASURE_OPTIONS = [
-  { value: 'narrow', label: '窄' },
-  { value: 'standard', label: '标准' },
-  { value: 'wide', label: '宽' },
+  { value: 'narrow', key: 'settings.measure.narrow' },
+  { value: 'standard', key: 'settings.measure.standard' },
+  { value: 'wide', key: 'settings.measure.wide' },
 ]
+// 带单位的档位（自动保存 / 快照间隔）需要插值，故此处直接存已格式化 label；
+// 它们同样只在 computed 里被 withLabels 读取时求值。
 const AUTOSAVE_OPTIONS = [
-  { value: 0, label: '关' },
-  { value: 800, label: '0.8 秒' },
-  { value: 2000, label: '2 秒' },
-  { value: 5000, label: '5 秒' },
+  { value: 0, key: 'settings.autosave.off' },
+  { value: 800, key: 'settings.autosave.seconds', params: { n: 0.8 } },
+  { value: 2000, key: 'settings.autosave.seconds', params: { n: 2 } },
+  { value: 5000, key: 'settings.autosave.seconds', params: { n: 5 } },
 ]
 const SNAPSHOT_OPTIONS = [
-  { value: 0, label: '关' },
-  { value: 180000, label: '3 分钟' },
-  { value: 600000, label: '10 分钟' },
-  { value: 1800000, label: '30 分钟' },
+  { value: 0, key: 'settings.snapshot.off' },
+  { value: 180000, key: 'settings.snapshot.minutes', params: { n: 3 } },
+  { value: 600000, key: 'settings.snapshot.minutes', params: { n: 10 } },
+  { value: 1800000, key: 'settings.snapshot.minutes', params: { n: 30 } },
 ]
 
+/** 把 { value, key, params? } 选项表补上译好的 label（无 key 的项自带 label，如字号数字） */
+function withLabels(options) {
+  return options.map((o) => ({
+    ...o,
+    label: o.key ? t(o.key, o.params) : o.label,
+  }))
+}
+
 // 每项：label/desc + 当前值 getter + 变更 setter（值变更经响应式 prefs / themePref 回显）
-const ROWS = {
+// 整体包在 computed 里：行内的 t() 必须随locale 重算，写成模块级常量就废了。
+const ROWS = computed(() => ({
   appearance: [
-    { key: 'theme', label: '主题', desc: '界面配色', options: THEME_OPTIONS, get: () => themePref.value, set: (v) => setPreference(v) },
-    { key: 'fontFamily', label: '正文字体', desc: '编辑与预览共用', options: FONT_FAMILY_OPTIONS, get: () => prefs.value.fontFamily, set: (v) => setPref('fontFamily', v) },
-    { key: 'fontSize', label: '正文字号', desc: '两栏同步', options: FONT_SIZE_OPTIONS, get: () => prefs.value.fontSize, set: (v) => setPref('fontSize', v) },
-    { key: 'lineHeight', label: '行距', desc: '正文行高', options: LINE_HEIGHT_OPTIONS, get: () => prefs.value.lineHeight, set: (v) => setPref('lineHeight', v) },
-    { key: 'measure', label: '行宽', desc: '预览正文宽度', options: MEASURE_OPTIONS, get: () => prefs.value.measure, set: (v) => setPref('measure', v) },
+    { key: 'theme', labelKey: 'settings.theme.label', descKey: 'settings.theme.desc', options: withLabels(THEME_OPTIONS), get: () => themePref.value, set: (v) => setPreference(v) },
+    { key: 'fontFamily', labelKey: 'settings.fontFamily.label', descKey: 'settings.fontFamily.desc', options: withLabels(FONT_FAMILY_OPTIONS), get: () => prefs.value.fontFamily, set: (v) => setPref('fontFamily', v) },
+    { key: 'fontSize', labelKey: 'settings.fontSize.label', descKey: 'settings.fontSize.desc', options: FONT_SIZE_OPTIONS, get: () => prefs.value.fontSize, set: (v) => setPref('fontSize', v) },
+    { key: 'lineHeight', labelKey: 'settings.lineHeight.label', descKey: 'settings.lineHeight.desc', options: withLabels(LINE_HEIGHT_OPTIONS), get: () => prefs.value.lineHeight, set: (v) => setPref('lineHeight', v) },
+    { key: 'measure', labelKey: 'settings.measure.label', descKey: 'settings.measure.desc', options: withLabels(MEASURE_OPTIONS), get: () => prefs.value.measure, set: (v) => setPref('measure', v) },
+    // 语言项与主题/字体同级：写 prefs.locale（i18n/index.js 订阅它并驱动全站重渲染），
+    // 同时 main.js 的 onLocaleChange 会通知 Go 侧重建原生菜单。
+    { key: 'locale', labelKey: 'settings.locale.label', descKey: 'settings.locale.desc', options: LOCALE_OPTIONS, get: () => prefs.value.locale, set: (v) => setLocale(v) },
   ],
   editor: [
-    { key: 'autosave', label: '自动保存', desc: '停手后自动落盘', options: AUTOSAVE_OPTIONS, get: () => prefs.value.autosave, set: (v) => setPref('autosave', v) },
-    { key: 'snapshot', label: '快照间隔', desc: '关后仅手动快照', options: SNAPSHOT_OPTIONS, get: () => prefs.value.snapshot, set: (v) => setPref('snapshot', v) },
+    { key: 'autosave', labelKey: 'settings.autosave.label', descKey: 'settings.autosave.desc', options: withLabels(AUTOSAVE_OPTIONS), get: () => prefs.value.autosave, set: (v) => setPref('autosave', v) },
+    { key: 'snapshot', labelKey: 'settings.snapshot.label', descKey: 'settings.snapshot.desc', options: withLabels(SNAPSHOT_OPTIONS), get: () => prefs.value.snapshot, set: (v) => setPref('snapshot', v) },
   ],
-}
-const rows = computed(() => ROWS[tab.value] ?? [])
+}))
+const rows = computed(() =>
+  (ROWS.value[tab.value] ?? []).map((r) => ({
+    ...r,
+    label: t(r.labelKey),
+    desc: t(r.descKey),
+  }))
+)
 
 // ---- 恢复默认（二次确认） ----
 const resetArmed = ref(false)
@@ -114,9 +140,9 @@ onMounted(() => {
 
 <template>
   <div class="settings-mask" @click.self="emit('close')">
-    <div ref="panelEl" class="settings-panel" role="dialog" aria-modal="true" aria-label="设置">
+    <div ref="panelEl" class="settings-panel" role="dialog" aria-modal="true" :aria-label="t('settings.label')">
       <div class="settings-body">
-        <nav class="settings-nav" aria-label="设置分类">
+        <nav class="settings-nav" :aria-label="t('settings.categoryLabel')">
           <button
             v-for="cat in CATEGORIES"
             :key="cat.id"
@@ -125,7 +151,7 @@ onMounted(() => {
             type="button"
             :aria-current="tab === cat.id ? 'true' : undefined"
             @click="tab = cat.id"
-          >{{ cat.label }}</button>
+          >{{ t(cat.key) }}</button>
         </nav>
 
         <div class="settings-content">
@@ -147,9 +173,9 @@ onMounted(() => {
 
       <div class="settings-footer">
         <button class="settings-btn" type="button" @click="onResetClick">
-          {{ resetArmed ? '确认恢复默认？' : '恢复默认' }}
+          {{ resetArmed ? t('settings.resetConfirm') : t('settings.reset') }}
         </button>
-        <button class="settings-btn primary" type="button" @click="emit('close')">关闭</button>
+        <button class="settings-btn primary" type="button" @click="emit('close')">{{ t('common.close') }}</button>
       </div>
     </div>
   </div>
@@ -167,7 +193,7 @@ onMounted(() => {
 }
 .settings-panel {
   width: var(--dialog-width-lg);
-  /* 稳定高度：切换「外观」（5 项）/「编辑器」（2 项）时面板不再整体跳变。
+  /* 稳定高度：切换「外观」（6 项）/「编辑器」（2 项）时面板不再整体跳变。
    * 用 min-height 而非 height —— 条目多时内容区（.settings-content）自身滚动，
    * 面板不会被内容撑得更高，两种分类下外框尺寸完全一致。 */
   min-height: var(--dialog-min-height);
