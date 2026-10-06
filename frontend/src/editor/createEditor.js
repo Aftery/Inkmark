@@ -281,46 +281,10 @@ export function createEditor(parent, { doc = '', onDocChange, onScroll, onUpdate
           backgroundColor: 'var(--border-strong)',
           borderRadius: 'var(--radius-pill)',
         },
-
-        /* ---- WYSIWYG 装饰类（editor/wysiwyg.js 产出）----
-           唯一 theme 扩展内追加（§3.6：EditorView.theme 多次提供会同键覆盖，
-           禁止为装饰样式另开第二个 theme）。值全部引用语义 Token，无裸 hex。 */
-        /* 引用块不做行内底色预览（用户反馈：预览里已有引用底色，左侧保持原
-           Markdown 样式、不重复；引用标识仅靠隐藏 ">" 符号即可辨认）。
-           .cm-md-quote 由 wysiwyg.js 生成，此处不附着视觉样式；
-           若日后需要编辑器内引用底色，恢复此行即可（值：var(--surface-warm)）。 */
-        /* 代码块不做行内样式预览（用户反馈：左侧应保持原 Markdown 样式，
-           行内样式装饰与右侧完整预览重复，且与「围栏可见」的源码感冲突）。
-           装饰类 .cm-md-codeblock 由 wysiwyg.js 生成，此处不附着视觉样式；
-           若日后需要代码块底色，恢复此行即可（值：var(--code-bg)）。 */
-        '.cm-md-bullet': { color: 'var(--muted)', padding: '0 1px' },
-        '.cm-md-listmark': { color: 'var(--muted)' },
-        '.cm-md-empty': { color: 'var(--meta)' }, // 空标记弱提示（**** []()）
-        '.cm-md-task-box': {
-          display: 'inline-block',
-          width: '13px',
-          height: '13px',
-          boxSizing: 'border-box',
-          border: '1px solid var(--border-strong)',
-          borderRadius: 'var(--radius-sm)',
-          verticalAlign: '-2px',
-          margin: '0 4px 0 2px',
-        },
-        '.cm-md-task-box.checked': {
-          backgroundColor: 'var(--accent)',
-          borderColor: 'var(--accent)',
-        },
-        '.cm-md-task-box.checked::after': {
-          content: '""',
-          display: 'block',
-          width: '7px',
-          height: '3px',
-          margin: '2px auto 0',
-          borderLeft: '2px solid var(--accent-on)',
-          borderBottom: '2px solid var(--accent-on)',
-          transform: 'rotate(-45deg)',
-        },
-        '.cm-md-task-done': { color: 'var(--muted)', textDecoration: 'line-through' },
+        // WYSIWYG 装饰类（.cm-md-*）的视觉**不在这里** —— 已迁到
+        // themes/editor-wysiwyg.css（该文件是 .cm-md-* 的唯一定义处）。
+        // 迁移原因见该文件头注：把纯 CSS 塞进本对象会顶破行数棘轮。
+        // 引用块 / 代码块刻意不附着行内底色（见 editor-wysiwyg.css 同处注释）。
       }),
       updateListener,
       selectionListener,

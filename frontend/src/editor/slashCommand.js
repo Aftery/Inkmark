@@ -69,7 +69,15 @@ export const slashItems = [
  * @returns {boolean} 是否成功插入
  */
 export function insertSlashItem(view, item, anchor) {
-  if (!view || !item || anchor < 0) return false
+  // 守卫失败必须**留痕**：这个函数历史上唯一的调用方把 close() 排在它前面，
+  // 于是 view/anchor 已被清空，这里 return false 后界面表现是「按了回车
+  // 面板关了但什么都没发生」—— 一个没有任何报错的静默失败（由
+  // scripts/probe-slash.mjs 实测定位）。守卫命中在正常键盘流里不该发生，
+  // 故打 warn 而不是静默返回。
+  if (!view || !item || anchor < 0) {
+    console.warn('[slash] insertSlashItem 守卫命中（上下文缺失）:', { view: !!view, item: !!item, anchor })
+    return false
+  }
   const head = view.state.selection.main.head
   const from = Math.min(anchor, head)
   const to = Math.max(anchor, head)

@@ -42,6 +42,8 @@ const outline = ref([])
 const outlineSync = useOutline({
   getEditor, viewMode: workspace.viewMode, sidebarOpen: workspace.sidebarOpen, outline,
 })
+// 【顶层解包】Vue 只解包顶层 ref；composables 实例是普通对象，字段读 .value 无响应性
+const { outlineActive } = outlineSync, { zoom } = prefs
 const session = useEditorSession({
   editorRef, onDocChange, onOutlineRefresh: refreshOutline,
   // 惰性：粘贴 / 拖拽真实发生在 mount 之后，届时 assets 已初始化
@@ -99,7 +101,7 @@ function onDocChange() {
       <Sidebar v-show="sidebarOpen && !focusOn && viewMode !== 'reading'"
         :inert="!sidebarOpen || focusOn || viewMode === 'reading'"
         :folder-path="folderPath" :reload-signal="treeSignal" :outline="outline"
-        :active-index="outlineSync.outlineActive" :tab="sidebarTab"
+        :active-index="outlineActive" :tab="sidebarTab"
         @select="openTreeFile" @open-folder="openFolder"
         @jump="outlineSync.jumpToHeading" @tab="showSidebarTab" />
 
@@ -119,7 +121,7 @@ function onDocChange() {
     </div>
 
     <StatusBar v-show="!focusOn && viewMode !== 'reading'" :status="saveState"
-      :line="caret.line" :col="caret.col" :words="wordCount" :zoom="prefs.zoom.value"
+      :line="caret.line" :col="caret.col" :words="wordCount" :zoom="zoom"
       @zoom="prefs.changeZoom(10)" />
 
     <SlashCommand ref="slashRef" />

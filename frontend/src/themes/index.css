@@ -7,7 +7,8 @@
  *   2) base.css                —— 全局重置与 body 基础排版
  *   3) preview.css             —— 预览区排版 + highlight.js token 配色
  *   4) app-shell.css           —— 装配层布局（App.vue 的样式部分迁出，≤150 行铁律）
- *   5) platform-darwin.css     —— macOS 毛玻璃适配（挂 <html data-platform>）
+ *   5) editor-wysiwyg.css      —— 编辑器内 WYSIWYG 装饰视觉（.cm-md-* 的唯一定义处）
+ *   6) platform-darwin.css     —— macOS 毛玻璃适配（挂 <html data-platform>）
  *
  * 使用：App.vue 顶部 `import './themes/index.css'`（main.js 不再单独引 base.css）。
  * ========================================================================== */
@@ -16,4 +17,5 @@
 @import './base.css';
 @import './preview.css';
 @import './app-shell.css';
+@import './editor-wysiwyg.css';
 @import './platform-darwin.css';

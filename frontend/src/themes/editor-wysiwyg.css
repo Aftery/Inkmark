@@ -1,0 +1,73 @@
+/* ============================================================================
+ * editor-wysiwyg.css — 编辑器内 WYSIWYG 装饰的视觉（与 token 单一真源同源）
+ * ----------------------------------------------------------------------------
+ * 为什么独立成文件，而不是继续写在 createEditor.js 的 EditorView.theme 里：
+ *   架构 §3.6 曾要求「装饰类不得另开第二个 theme 扩展」——那条约束的**本意**
+ *   是「同一个类名不许被两处定义」（EditorView.theme 多次提供会同键覆盖）。
+ *   但把纯 CSS 声明塞进 JS 对象会让 createEditor.js 顶破行数棘轮
+ *   （实测：加 20 行装饰样式即从 260 涨到 280，契约 5 报红）。
+ *   两害相权：**同键覆盖的风险用「本文件是 .cm-md-* 的唯一定义处」来防**，
+ *   而行数预算靠移出文件保住。若日后有人又在 theme 里写 .cm-md-*，
+ *   请一并删掉本文件对应条目，而不是两处并存。
+ *
+ * 类名由 editor/wysiwyg.js 产出（bullet / listmark / empty / task-box /
+ * task-done / hr / img），值全部引用语义 Token，无裸 hex。
+ * ========================================================================== */
+
+/* ---- 列表圆点与序号 ---- */
+.cm-md-bullet { color: var(--muted); padding: 0 1px; }
+.cm-md-listmark { color: var(--muted); }
+
+/* ---- 空标记弱提示（**** / []() ）---- */
+.cm-md-empty { color: var(--meta); }
+
+/* ---- 任务列表勾选框 ---- */
+.cm-md-task-box {
+  display: inline-block;
+  width: 13px;
+  height: 13px;
+  box-sizing: border-box;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  vertical-align: -2px;
+  margin: 0 4px 0 2px;
+}
+.cm-md-task-box.checked { background-color: var(--accent); border-color: var(--accent); }
+.cm-md-task-box.checked::after {
+  content: '';
+  display: block;
+  width: 7px;
+  height: 3px;
+  margin: 2px auto 0;
+  border-left: 2px solid var(--accent-on);
+  border-bottom: 2px solid var(--accent-on);
+  transform: rotate(-45deg);
+}
+.cm-md-task-done { color: var(--muted); text-decoration: line-through; }
+
+/* ---- 分割线：把 `---` 换成实线 ----
+   height:0 + border-top 是「零内容但占高度」的经典写法：若只把 `---` 替换成
+   空 widget，该行高度会塌陷，分割线与上下段贴在一起。 */
+.cm-md-hr {
+  display: block;
+  height: 0;
+  width: 100%;
+  margin: var(--space-4) 0;
+  border-top: 1px solid var(--border-strong);
+}
+
+/* ---- 图片：非活跃行把 `![alt](url)` 换成真图 ---- */
+.cm-md-img { display: inline-block; max-width: 100%; }
+.cm-md-img img {
+  max-width: 100%;
+  height: auto;
+  border-radius: var(--radius-sm);
+  vertical-align: middle;
+}
+/* 远程图常因离线 / 防盗链失败：留可读占位，而不是一个碎图标 */
+.cm-md-img.is-broken {
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--radius-sm);
+  padding: var(--space-1) var(--space-2);
+}
+.cm-md-img-tip { color: var(--meta); font-size: var(--text-xs); }

@@ -27,6 +27,12 @@ node scripts/verify/scan-i18n-residue.mjs   # i18n 文案残留，期望退出�
 /usr/local/opt/go/bin/go vet ./...           # 注意：go 不在 PATH
 node scripts/smoke/render-check.mjs         # 真渲染冒烟（需先 npm run build），期望 PASS
 
+# 交互探针（验「静默失败」类缺陷，render-check 覆盖不到）
+cd frontend && npx vite --port 5599 --strictPort   # 另开终端起 dev server
+cd .. && node scripts/probe/probe-slash.mjs         # 斜杠面板：输入 / 后按 Enter 是否真插入
+node scripts/probe/probe-wysiwyg.mjs               # 表格/分割线/图片装饰是否产出 DOM
+node scripts/probe/probe-theme.mjs                 # 暗色下各区域实际计算色
+
 # 构建 + 启动
 # ⚠️ 在 WorkBuddy 沙箱内跑会被 safe-delete shim 拦（vite 的 emptyDir 触发熔断）→ 需提权
 PATH=/usr/local/opt/go/bin:$HOME/go/bin:$PATH ~/go/bin/wails build
@@ -205,6 +211,36 @@ docs/spec/                   契约文档（见下）
    阅读态高亮/跳转静默退化为「不算」。现由 App.vue 装配时注入 `previewEl`。
 3. **`doc.unsaved` i18n key 不存在**：标题栏脏圆点的 title 显示成 key 原文。
    已补三档（`doc.unsaved` / `about.checkUpdate`）。
+
+### 第六轮：修四个静默失败（真机截图 + headless 探针驱动）
+用户报「暗色下大纲颜色没变 / 表格、图片没渲染 / 分割线没渲染 / 斜杠插入回车没反应」。
+**四个全是静默失败**——不抛异常、构建通过、121 条测试全绿，只有真机才能看见。
+故本轮新建了 `scripts/probe/`（三个 CDP 探针，见下），先复现再改，最后做变异自证。
+
+| # | 现象 | 真因（探针实测，非推断） |
+|---|---|---|
+| 1 | 斜杠面板按 Enter 无反应 | `confirm()` 先 `close()`（把 `view=null`、`anchor=-1`），再把这两个已清空的变量传给 `insertSlashItem` → 守卫 `if (!view || anchor < 0) return false` **静默返回**。面板关了、文档没变 |
+| 2 | 表格管道符裸露 | **误判纠正**：`@lezer/markdown` **是**支持 GFM 表格的（`markdownLanguage` 已 `configure([GFM, …])`，实测语法树里 `Table`/`TableRow`/`TableDelimiter` 全在）。真因是 `wysiwyg.js` 的 switch **没有这些分支** |
+| 3 | `---` 与 `![alt](url)` 裸露 | 同上：`HorizontalRule` / `Image` 节点存在但无装饰。已补 `HrWidget`（`height:0`+`border-top` 撑高）、`ImageWidget`（非活跃行替换 + `onError` 占位） |
+| 4 | 暗色下侧栏/大纲是浅色 | token 与计算色**全对**（实测 `--fg-2: #B4B7C2`、outline `rgb(180,183,194)`）。真因是 `platform-darwin.css` 的半透明层：`--surface` 只有 **78%** 不透明度，透明窗口下**透出 macOS 桌面壁纸**，深色被冲淡成浅灰。已提到 92%（`.app` 86%→94%，标题栏由 `transparent` 改为 `--surface` 55%） |
+
+**顺带修掉的两处同类静默失效**（探针的 console 日志里抓到的，不是 review 看出来的）：
+5. **大纲当前节高亮从未生效**：模板传的是 `:active-index="outlineSync.outlineActive"`。
+   Vue **只解包顶层 ref**，composables 实例是普通对象 → 送进 prop 的是 `Ref` 实例
+   （探针实测 `active-index=Ref< -1 >`）。已解包成顶层 `const`。
+   同类：`:zoom="prefs.zoom.value"` → `const { zoom } = prefs`。
+6. **wysiwyg 插件崩溃**（探针捕获 `Runtime.exceptionThrown`）：为取 Image 的 url/alt
+   我写了 `node.state.doc`，而 lezer 的 `SyntaxNode` **没有** `.state` / `.doc`。
+   已改为显式传 `doc`（`urlOf(node, doc)`）。
+
+**新增文件**：`themes/editor-wysiwyg.css`（`.cm-md-*` 的唯一定义处，从 createEditor.js
+迁出——写进 theme 会顶破行数棘轮，实测 260→280 被契约 5 拦下）、
+`tests/wysiwyg-decor.test.mjs`（15 条行为契约）、
+`scripts/probe/{probe-slash,probe-wysiwyg,probe-theme}.mjs`。
+
+**教训（新增第 8 次「匹配到注释里的代码」）**：新测试首跑 4 条红，代码明明改对了——
+断言 `/node\.state\.doc/` 命中了我自己写的**说明性注释**（「曾写成 node.state.doc
+直接把插件打崩」）。测试内已加 `stripComments()`，所有断言切到剥离后的源码。
 
 ---
 

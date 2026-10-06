@@ -43,7 +43,12 @@ watch(filtered, (list) => {
 /** 在光标下方弹出；贴边时翻转方向并收进视口 */
 function openMenu(v, anchorPos) {
   const coords = v.coordsAtPos(v.state.selection.main.head)
-  if (!coords) return
+  if (!coords) {
+    // 与 insertSlashItem 同理：静默 return 会让面板永远不显示，
+    // 而界面表现只是「打了 / 没反应」——无任何报错，最难排查。
+    console.warn('[slash] openMenu 拿不到光标坐标，放弃弹出面板')
+    return
+  }
   view = v
   anchor = anchorPos
   const estHeight = Math.min(items.value.length, 6) * ITEM_HEIGHT + 12
@@ -72,10 +77,17 @@ function move(delta) {
 
 function confirm() {
   const item = filtered.value[selected.value]
-  // 先关面板再改文档：扩展的 updateListener 看到 isOpen()===false，
-  // 不会把这次插入误当成「用户继续输入过滤词」。
+  // 【顺序契约，勿调换】必须**先取上下文再关面板**：
+  // close() 会把 view / anchor 清成 null / -1，而 insertSlashItem 的守卫
+  // 是 `if (!view || anchor < 0) return false` —— 反过来的话它拿到的是已清空的
+  // 上下文，静默返回 false，表现为「按了回车面板关了但什么都没插入」。
+  // （该缺陷由 scripts/probe-slash.mjs 的 headless 探针实测复现并定位。）
+  const targetView = view
+  const targetAnchor = anchor
+  // 关面板仍须早于改文档：扩展的 updateListener 看到 isOpen()===false，
+  // 就不会把这次插入误当成「用户继续输入过滤词」。
   close()
-  insertSlashItem(view, item, anchor)
+  insertSlashItem(targetView, item, targetAnchor)
 }
 
 function close() {

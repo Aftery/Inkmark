@@ -19,22 +19,34 @@
 /* 窗口底色让给系统材质（base.css 里 body 是 --bg 实色，先在这里接管） */
 html[data-platform='darwin'] body { background: transparent; }
 
+/* 窗口底色让给系统材质（base.css 里 body 是 --bg 实色，先在这里接管）。
+   94% 而非更低：这一层是正文写作面（长文可读性优先），
+   只留 6% 让壁纸的色相隐约进来，够「有材质感」而不至于冲淡主题色。 */
 html[data-platform='darwin'] .app {
-  background: color-mix(in srgb, var(--bg) 86%, transparent);
+  background: color-mix(in srgb, var(--bg) 94%, transparent);
 }
 
-/* 标题栏：完全透明，直接吃窗口材质（菜单按钮本身是 no-drag，不影响拖动） */
-html[data-platform='darwin'] .app > .titlebar {
-  background: transparent;
-  border-bottom-color: color-mix(in srgb, var(--border) 55%, transparent);
-}
-
+/* 【不透明度取值：真机截图实测后从 78% 提到 92%】
+   原值 78% 时，暗色主题下侧栏 / 标题栏 / 状态栏会透出 macOS 桌面壁纸，
+   在浅色壁纸上整片 chrome 被冲淡成浅灰 —— 表现为「暗色模式下大纲颜色没变」
+   （正文是深色、侧栏却是浅色，同一屏两种明暗）。
+   78% 是「材质感」与「色彩正确」的折中，但实测证明该折中在暗色下不可接受：
+   chrome 的底色必须**由主题说了算**，材质只透一点点。
+   92% 保留一丝通透感（壁纸的色相仍能隐约影响 chrome），同时保证暗色下
+   --surface 的深色成立、--fg-2 的浅色文字有足够对比度。 */
 html[data-platform='darwin'] .main .sidebar {
-  background: color-mix(in srgb, var(--surface) 78%, transparent);
+  background: color-mix(in srgb, var(--surface) 92%, transparent);
 }
 
 html[data-platform='darwin'] .app > .statusbar {
-  background: color-mix(in srgb, var(--surface) 78%, transparent);
+  background: color-mix(in srgb, var(--surface) 92%, transparent);
+}
+
+/* 标题栏：给一层极淡的主题底 —— 纯 transparent 时桌面壁纸会直接透上来，
+   同样造成「暗色下标题栏是浅色」。这一层几乎不可见，但让 chrome 与主题同源。 */
+html[data-platform='darwin'] .app > .titlebar {
+  background: color-mix(in srgb, var(--surface) 55%, transparent);
+  border-bottom-color: color-mix(in srgb, var(--border) 55%, transparent);
 }
 
 /* 弹层需要不透明底：浮层压在材质上再透字会难以辨读，故显式回到实色 */

@@ -69,6 +69,52 @@ const taskDeco = (checked) => Decoration.replace({ widget: new TaskCheckboxWidge
 const emptyHintDeco = Decoration.mark({ class: 'cm-md-empty' })
 const listmarkDeco = Decoration.mark({ class: 'cm-md-listmark' })
 
+// ---------- 分割线：把 `---` 替换成一条真实的横线 ----------
+// 为什么用 widget 而不是只给隐藏后的行加边框：hide() 之后行内没有任何内容，
+// 行高会塌到 0（CM6 的空行高度由 .cm-line 的 line-height 决定，替换成空
+// widget 更矮），而分割线需要一条**占位且撑开高度**的可见线。用 widget
+// 同时拿到「不占字符」与「有高度」两个性质。
+class HrWidget extends WidgetType {
+  eq() { return true }
+  toDOM() {
+    const s = document.createElement('span')
+    s.className = 'cm-md-hr'
+    s.setAttribute('aria-hidden', 'true')
+    return s
+  }
+  ignoreEvent() { return true }
+}
+const hrDeco = Decoration.replace({ widget: new HrWidget() })
+
+// ---------- 图片：`![alt](url)` 换成图片预览 ----------
+// 只在「非活跃行」替换（活跃行保持源码，见 §3.2 显形判定）：用户正在编辑
+// 那一行时把它变成图片反而挡路。加载失败不抛——onError 把 <img> 摘掉，
+// 由 CSS 的 .cm-md-img-broken 呈现占位框（并保留 alt 文本于 title）。
+class ImageWidget extends WidgetType {
+  constructor(src, alt) { super(); this.src = src; this.alt = alt }
+  eq(other) { return other.src === this.src && other.alt === this.alt }
+  toDOM() {
+    const wrap = document.createElement('span')
+    wrap.className = 'cm-md-img'
+    const img = document.createElement('img')
+    img.src = this.src
+    img.alt = this.alt
+    img.loading = 'lazy'
+    img.addEventListener('error', () => {
+      // 远程图常因离线/防盗链失败：留一个可读的占位而不是碎图标
+      wrap.classList.add('is-broken')
+      img.remove()
+      const tip = document.createElement('span')
+      tip.className = 'cm-md-img-tip'
+      tip.textContent = this.alt || this.src
+      wrap.appendChild(tip)
+    })
+    wrap.appendChild(img)
+    return wrap
+  }
+  ignoreEvent() { return false }
+}
+
 // ---------- 活跃行集合（§3.2）：与任一选区相交的行号，扩展上下各 1 行 ----------
 // 扩展原因（真机反馈）：只含选区行时，光标移到相邻行瞬间该行标记从「隐藏+原子」
 // 突变为可见，atomicRanges 动态变化导致方向键跳跃感明显。扩展后相邻行标记
@@ -84,6 +130,37 @@ function activeLineSet(doc, selection) {
 }
 
 const parentName = (ref) => (ref.node && ref.node.parent ? ref.node.parent.name : '')
+
+/**
+ * 从 Image 节点里取出 URL 与 alt 文本。
+ * 不用正则去 `![]()` 上抠（会误伤嵌套括号与转义），而是走子节点：
+ * URL 节点是解析器给出的权威区间，LinkLabel 里是 alt。
+ * 两个都要在直接子节点里找 —— Image 的子结构随内容变
+ * （`![](a.png)` 没有 LinkLabel，`![说明](a.png)` 有）。
+ *
+ * 【坑，勿改】SyntaxNode 上**没有** .state / .doc 属性（只有 from/to/name/
+ * node/nextSibling 等）。取文本必须用闭包里的 doc（build() 的 state.doc）。
+ * 曾写成 node.state.doc 直接把插件打崩（CodeMirror plugin crashed）。
+ */
+function findChild(node, name) {
+  const n = node.node
+  if (!n) return null
+  for (let c = n.firstChild; c; c = c.nextSibling) {
+    if (c.name === name) return c
+  }
+  return null
+}
+function urlOf(node, doc) {
+  const url = findChild(node, 'URL')
+  if (!url) return null
+  // URL 节点含尖括号包裹时 slice 出来是 <a.png>，去掉
+  return doc.sliceString(url.from, url.to).replace(/^<|>$/g, '')
+}
+function altOf(node, doc) {
+  const label = findChild(node, 'LinkLabel')
+  if (!label) return null
+  return doc.sliceString(label.from, label.to).replace(/^\[|\]$/g, '')
+}
 
 // ---------- 装饰构建：只遍历 visibleRanges ----------
 function build(view) {
@@ -137,6 +214,44 @@ function build(view) {
         // 块容器：行级底色（不改布局，仅背景，与专注模式 line 类叠加共存）
         if (name === 'Blockquote') { lineClass(node, 'cm-md-quote', visFrom, visTo); return }
         if (name === 'FencedCode') { lineClass(node, 'cm-md-codeblock', visFrom, visTo); return }
+
+        // 分隔线：整行替换为横线 widget。必须**整节点**替换且在活跃行显形
+        // （否则光标停在那一行时横线消失，位置感错乱）。
+        if (name === 'HorizontalRule') {
+          if (canHide(node.from)) {
+            const d = hrDeco
+            decoRanges.push({ from: node.from, to: node.to, value: d })
+            atomicRanges.push({ from: node.from, to: node.to, value: d })
+            lastReplacedTo = node.to
+          }
+          return
+        }
+
+        // 表格：管道符与分隔行全部隐藏（这才是「表格渲染」在编辑器里的
+        // 真实含义 ——  Bear 式渐进渲染只隐藏标记，不做真表格布局；
+        // 真表格需要 block 装饰，而本仓的架构约束明令禁止，见文件头 §1）。
+        if (name === 'TableDelimiter') {
+          hide(node.from, node.to)
+          return
+        }
+
+        // 图片：非活跃行替换为图片预览。父 Image 的 from/to 覆盖整个
+        // `![alt](url)`，一次整体替换（内部 LinkMark/URL/LinkTitle 的
+        // 隐藏靠 lastReplacedTo 被拦掉，不会与本条产生重叠区间）。
+        if (name === 'Image') {
+          if (canHide(node.from)) {
+            const src = urlOf(node, doc) ?? ''
+            const alt = altOf(node, doc) ?? ''
+            if (src) {
+              const d = Decoration.replace({ widget: new ImageWidget(src, alt) })
+              decoRanges.push({ from: node.from, to: node.to, value: d })
+              atomicRanges.push({ from: node.from, to: node.to, value: d })
+              lastReplacedTo = node.to
+              return
+            }
+          }
+          return
+        }
 
         switch (name) {
           case 'HeaderMark': { // # ~ ######（含其后一个空格）
