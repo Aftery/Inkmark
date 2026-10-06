@@ -287,52 +287,6 @@ export function parseLocaleTable(localeSrc) {
   return table
 }
 
-/**
- * 剥 Go 注释（行注释与块注释），保持长度不变（用空格替换）以维持行号。
- * 与本仓其他解析器（contracts.test.mjs 的 stripComments）同一原则：
- * 匹配前必须剥注释，否则注释里的示例代码会被当成真代码
- * —— 本仓已因此踩坑 4 次（shell grep 静默 / @media print 注释误判 /
- * JSDoc 示例误判 / 这次的 Go 注释）。
- */
-function stripGoComments(src) {
-  let out = ''
-  let i = 0
-  const n = src.length
-  while (i < n) {
-    const two = src.slice(i, i + 2)
-    if (two === '//') {
-      while (i < n && src[i] !== '\n') { out += ' '; i++ }
-    } else if (two === '/*') {
-      while (i < n && src.slice(i, i + 2) !== '*/') {
-        out += src[i] === '\n' ? '\n' : ' '
-        i++
-      }
-      out += '  '
-      i += 2
-    } else {
-      // 字符串字面量内的注释符号不是注释（t(l, "http://x") 这类）
-      if (src[i] === '"' || src[i] === '`') {
-        const q = src[i]
-        out += src[i]
-        i++
-        while (i < n && src[i] !== q) {
-          // ⚠ 这里必须与【单个】反斜杠字符比较（'\\' 即一个 \）。
-          // 若误写成 '\\\\'（两个 \ 的比较），转义序列 \"] 就不会闭合字符串，
-          // 后面整段会被当注释吃掉 —— 实测踩过：语言表解析出 0 条。
-          if (src[i] === '\\' && q === '"') { out += src.slice(i, i + 2); i += 2; continue }
-          out += src[i] === '\n' ? '\n' : ' '
-          i++
-        }
-        if (i < n) { out += q; i++ }
-      } else {
-        out += src[i]
-        i++
-      }
-    }
-  }
-  return out
-}
-
 /** 源码中第 index 个字符所在的 1-based 行号 */
 function lineAt(text, index) {
   return text.slice(0, index).split('\n').length
