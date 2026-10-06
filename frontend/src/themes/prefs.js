@@ -13,6 +13,9 @@
  *  - 字号【必须】成对同改 --text-base（编辑区）与 --text-md（预览区），
  *    两者不等会导致左右两栏文字错位（C2 不变量）。
  *  - 绝不碰 --zoom-scale：视图缩放走独立变量，与基础字号正交叠加（C3）。
+ *  - 第 7 项`locale`（界面语言）是**非 CSS 偏好**：applyPrefs 不为它写任何内联变量
+ *    （语言由 i18n/index.js 消费 prefs 的值）。它存在这里而不是另建一套
+ *    localStorage，是为了不出现两套持久化机制（Spec §2.3）。
  *
  * 本模块不依赖 Vue，可在 main.js 挂载前同步初始化（首帧前落好内联变量，避免跳变），
  * 与 theme.js 的防闪烁约定一致。
@@ -28,6 +31,7 @@ export const PREFS_DEFAULTS = {
   measure: 'standard', // narrow | standard | wide
   autosave: 800, // 0(关) | 800 | 2000 | 5000（ms）
   snapshot: 180000, // 0(关) | 180000 | 600000 | 1800000（ms）
+  locale: 'zh-CN', // zh-CN | en-US | ja-JP（界面语言；取值真源见 PREF_OPTIONS.locale）
 }
 
 /** 每项的合法取值白名单（校验 + 面板控件的取值来源） */
@@ -38,6 +42,11 @@ export const PREF_OPTIONS = {
   measure: ['narrow', 'standard', 'wide'],
   autosave: [0, 800, 2000, 5000],
   snapshot: [0, 180000, 600000, 1800000],
+  // 界面语言。这里是**取值的唯一真源**（i18n/index.js 的 LOCALE_OPTIONS
+  // 按本数组的顺序取三档、只补显示名，不再另写一份 locale 列表）——
+  // 两处各写一份的话，加第四种语言时会漏改其中一处，而漏改的那处
+  // 会表现为「面板里选得到、但setPref 静默忽略」。
+  locale: ['zh-CN', 'en-US', 'ja-JP'],
 }
 
 /**
