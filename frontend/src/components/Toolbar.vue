@@ -10,39 +10,42 @@
  */
 import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
 import AppIcon from './icons/AppIcon.vue'
+import { t } from '../i18n/index.js'
 
 const props = defineProps({
   active: { type: Object, default: () => ({}) }, // activeFormats(state) 产出
 })
 const emit = defineEmits(['command'])
 
+// label 存 i18n key 而非译文：ITEMS 是模块级常量，直接存译文会让切语言时
+// 这批按钮永久停在初始语言（模块级常量不参与 Vue 响应式重算）。
 const ITEMS = [
-  { id: 'undo', icon: 'undo-2', label: '撤销', group: 0 },
-  { id: 'redo', icon: 'redo-2', label: '重做', group: 0 },
-  { id: 'bold', icon: 'bold', label: '加粗', group: 1, toggle: true },
-  { id: 'italic', icon: 'italic', label: '斜体', group: 1, toggle: true },
-  { id: 'strike', icon: 'strikethrough', label: '删除线', group: 1, toggle: true },
-  { id: 'code', icon: 'code', label: '行内代码', group: 1, toggle: true },
-  { id: 'heading', icon: 'heading', label: '标题', group: 2, menu: true },
-  { id: 'quote', icon: 'quote', label: '引用', group: 2, toggle: true },
-  { id: 'ul', icon: 'list', label: '无序列表', group: 2, toggle: true },
-  { id: 'ol', icon: 'list-ordered', label: '有序列表', group: 2, toggle: true },
-  { id: 'task', icon: 'list-todo', label: '任务列表', group: 2, toggle: true },
-  { id: 'link', icon: 'link', label: '链接', group: 3 },
-  { id: 'image', icon: 'image', label: '图片', group: 3 },
-  { id: 'codeblock', icon: 'square-code', label: '代码块', group: 3 },
-  { id: 'table', icon: 'table', label: '表格', group: 3 },
-  { id: 'hr', icon: 'minus', label: '分隔线', group: 3 },
+  { id: 'undo', icon: 'undo-2', key: 'toolbar.undo', group: 0 },
+  { id: 'redo', icon: 'redo-2', key: 'toolbar.redo', group: 0 },
+  { id: 'bold', icon: 'bold', key: 'toolbar.bold', group: 1, toggle: true },
+  { id: 'italic', icon: 'italic', key: 'toolbar.italic', group: 1, toggle: true },
+  { id: 'strike', icon: 'strikethrough', key: 'toolbar.strike', group: 1, toggle: true },
+  { id: 'code', icon: 'code', key: 'toolbar.inlineCode', group: 1, toggle: true },
+  { id: 'heading', icon: 'heading', key: 'toolbar.heading', group: 2, menu: true },
+  { id: 'quote', icon: 'quote', key: 'toolbar.quote', group: 2, toggle: true },
+  { id: 'ul', icon: 'list', key: 'toolbar.bulletList', group: 2, toggle: true },
+  { id: 'ol', icon: 'list-ordered', key: 'toolbar.orderedList', group: 2, toggle: true },
+  { id: 'task', icon: 'list-todo', key: 'toolbar.taskList', group: 2, toggle: true },
+  { id: 'link', icon: 'link', key: 'toolbar.link', group: 3 },
+  { id: 'image', icon: 'image', key: 'toolbar.image', group: 3 },
+  { id: 'codeblock', icon: 'square-code', key: 'toolbar.codeBlock', group: 3 },
+  { id: 'table', icon: 'table', key: 'toolbar.table', group: 3 },
+  { id: 'hr', icon: 'minus', key: 'toolbar.hr', group: 3 },
 ]
 
 // 折叠顺序（先折 → 后折），视觉规格 §2.6：undo/redo 与 bold/italic 最后折叠
 const COLLAPSE_ORDER = ['hr', 'table', 'codeblock', 'image', 'link', 'task', 'ol', 'ul', 'quote', 'heading']
 
 const HEADING_ITEMS = [
-  { id: 'h0', label: '正文' },
-  { id: 'h1', label: '标题 1' },
-  { id: 'h2', label: '标题 2' },
-  { id: 'h3', label: '标题 3' },
+  { id: 'h0', key: 'toolbar.heading0' },
+  { id: 'h1', key: 'toolbar.heading1' },
+  { id: 'h2', key: 'toolbar.heading2' },
+  { id: 'h3', key: 'toolbar.heading3' },
 ]
 
 const barEl = ref(null)
@@ -102,7 +105,7 @@ function isActive(item) {
 </script>
 
 <template>
-  <div ref="barEl" class="editor-toolbar" role="toolbar" aria-label="格式化工具条">
+  <div ref="barEl" class="editor-toolbar" role="toolbar" :aria-label="t('toolbar.label')">
     <template v-for="(item, i) in visibleItems" :key="item.id">
       <span
         v-if="i > 0 && item.group !== visibleItems[i - 1].group"
@@ -113,8 +116,8 @@ function isActive(item) {
         class="tb-btn"
         :class="{ selected: item.toggle && isActive(item) }"
         type="button"
-        :aria-label="item.label"
-        :title="item.label"
+        :aria-label="t(item.key)"
+        :title="t(item.key)"
         :aria-pressed="item.toggle ? isActive(item) : undefined"
         @click="clickItem(item)"
       >
@@ -129,8 +132,8 @@ function isActive(item) {
       class="tb-btn"
       :class="{ selected: moreOpen }"
       type="button"
-      aria-label="更多格式"
-      title="更多格式"
+      :aria-label="t('toolbar.more')"
+      :title="t('toolbar.more')"
       :aria-expanded="moreOpen"
       @click="moreOpen = !moreOpen"
     >
@@ -138,7 +141,7 @@ function isActive(item) {
     </button>
 
     <!-- 标题下拉（文本菜单项，视觉规格 §2.2） -->
-    <div v-if="headMenuOpen" class="tb-menu" role="menu" aria-label="标题级别">
+    <div v-if="headMenuOpen" class="tb-menu" role="menu" :aria-label="t('toolbar.headingMenu')">
       <button
         v-for="h in HEADING_ITEMS"
         :key="h.id"
@@ -147,11 +150,11 @@ function isActive(item) {
         type="button"
         role="menuitem"
         @click="pickHeading(h.id)"
-      >{{ h.label }}</button>
+      >{{ t(h.key) }}</button>
     </div>
 
     <!-- 溢出菜单：图标 + 文本标签（菜单不是纯图标位） -->
-    <div v-if="moreOpen" class="tb-menu" role="menu" aria-label="更多格式">
+    <div v-if="moreOpen" class="tb-menu" role="menu" :aria-label="t('toolbar.more')">
       <button
         v-for="item in overflowItems"
         :key="item.id"
@@ -162,10 +165,10 @@ function isActive(item) {
         @click="clickItem(item)"
       >
         <AppIcon :name="item.icon" size="button" />
-        <span>{{ item.label }}</span>
+        <span>{{ t(item.key) }}</span>
       </button>
       <template v-if="overflowHasHeading">
-        <div class="tb-menu-group" role="separator">标题</div>
+        <div class="tb-menu-group" role="separator">{{ t('toolbar.headingGroup') }}</div>
         <button
           v-for="h in HEADING_ITEMS"
           :key="'m-' + h.id"
@@ -173,7 +176,7 @@ function isActive(item) {
           type="button"
           role="menuitem"
           @click="pickHeading(h.id)"
-        >{{ h.label }}</button>
+        >{{ t(h.key) }}</button>
       </template>
     </div>
   </div>

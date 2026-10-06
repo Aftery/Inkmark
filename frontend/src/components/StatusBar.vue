@@ -8,6 +8,7 @@
  */
 import { computed } from 'vue'
 import AppIcon from './icons/AppIcon.vue'
+import { t } from '../i18n/index.js'
 
 const props = defineProps({
   status: { type: String, default: 'saved' }, // 'saved' | 'saving' | 'unsaved' | 'error'
@@ -19,13 +20,19 @@ const props = defineProps({
 defineEmits(['zoom'])
 
 // 三态三重表达：图标形状不同 + 文案不同 + 颜色不同（色盲/灰度下仍可区分）
+// text 存 i18n key 而非译文：META 是模块级常量，直接存译文会让切语言时
+// 这段文案永久停在初始语言（模块级常量不参与 Vue 响应式重算）。
 const META = {
-  saved: { icon: 'circle-check', text: '已保存', cls: 'is-ok' },
-  saving: { icon: 'loader', text: '保存中…', cls: 'is-busy' },
-  unsaved: { icon: 'circle-dot', text: '未保存', cls: 'is-warn' },
-  error: { icon: 'circle-dot', text: '保存失败', cls: 'is-err' },
+  saved: { icon: 'circle-check', key: 'common.saved', cls: 'is-ok' },
+  saving: { icon: 'loader', key: 'common.saving', cls: 'is-busy' },
+  unsaved: { icon: 'circle-dot', key: 'common.unsaved', cls: 'is-warn' },
+  error: { icon: 'circle-dot', key: 'common.saveFailed', cls: 'is-err' },
 }
-const meta = computed(() => META[props.status] || META.saved)
+// 在 computed 里读 t() → 依赖 i18n 的 locale ref，切语言即重算
+const meta = computed(() => {
+  const m = META[props.status] || META.saved
+  return { ...m, text: t(m.key) }
+})
 </script>
 
 <template>
@@ -37,14 +44,14 @@ const meta = computed(() => META[props.status] || META.saved)
 
     <span class="sb-spring" aria-hidden="true"></span>
 
-    <span class="sb-item sb-num">Ln {{ line }}, Col {{ col }}</span>
+    <span class="sb-item sb-num">{{ t('statusbar.lineCol', { line, col }) }}</span>
     <span class="sb-dot" aria-hidden="true">·</span>
-    <span class="sb-item sb-num">{{ words.toLocaleString() }} 字</span>
+    <span class="sb-item sb-num">{{ t('statusbar.words', { count: words.toLocaleString() }) }}</span>
     <span class="sb-dot" aria-hidden="true">·</span>
     <button
       class="sb-item sb-zoom sb-num"
       type="button"
-      title="切换缩放（90 / 100 / 110 / 125%）"
+      :title="t('statusbar.zoomTitle')"
       @click="$emit('zoom')"
     >{{ zoom }}%</button>
   </footer>

@@ -4,6 +4,7 @@
 import { ref, computed } from 'vue'
 import { ListDir } from '../../wailsjs/go/main/App'
 import AppIcon from './icons/AppIcon.vue'
+import { t } from '../i18n/index.js'
 
 const props = defineProps({
   entry: { type: Object, required: true },
@@ -43,7 +44,7 @@ async function toggle() {
       <span class="tree-name">{{ entry.name }}</span>
     </div>
     <div v-if="entry.isDir && open">
-      <div v-if="loading" class="tree-hint">加载中…</div>
+      <div v-if="loading" class="tree-hint">{{ t('tree.loading') }}</div>
       <template v-else>
         <TreeNode
           v-for="child in children || []"
@@ -52,7 +53,7 @@ async function toggle() {
           :depth="depth + 1"
           @select="emit('select', $event)"
         />
-        <div v-if="children && children.length === 0" class="tree-hint">（空目录）</div>
+        <div v-if="children && children.length === 0" class="tree-hint">{{ t('tree.emptyDir') }}</div>
       </template>
     </div>
   </div>

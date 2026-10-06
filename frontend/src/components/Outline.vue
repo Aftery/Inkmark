@@ -4,6 +4,7 @@
 // --accent 竖条（交互 Spec 3.2 定稿视觉）；每级缩进 16px（4px 网格）；
 // 行高按触控目标 44px 约束（交互 Spec §5）。零新增颜色与图标。
 import { ref, watch, nextTick } from 'vue'
+import { t } from '../i18n/index.js'
 
 const props = defineProps({
   items: { type: Array, default: () => [] },
@@ -45,8 +46,8 @@ function onKeydown(e) {
 </script>
 
 <template>
-  <nav class="outline" aria-label="文档大纲">
-    <p v-if="!items.length" class="outline-empty">当前文档没有标题，用 # 开始一节</p>
+  <nav class="outline" :aria-label="t('outline.label')">
+    <p v-if="!items.length" class="outline-empty">{{ t('outline.empty') }}</p>
     <ul v-else ref="listEl" class="outline-list" @keydown="onKeydown">
       <li
         v-for="(item, index) in items"

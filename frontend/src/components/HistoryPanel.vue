@@ -8,6 +8,7 @@
  */
 import AppIcon from './icons/AppIcon.vue'
 import { formatSnapTime, formatSnapSize } from '../composables/useDocumentPersistence'
+import { t } from '../i18n/index.js'
 
 defineProps({
   filePath: { type: String, default: '' },
@@ -19,32 +20,32 @@ defineEmits(['close', 'restore', 'snapshot-now'])
 </script>
 
 <template>
-  <div class="history-panel" role="dialog" aria-label="历史快照">
+  <div class="history-panel" role="dialog" :aria-label="t('history.label')">
     <div class="history-head">
-      <span class="history-title">历史快照</span>
+      <span class="history-title">{{ t('history.title') }}</span>
       <button
         v-if="filePath"
         class="history-btn"
         type="button"
         @click="$emit('snapshot-now')"
-      >立即快照</button>
-      <button class="history-close" type="button" aria-label="关闭" @click="$emit('close')">
+      >{{ t('history.snapshotNow') }}</button>
+      <button class="history-close" type="button" :aria-label="t('common.close')" @click="$emit('close')">
         <AppIcon name="x" size="inline" />
       </button>
     </div>
     <div class="history-body">
-      <p v-if="!filePath" class="history-empty">当前文档尚未保存到磁盘，暂无快照</p>
+      <p v-if="!filePath" class="history-empty">{{ t('history.empty.unsaved') }}</p>
       <template v-else>
-        <p v-if="loading" class="history-empty">读取中…</p>
+        <p v-if="loading" class="history-empty">{{ t('history.empty.loading') }}</p>
         <p v-else-if="!snapshots.length" class="history-empty">
-          还没有快照。持续编辑 3 分钟、手动保存或点「立即快照」后会自动生成，最多保留 10 版。
+          {{ t('history.empty.none') }}
         </p>
         <ul v-else class="history-list">
           <li v-for="s in snapshots" :key="s.name" class="history-item">
             <span class="history-meta">
               {{ formatSnapTime(s.createdAt) }} · {{ formatSnapSize(s.size) }}
             </span>
-            <button class="history-btn" type="button" @click="$emit('restore', s)">恢复</button>
+            <button class="history-btn" type="button" @click="$emit('restore', s)">{{ t('history.restore') }}</button>
           </li>
         </ul>
       </template>

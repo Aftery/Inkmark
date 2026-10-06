@@ -1,8 +1,9 @@
 <script setup>
-// 文件树：懒加载（点目录才调用 Go 的 ListDir），只显示 md/txt 文件和目录
+// 文件树：懒加载（点目录才调用 Go 的ListDir），只显示 md/txt 文件和目录
 import { ref, watch } from 'vue'
 import { ListDir } from '../../wailsjs/go/main/App'
 import TreeNode from './TreeNode.vue'
+import { t } from '../i18n/index.js'
 
 const props = defineProps({
   root: { type: String, required: true },
@@ -36,7 +37,7 @@ watch(() => [props.root, props.reloadSignal], load)
       :entry="entry"
       @select="emit('select', $event)"
     />
-    <div v-if="loaded && entries.length === 0" class="tree-empty">没有 Markdown 文件</div>
+    <div v-if="loaded && entries.length === 0" class="tree-empty">{{ t('tree.empty') }}</div>
   </div>
 </template>
 

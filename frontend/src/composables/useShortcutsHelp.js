@@ -13,7 +13,8 @@
  * 它会比对 SHORTCUTS / README 与 main.go 三处，漏改任一处即报红。
  * 该脚本还会检测同一张表内「同一键两义」的撞键。
  */
-import { ref } from 'vue'
+import { ref, computed } from 'vue'
+import { t } from '../i18n/index.js'
 
 /** 键位展示：mac 用符号，其余平台把 ⌘/⌥/⇧ 替换为 Ctrl/Alt/Shift */
 const IS_MAC = /mac/i.test(navigator.platform || '')
@@ -26,28 +27,38 @@ export function useShortcutsHelp() {
     return k.replace(/⌘/g, 'Ctrl+').replace(/⌥/g, 'Alt+').replace(/⇧/g, 'Shift+')
   }
 
-  return { showShortcuts, fmtKey, SHORTCUTS }
+  // 速查表渲染成「已翻译的描述」而不是裸 key：SHORTCUTS 是模块级常量，
+  // 若在模板里现调 t() 也能跟着切语言，但把翻译收在这里可以顺带保证
+  // 弹层标题、表格内容走同一份 t()，且键位串 fmtKey() 不受影响。
+  const rows = computed(() => SHORTCUTS.map(([keys, descKey]) => [fmtKey(keys), t(descKey)]))
+
+  return { showShortcuts, fmtKey, rows }
 }
 
-/** 快捷键速查表（键位 → 用途）。顺序按「文件 / 编辑 / 视图」分组，便于扫读。 */
+/**
+ * 快捷键速查表（键位 → 用途描述的 i18n key）。顺序按「文件 / 编辑 / 视图」分组，便于扫读。
+ *
+ * 注意·第二列存的是 **i18n key 而非译文**：切语言时表格靠 t() 重算描述。
+ * 键位串（第一列）**不译**（Spec §7 坑 4：⌘⇧B 这类键位是平台约定，译了反而不准）。
+ */
 export const SHORTCUTS = [
-  ['⌘N', '新建文件'],
-  ['⌘O / ⌘⇧O', '打开文件 / 打开文件夹'],
-  ['⌘S / ⌘⇧S', '保存 / 另存为'],
-  ['⌘P', '打印'],
-  ['⇧⌘P', '导出 PDF'],
-  ['⌘F', '查找（⌘⌥F 查找替换）'],
-  ['⌘L', '跳转到行'],
-  ['⌥↑ / ⌥↓', '上移 / 下移行'],
-  ['⇧⌥↑ / ⇧⌥↓', '在上方 / 下方复制当前行'],
-  ['⌘⇧K', '删除当前行'],
-  ['⌘⇧B / ⌘I', '加粗 / 斜体'],
-  ['⌘K', '插入链接'],
-  ['⌘1 ~ ⌘4', '编辑 / 预览 / 双栏 / 阅读'],
-  ['⌘⇧F', '专注模式（Esc 退出）'],
-  ['⌘B', '显示 / 隐藏大纲'],
-  ['⌘= / ⌘- / ⌘0', '放大 / 缩小 / 重置缩放'],
-  ['⌘⇧L', '切换主题'],
-  ['⌘,', '设置'],
-  ['⌘/', '快捷键速查'],
+  ['⌘N', 'shortcuts.new'],
+  ['⌘O / ⌘⇧O', 'shortcuts.open'],
+  ['⌘S / ⌘⇧S', 'shortcuts.save'],
+  ['⌘P', 'shortcuts.print'],
+  ['⇧⌘P', 'shortcuts.exportPdf'],
+  ['⌘F', 'shortcuts.find'],
+  ['⌘L', 'shortcuts.jumpLine'],
+  ['⌥↑ / ⌥↓', 'shortcuts.moveLine'],
+  ['⇧⌥↑ / ⇧⌥↓', 'shortcuts.dupLine'],
+  ['⌘⇧K', 'shortcuts.deleteLine'],
+  ['⌘⇧B / ⌘I', 'shortcuts.boldItalic'],
+  ['⌘K', 'shortcuts.insertLink'],
+  ['⌘1 ~ ⌘4', 'shortcuts.viewModes'],
+  ['⌘⇧F', 'shortcuts.focus'],
+  ['⌘B', 'shortcuts.outline'],
+  ['⌘= / ⌘- / ⌘0', 'shortcuts.zoom'],
+  ['⌘⇧L', 'shortcuts.theme'],
+  ['⌘,', 'shortcuts.settings'],
+  ['⌘/', 'shortcuts.list'],
 ]
