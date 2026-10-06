@@ -1,3 +1,5 @@
+//go:build darwin
+
 // Inkmark PDF 导出桥（darwin）—— ADR-003 路线 A′ 实现：
 //   离屏 WKWebView 加载自包含 HTML
 //   -> evaluateJavaScript 取 scrollHeight（CSS px，与 PDF pt 1:1，禁止前端缩放）

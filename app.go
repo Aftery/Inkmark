@@ -233,7 +233,14 @@ func (a *App) OnBeforeClose(ctx context.Context) bool {
 	if err != nil {
 		return true // 对话框异常时保守阻止关闭，避免误丢内容
 	}
-	return choice != "不保存退出"
+	// Linux/GTK 下可能返回按钮文本、按钮索引（"0"/"1"）或空串。
+	// 只有明确匹配"不保存退出"时才放行，其余一律视为"取消"。
+	switch strings.TrimSpace(choice) {
+	case "不保存退出", "1":
+		return false
+	default:
+		return true
+	}
 }
 
 // ---------- 图片粘贴 / 拖拽插入 ----------

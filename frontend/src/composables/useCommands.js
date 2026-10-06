@@ -214,6 +214,7 @@ export function useCommands(deps) {
       'file.print': () => { session.flushPreview(); window.print() },
       'file.exportHtml': () => { session.flushPreview(); docState.exportHtml() },
       'file.exportPdf': () => { session.flushPreview(); docState.exportPdf() },
+      'file.settings': () => { showSettings.value = true },
       // 编辑
       'edit.undo': () => execCmd(undo),
       'edit.redo': () => execCmd(redo),

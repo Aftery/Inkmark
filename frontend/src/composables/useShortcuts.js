@@ -54,6 +54,7 @@ export const COMMANDS = [
   { id: 'file.print', group: 'file', labelKey: 'titlebar.print', accel: '⌘P', descKey: 'shortcuts.print' },
   { id: 'file.exportHtml', group: 'file', labelKey: 'menu.exportHtml', accel: '⌘⇧H', descKey: null },
   { id: 'file.exportPdf', group: 'file', labelKey: 'menu.exportPdf', accel: '⌘⇧P', descKey: 'shortcuts.exportPdf' },
+  { id: 'file.settings', group: 'file', labelKey: 'menu.settings', accel: '⌘,', descKey: null },
 
   // ---- 编辑 ----
   { id: 'edit.undo', group: 'edit', labelKey: 'menu.undo', accel: '⌘Z', descKey: null },

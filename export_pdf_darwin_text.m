@@ -1,3 +1,5 @@
+//go:build darwin
+
 // 页眉页脚绘制辅助实现——见 export_pdf_darwin_text.h。
 #import "export_pdf_darwin_text.h"
 #import <AppKit/AppKit.h>
