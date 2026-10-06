@@ -10,8 +10,7 @@ import {
 } from './editor/commands'
 import {
   undo, redo, selectAll,
-  moveLineUp, moveLineDown, copyLineDown, deleteLine,
-  indentMore, indentLess,
+  moveLineUp, moveLineDown, copyLineDown, deleteLine, indentMore, indentLess,
 } from '@codemirror/commands'
 import { openSearchPanel } from '@codemirror/search'
 import { createRenderer, render } from './preview/markdown'
@@ -29,6 +28,7 @@ import { useDialog } from './composables/useDialog'
 import { useShortcutsHelp } from './composables/useShortcutsHelp'
 import { useFileOps } from './composables/useFileOps'
 import { getTheme, onThemeChange } from './themes/theme.js'
+import { t } from './i18n/index.js'
 import { OpenFileDialog, OpenDirectoryDialog, ReadFile, CheckUpdate, Version, ClipboardGet, ClipboardSet } from '../wailsjs/go/main/App'
 import { EventsOn, BrowserOpenURL } from '../wailsjs/runtime/runtime'
 import './themes/index.css'
@@ -44,7 +44,7 @@ const offThemeChange = onThemeChange((resolved) => (theme.value = resolved))
 
 const renderer = createRenderer()
 const previewHtml = computed(() => render(renderer, markdown.value))
-const title = computed(() => filePath.value ? filePath.value.split('/').pop() : '未命名')
+const title = computed(() => filePath.value ? filePath.value.split('/').pop() : t('common.untitled'))
 
 const DEFAULT_DOC = `# Inkmark
 
@@ -263,11 +263,11 @@ function cancelPendingPreview() {
 async function onImageFile(file) {
   const api = window.go?.main?.App
   if (!api?.SaveImage) {
-    showToast('当前环境不支持插入图片', true)
+    showToast(t('toast.imageUnsupported'), true)
     return null
   }
   if (!filePath.value) {
-    showToast('请先保存文档（⌘S）再插入图片', true)
+    showToast(t('toast.saveBeforeImage'), true)
     return null
   }
   try {
@@ -277,7 +277,7 @@ async function onImageFile(file) {
     const ext = (file.name.split('.').pop() || 'png').toLowerCase()
     return await api.SaveImage(filePath.value, btoa(bin), ext)
   } catch (err) {
-    showToast(`插入图片失败：${err?.message || err}`, true)
+    showToast(t('toast.imageFailed', { error: err?.message || err }), true)
     return null
   }
 }
@@ -545,11 +545,14 @@ function openFind() {
 
 async function jumpToLine() {
   if (!editor) return
-  const v = await askInput({ title: '跳转到行', placeholder: `1 ~ ${editor.state.doc.lines}` })
+  const v = await askInput({
+    title: t('dialog.jumpToLine'),
+    placeholder: t('dialog.linePlaceholder', { total: editor.state.doc.lines }),
+  })
   if (v === null) return
   const n = Number.parseInt(v, 10)
   if (!Number.isFinite(n) || n < 1 || n > editor.state.doc.lines) {
-    showToast(`行号超出范围（1 ~ ${editor.state.doc.lines}）`, true)
+    showToast(t('toast.lineOutOfRange', { total: editor.state.doc.lines }), true)
     return
   }
   const line = editor.state.doc.line(n)
@@ -565,8 +568,8 @@ function copySelectionAsHtml() {
   const md = r.empty ? editor.state.doc.toString() : editor.state.sliceDoc(r.from, r.to)
   const html = render(renderer, md)
   navigator.clipboard?.writeText(html).then(
-    () => showToast('已复制为 HTML'),
-    () => showToast('复制失败', true),
+    () => showToast(t('toast.copiedHtml')),
+    () => showToast(t('toast.copyFailed'), true),
   )
 }
 
@@ -574,7 +577,7 @@ function copySelectionAsHtml() {
 // 速查弹层的状态、fmtKey 与 SHORTCUTS 表已抽到 composables/useShortcutsHelp.js
 // （SHORTCUTS 的正确性由 scripts/verify/verify-shortcuts.mjs 门禁保证，改键位须同步）
 
-const { showShortcuts, fmtKey, SHORTCUTS } = useShortcutsHelp()
+const { showShortcuts, rows: shortcutRows } = useShortcutsHelp()
 // 设置面板可见性（menu:open-settings ⌘, 打开；Esc / 关闭按钮收起）
 const showSettings = ref(false)
 
@@ -611,16 +614,16 @@ async function checkUpdate() {
   try {
     info = await CheckUpdate()
   } catch (err) {
-    showToast(`无法检查更新：${err?.message || err}`, true)
+    showToast(t('toast.checkUpdateFailed', { error: err?.message || err }), true)
     return
   }
   if (info.status === 'update') {
-    showToast(`发现新版本 ${info.latest}，正在打开下载页…`)
+    showToast(t('toast.newVersion', { version: info.latest }))
     if (info.url) BrowserOpenURL(info.url)
   } else if (info.status === 'latest') {
-    showToast(info.note || `已是最新版本（${info.current}）`)
+    showToast(info.note || t('toast.alreadyLatest', { version: info.current }))
   } else {
-    showToast(info.note || '无法检查更新', true)
+    showToast(info.note || t('toast.updateUnavailable'), true)
   }
 }
 
@@ -668,7 +671,7 @@ function hello(name) {
 async function loadSyntaxSample() {
   await persistence.snapshotBoundary()
   loadDocument(SYNTAX_DOC, '')
-  showToast('已载入语法示例（⌘S 可另存）')
+  showToast(t('toast.syntaxLoaded'))
 }
 
 // ---------- 输入对话框 ----------
@@ -814,7 +817,7 @@ safeEventsOn('menu:help-syntax', loadSyntaxSample)
 // Wails 的 Go 回调而非原生 copy:/paste: selector，所以剪贴板要前端自己做。
 // 为什么不用 document.execCommand('paste')：被浏览器安全策略禁用（无用户手势
 // 且非可编辑上下文），实测不生效 —— 故改用 Wails 的 ClipboardGet/Set。
-// ⚠ 顺序契约：粘贴必须【先 ClipboardGet 拿到文本、再插入】，异步读取期间
+// 注意·顺序契约：粘贴必须【先 ClipboardGet 拿到文本、再插入】，异步读取期间
 // 焦点/选区可能变化，故先捕获选区快照，读取成功后再用该快照插入。
 async function doCopy({ cut = false } = {}) {
   if (!editor) return
@@ -822,14 +825,14 @@ async function doCopy({ cut = false } = {}) {
   const { from, to } = view.state.selection.main
   const text = view.state.sliceDoc(from, to)
   if (!text) {
-    showToast('没有选中的内容')
+    showToast(t('toast.noSelection'))
     return
   }
   try {
     await ClipboardSet(text)
   } catch (e) {
     console.error('[clipboard] write failed:', e)
-    showToast('写入剪贴板失败')
+    showToast(t('toast.clipboardWriteFailed'))
     return
   }
   if (cut) {
@@ -847,11 +850,11 @@ async function doPaste() {
     text = await ClipboardGet()
   } catch (e) {
     console.error('[clipboard] read failed:', e)
-    showToast('读取剪贴板失败')
+    showToast(t('toast.clipboardReadFailed'))
     return
   }
   if (!text) {
-    showToast('剪贴板为空')
+    showToast(t('toast.clipboardEmpty'))
     return
   }
   view.dispatch({ changes: { from, to, insert: text }, selection: { anchor: from + text.length } })
@@ -931,7 +934,7 @@ function onDividerKeydown(e) {
          背景与页面同色、无分隔线，整条都是窗口拖拽区（Wails 用 --wails-draggable）。
          专注 / 阅读模式下整条隐藏，把 44px 让给内容（红绿灯为系统绘制，不受影响）。 -->
     <header v-show="!focusOn && viewMode !== 'reading'" class="toolbar">
-      <div class="toolbar-title" :title="title">{{ title }}{{ dirty ? ' •' : '' }}</div>
+      <div class="toolbar-title" :title="title">{{ title }}{{ dirty ? t('doc.unsavedMark') : '' }}</div>
     </header>
 
     <div class="main" ref="mainEl">
@@ -943,7 +946,7 @@ function onDividerKeydown(e) {
         class="sidebar"
         :inert="!sidebarOpen || focusOn || viewMode === 'reading'"
       >
-        <div class="sidebar-tabs" role="tablist" aria-label="侧栏">
+        <div class="sidebar-tabs" role="tablist" :aria-label="t('sidebar.label')">
           <button
             class="sidebar-tab"
             :class="{ active: sidebarTab === 'files' }"
@@ -951,7 +954,7 @@ function onDividerKeydown(e) {
             role="tab"
             :aria-selected="sidebarTab === 'files'"
             @click="showSidebarTab('files')"
-          >文件</button>
+          >{{ t('sidebar.tab.files') }}</button>
           <button
             class="sidebar-tab"
             :class="{ active: sidebarTab === 'outline' }"
@@ -959,7 +962,7 @@ function onDividerKeydown(e) {
             role="tab"
             :aria-selected="sidebarTab === 'outline'"
             @click="showSidebarTab('outline')"
-          >大纲</button>
+          >{{ t('sidebar.tab.outline') }}</button>
         </div>
 
         <div v-show="sidebarTab === 'files'" class="sidebar-body">
@@ -968,8 +971,8 @@ function onDividerKeydown(e) {
             <FileTree :root="folderPath" :reload-signal="treeSignal" @select="openTreeFile" />
           </template>
           <div v-else class="sidebar-empty">
-            <p>打开一个文件夹，在侧栏浏览文件</p>
-            <button class="sidebar-cta" type="button" @click="openFolder">打开文件夹</button>
+            <p>{{ t('sidebar.empty.hint') }}</p>
+            <button class="sidebar-cta" type="button" @click="openFolder">{{ t('sidebar.empty.cta') }}</button>
           </div>
         </div>
 
@@ -1004,12 +1007,12 @@ function onDividerKeydown(e) {
         :class="{ active: splitting }"
         role="separator"
         aria-orientation="vertical"
-        aria-label="编辑区宽度"
+        :aria-label="t('divider.ariaLabel')"
         :aria-valuenow="Math.round(editorWidth)"
         aria-valuemin="20"
         aria-valuemax="80"
         tabindex="0"
-        title="拖动调整宽度，双击复位，方向键微调"
+        :title="t('divider.title')"
         @pointerdown="onDividerDown"
         @pointermove="onDividerMove"
         @pointerup="onDividerUp"
@@ -1059,7 +1062,7 @@ function onDividerKeydown(e) {
     <SettingsPanel v-if="showSettings" @close="closeSettings" />
 
     <!-- 一次性 / 结果提示（专注模式首次进入、导出结果、快照反馈） -->
-    <div v-show="focusToast" class="focus-toast" role="status">已进入专注模式，Esc 退出</div>
+    <div v-show="focusToast" class="focus-toast" role="status">{{ t('focus.toast') }}</div>
     <div v-show="toast.show" class="focus-toast" :class="{ 'is-err': toast.isErr }" role="status">
       {{ toast.msg }}
     </div>
@@ -1077,42 +1080,42 @@ function onDividerKeydown(e) {
           @keydown.enter.prevent="closeDialog(dialog.value)"
         />
         <div class="dialog-actions">
-          <button class="dialog-btn" type="button" @click="closeDialog(null)">取消</button>
-          <button class="dialog-btn primary" type="button" @click="closeDialog(dialog.value)">确定</button>
+          <button class="dialog-btn" type="button" @click="closeDialog(null)">{{ t('common.cancel') }}</button>
+          <button class="dialog-btn primary" type="button" @click="closeDialog(dialog.value)">{{ t('common.confirm') }}</button>
         </div>
       </div>
     </div>
 
     <!-- 快捷键速查（帮助菜单 ⌘/ / Esc 关闭） -->
     <div v-if="showShortcuts" class="dialog-mask" @click.self="showShortcuts = false">
-      <div class="dialog dialog-wide" role="dialog" aria-modal="true" aria-label="快捷键速查">
-        <p class="dialog-title">快捷键速查</p>
+      <div class="dialog dialog-wide" role="dialog" aria-modal="true" :aria-label="t('shortcutsDialog.title')">
+        <p class="dialog-title">{{ t('shortcutsDialog.title') }}</p>
         <table class="shortcut-table">
           <tbody>
-            <tr v-for="([keys, desc], i) in SHORTCUTS" :key="i">
-              <td class="shortcut-keys">{{ fmtKey(keys) }}</td>
+            <tr v-for="([keys, desc], i) in shortcutRows" :key="i">
+              <td class="shortcut-keys">{{ keys }}</td>
               <td class="shortcut-desc">{{ desc }}</td>
             </tr>
           </tbody>
         </table>
         <div class="dialog-actions">
-          <button class="dialog-btn primary" type="button" @click="showShortcuts = false">关闭</button>
+          <button class="dialog-btn primary" type="button" @click="showShortcuts = false">{{ t('common.close') }}</button>
         </div>
       </div>
     </div>
 
     <!-- 关于 Inkmark（应用菜单；版本号来自 Go 单一真源 App.Version()） -->
     <div v-if="showAbout" class="dialog-mask" @click.self="closeAbout()">
-      <div class="dialog" role="dialog" aria-modal="true" aria-label="关于 Inkmark">
-        <p class="dialog-title">关于 Inkmark</p>
-        <p class="about-line">一个安静的跨平台 Markdown 写作工具。</p>
-        <p class="about-line">版本 {{ aboutVersion || '未知' }}</p>
+      <div class="dialog" role="dialog" aria-modal="true" :aria-label="t('about.title')">
+        <p class="dialog-title">{{ t('about.title') }}</p>
+        <p class="about-line">{{ t('about.tagline') }}</p>
+        <p class="about-line">{{ t('about.version', { version: aboutVersion || t('common.unknown') }) }}</p>
         <p class="about-line">
           <a class="about-link" href="#" @click.prevent="BrowserOpenURL(REPO_URL)">{{ REPO_URL }}</a>
         </p>
         <div class="dialog-actions">
-          <button class="dialog-btn" type="button" @click="BrowserOpenURL(REPO_URL)">打开仓库</button>
-          <button class="dialog-btn primary" type="button" @click="closeAbout()">关闭</button>
+          <button class="dialog-btn" type="button" @click="BrowserOpenURL(REPO_URL)">{{ t('about.repo') }}</button>
+          <button class="dialog-btn primary" type="button" @click="closeAbout()">{{ t('common.close') }}</button>
         </div>
       </div>
     </div>

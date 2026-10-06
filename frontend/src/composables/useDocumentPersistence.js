@@ -18,6 +18,7 @@ import { SaveFileDialog, WriteFile } from '../../wailsjs/go/main/App'
 import { buildHtmlDocument } from '../export/exporters'
 import { replaceDocument } from '../editor/createEditor'
 import { getPref, onPrefsChange } from '../themes/prefs.js'
+import { t } from '../i18n/index.js'
 
 // ---------- 快照元数据展示格式化（历史面板 / 恢复提示共用） ----------
 
@@ -31,9 +32,10 @@ export function formatSnapSize(bytes) {
   return bytes >= 1024 ? `${(bytes / 1024).toFixed(1)} KB` : `${bytes} B`
 }
 
+//错误文案兜底：空 message（如 new Error()）会让 toast 变成「保存失败：」这种空洞结尾
 function errText(err) {
   const s = typeof err === 'string' ? err : err?.message || ''
-  return s.slice(0, 120) || '未知错误'
+  return s.slice(0, 120) || t('toast.unknownError')
 }
 
 /**
@@ -101,7 +103,7 @@ export function useDocumentPersistence({ getEditor, filePath, title, previewHtml
       saveState.value = 'saved'
     } catch (err) {
       saveState.value = 'error' // 只读目录等失败：状态栏明示，不静默
-      notify?.(`自动保存失败：${errText(err)}`, true)
+      notify?.(t('toast.autoSaveFailed', { error: errText(err) }), true)
     }
   }
 
@@ -150,12 +152,12 @@ export function useDocumentPersistence({ getEditor, filePath, title, previewHtml
       writeSnapshot(true) // 显式保存 → 立即快照（Go 侧按内容哈希去重）
     } catch (err) {
       saveState.value = 'error'
-      notify?.(`保存失败：${errText(err)}`, true)
+      notify?.(t('toast.saveFailedWith', { error: errText(err) }), true)
     }
   }
 
   async function saveFileAs() {
-    let path = await SaveFileDialog(title.value.endsWith('.md') ? title.value : '未命名.md')
+    let path = await SaveFileDialog(title.value.endsWith('.md') ? title.value : `${t('common.untitled')}.md`)
     if (!path) return
     if (!path.endsWith('.md')) path += '.md'
     saveState.value = 'saving'
@@ -168,7 +170,7 @@ export function useDocumentPersistence({ getEditor, filePath, title, previewHtml
       writeSnapshot(true)
     } catch (err) {
       saveState.value = 'error'
-      notify?.(`保存失败：${errText(err)}`, true)
+      notify?.(t('toast.saveFailedWith', { error: errText(err) }), true)
     }
   }
 
@@ -228,13 +230,13 @@ export function useDocumentPersistence({ getEditor, filePath, title, previewHtml
       // 用户在保存对话框点「取消」：后端返回 ("", nil)（空路径无错误）——
       // 按用户取消处理：静默返回，不弹 toast、不改状态栏错误态
       if (!savedPath) return
-      notify?.(`已导出 PDF：${savedPath}`)
+      notify?.(t('toast.exportPdfDone', { path: savedPath }))
     } catch (err) {
       // 非 darwin 桌面平台：绑定存在但后端返回「当前平台不支持一键导出 PDF」——
       // 退回 window.print()，⌘P 仍能出 PDF，而不是弹一个错误 toast 就结束
       if (isNonDarwin()) return window.print()
       // 含 Go 侧 500 页超限等错误：明示并中止，不静默
-      notify?.(`导出失败：${errText(err)}`, true)
+      notify?.(t('toast.exportFailed', { error: errText(err) }), true)
     }
   }
 
@@ -259,7 +261,7 @@ export function useDocumentPersistence({ getEditor, filePath, title, previewHtml
 
   async function snapshotNow() {
     await writeSnapshot(true)
-    notify?.('已生成快照')
+    notify?.(t('toast.snapshotDone'))
     loadSnapshots()
   }
 
@@ -278,9 +280,9 @@ export function useDocumentPersistence({ getEditor, filePath, title, previewHtml
       markDirty()
       getEditor()?.focus()
       showHistory.value = false
-      notify?.(`已恢复到 ${formatSnapTime(s.createdAt)}，可 ⌘Z 撤销`)
+      notify?.(t('toast.restored', { time: formatSnapTime(s.createdAt) }))
     } catch (err) {
-      notify?.(`恢复失败：${errText(err)}`, true)
+      notify?.(t('toast.restoreFailed', { error: errText(err) }), true)
     }
   }
 

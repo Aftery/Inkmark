@@ -20,7 +20,11 @@
  *     说明，那正是「编辑器停在旧文件、预览已是新文件」的成因。
  *   - AddRecent 放在 loadDocument 内、且包 try/catch：浏览器预览没有
  *     Wails 绑定，不能因此让整个打开流程失败。
+ *
+ * 【i18n】用户可见文案走 i18n 的 t()。本模块不持有语言状态 —— t() 读的是
+ * i18n/index.js 的模块级 ref，故切语言后这些文案自动跟着变，无需重新注入。
  */
+import { t } from '../i18n/index.js'
 export function useFileOps(deps) {
   const {
     // 编辑器与文档
@@ -74,20 +78,20 @@ export function useFileOps(deps) {
   async function newFile() {
     await persistence.snapshotBoundary() // 破坏性边界前先留一份快照
     loadDocument('', '')
-    showToast('已新建文件，⌘S 保存到磁盘')
+    showToast(t('toast.newFile'))
   }
 
   async function renameFile() {
     if (!filePath.value) {
-      showToast('请先保存文档（⌘S）再重命名', true)
+      showToast(t('toast.saveBeforeRename'), true)
       return
     }
     const api = window.go?.main?.App
     if (!api?.RenameFile) {
-      showToast('当前环境不支持重命名', true)
+      showToast(t('toast.renameUnsupported'), true)
       return
     }
-    const name = await askInput({ title: '重命名', value: title.value })
+    const name = await askInput({ title: t('dialog.rename'), value: title.value })
     if (name === null) return
     const trimmed = name.trim()
     if (!trimmed || trimmed === title.value) return
@@ -95,9 +99,9 @@ export function useFileOps(deps) {
       const newPath = await api.RenameFile(filePath.value, trimmed)
       filePath.value = newPath
       api.AddRecent?.(newPath)
-      showToast('已重命名')
+      showToast(t('toast.renamed'))
     } catch (err) {
-      showToast(`重命名失败：${err?.message || err}`, true)
+      showToast(t('toast.renameFailed', { error: err?.message || err }), true)
     }
   }
 
