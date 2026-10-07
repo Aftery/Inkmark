@@ -240,7 +240,10 @@ export function createEditor(parent, { doc = '', onDocChange, onScroll, onUpdate
       // 图片粘贴 / 拖拽：仅在拿到图片文件且注册了 onImageFile 时拦截，其余放行
       EditorView.domEventHandlers(imageDropHandlers(onImageFile)),
       markdown({ base: markdownLanguage, codeLanguages }),
-      syntaxHighlighting(mdHighlight, { fallback: true }),
+      // 只注册 mdHighlight：fallback 样式在存在主样式时会被整体跳过
+      //（getHighlighters: main.length ? main : fallback），曾与 defaultHighlightStyle
+      // 并列导致 mdHighlight 全程失效；且默认色板与预览区 --hl-* 不同源（单一色板原则）。
+      syntaxHighlighting(mdHighlight),
       // 查找/替换面板（⌘F / ⌘⌥F）：面板停靠编辑区顶部
       search({ top: true }),
       EditorView.theme({

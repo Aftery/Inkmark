@@ -9,10 +9,13 @@
     拖动由系统处理：TitleBarHidden 的 FullSizeContent 让内容铺满窗口，
     而标题栏区域仍是系统拖动区（--wails-draggable 只在无边框窗口下生效，
     在这里被 Wails 忽略，属预期）。
-  - linux/windows：main.go 用 Frameless:true，自绘窗口按钮（最小化/最大化/关闭），
-    整条是 --wails-draggable: drag 的拖拽区。
+  - linux/windows：main.go 用 Frameless:true，自绘窗口按钮（最小化/最大化/关闭）。
+    标题栏整条是 --wails-draggable: drag 的拖拽区。
 
   **所有可点击子元素必须显式声明 no-drag**（无边框平台下），否则点击会被拖拽区吞掉。
+  no-drag 只能加在具体可点元素上，不能加在布局容器上：Wails dragTest 只读
+  e.target 的计算值，而自定义属性会向下继承——容器级 no-drag 会把该容器占据的
+  整片空白区也变成非拖动区（真机反馈「窗口不能拖动」的根因所在）。
 -->
 <script setup>
 import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
@@ -96,7 +99,7 @@ const close = () => {
 <template>
   <div ref="rootRef" class="titlebar" style="--wails-draggable: drag">
     <!-- 左：自绘菜单栏。darwin 下右移 70px 给原生红绿灯留白 -->
-    <div class="tb-left" :class="{ 'tb-left-mac': isDarwin }" style="--wails-draggable: no-drag">
+    <div class="tb-left" :class="{ 'tb-left-mac': isDarwin }">
       <div v-for="g in groups" :key="g.id" class="tb-menu">
         <button
           class="tb-menu-btn"
@@ -128,7 +131,7 @@ const close = () => {
     </div>
 
     <!-- 右：窗口控制。darwin 隐藏（原生红绿灯已承担这三件事） -->
-    <div v-if="!isDarwin" class="tb-right" style="--wails-draggable: no-drag">
+    <div v-if="!isDarwin" class="tb-right">
       <button class="tb-win" type="button" :aria-label="t('titlebar.minimize')" @click="minimise">
         <svg viewBox="0 0 12 12" width="12" height="12" aria-hidden="true">
           <line x1="2.5" y1="6" x2="9.5" y2="6" />
@@ -248,4 +251,12 @@ const close = () => {
 .tb-win:hover { background: var(--surface-2); color: var(--fg); }
 .tb-win:focus-visible { outline: none; box-shadow: var(--focus-ring); }
 .tb-win-close:hover { background: var(--danger-soft); color: var(--danger); }
+
+/* --wails-draggable 白名单：root 的 drag 经继承覆盖整条标题栏，
+   仅可点元素逐个覆盖回 no-drag。绝不下放到 .tb-left/.tb-right 容器
+   （容器有自己的 1fr 空白区，下放即整片拖不动）。 */
+.tb-menu-btn,
+.tb-dropdown,
+.tb-item,
+.tb-win { --wails-draggable: no-drag; }
 </style>

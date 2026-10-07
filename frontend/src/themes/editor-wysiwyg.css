@@ -83,6 +83,6 @@
 /* ---- 围栏代码块底色（FencedCode 节点）---- */
 /* 与预览区 highlight.js 共用同一套 --hl-* 变量，仅加背景区分 */
 .cm-line.cm-md-codeblock {
-  background-color: var(--bg-2);
+  background-color: var(--surface-warm);
   border-radius: var(--radius-sm);
 }
