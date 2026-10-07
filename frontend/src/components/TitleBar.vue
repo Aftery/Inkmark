@@ -19,6 +19,7 @@ import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
 import { t } from '../i18n/index.js'
 import { isDarwin } from '../composables/usePlatform.js'
 import { WindowMinimise, WindowToggleMaximise } from '../../wailsjs/runtime/runtime'
+import { CloseWindow } from '../../wailsjs/go/main/App'
 
 const props = defineProps({
   filename: { type: String, default: '' },
@@ -86,8 +87,10 @@ const toggleMaximise = () => runWin(WindowToggleMaximise)
 
 // 关闭走 App.CloseWindow 而不是 Wails 的 Quit：Quit 是强制退出、不经过
 // OnBeforeClose，会绕过「未保存更改」确认框；CloseWindow 走正常关闭流程。
-// 浏览器预览下 window.go 不存在，兜底静默跳过。
-const close = () => runWin(() => window.go?.main?.App?.CloseWindow?.())
+// 浏览器预览下 CloseWindow 不存在，兜底静默跳过。
+const close = () => {
+  try { CloseWindow() } catch { /* 浏览器预览 */ }
+}
 </script>
 
 <template>

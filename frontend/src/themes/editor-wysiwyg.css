@@ -71,3 +71,18 @@
   padding: var(--space-1) var(--space-2);
 }
 .cm-md-img-tip { color: var(--meta); font-size: var(--text-xs); }
+
+/* ---- 引用块底色（Blockquote 节点）---- */
+/* 只加左侧边框，不做整行底色（避免与专注模式淡化冲突） */
+/* CodeMirror 行级装饰类加在 .cm-line 上 */
+.cm-line.cm-md-quote {
+  border-left: 3px solid var(--accent);
+  padding-left: calc(var(--space-2) - 3px); /* 补偿边框宽度 */
+}
+
+/* ---- 围栏代码块底色（FencedCode 节点）---- */
+/* 与预览区 highlight.js 共用同一套 --hl-* 变量，仅加背景区分 */
+.cm-line.cm-md-codeblock {
+  background-color: var(--bg-2);
+  border-radius: var(--radius-sm);
+}
