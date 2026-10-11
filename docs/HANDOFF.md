@@ -4,13 +4,24 @@
 > `docs/spec/` 与项目记忆。它记录「做到了什么、怎么验证、哪些坑别再踩」，
 > 而不是流水账。
 >
-> 最后更新：2026-10-06（**装配层瘦身 + 跨平台原生化**交付后）
+> 最后更新：2026-10-11（内容已同步到 `f1343eb`，2026-10-07 那四个提交补记为 §2 第七轮）
 >
-> ⚠️ **本次是架构级变更**：键位唯一真源从 `main.go` 的 `buildMenu()` 迁到了
+> ✅ **2026-10-11 已修两处缺陷（本地复验通过，尚未提交/推送，所以 runner 上仍是红的）**：
+> 1. `frontend/dist/.gitkeep` 已按原内容（blob `dfdc095`）恢复并**重新纳入 git 跟踪** ——
+>    之前 `8774a7e` 误删它导致干净 clone 编不过（`main.go:13` 的
+>    `//go:embed all:frontend/dist` 报 `no matching files found`），CI `go` 门禁连红两次。
+> 2. `preview/markdown.js:135` 的标题 `id` 属性引号已从中文弯引号换回 ASCII 直引号 ——
+>    之前「插入目录」生成的 `#slug` 与渲染出的 `id=“slug”` 永远对不上，跳转静默失效。
+>    同一提交里第 117 行注释的引号也一并还原。
+>
+> **推送之后才会在 GitHub 上复绿**；复验手段见 §8（真 clone `go vet` + 渲染锚点比对）。
+> ⚠ 这两类缺陷**至今没有门禁守着**（元守卫未补），同类问题还会再来，见 §5「口径之外的盲区」。
+>
+> ⚠️ **架构级变更（第四轮）仍然有效**：键位唯一真源从 `main.go` 的 `buildMenu()` 迁到了
 > 前端 `frontend/src/composables/useShortcuts.js` 的 `COMMANDS` 表。
-> 接手第一件事请读 §2 第五轮 与 §11「真源迁移对照表」。
-> ⚠️ **App.vue 现在是 ≤150 行的纯装配层**（门禁硬上限）：新增行为一律先下沉到
-> composables/，别往 App.vue 加行 —— 契约 5 会直接报红。
+> 接手第一件事请读 §2 第五轮 与 §11「真源迁移对照表」（架构语境），第二件事读 §8。
+> ⚠️ **App.vue 现在是 ≤150 行的纯装配层**（门禁硬上限），且**实测正好 150 行、零余量**：
+> 新增行为一律先下沉到 composables/，别往 App.vue 加行 —— 加 1 行契约 5 就报红。
 
 ---
 
@@ -20,11 +31,11 @@
 cd /Users/aftery/Desktop/myapp/inkmark
 
 # 门禁全跑一遍（约 2 分钟，与 CI 口径一致）
-cd frontend && npm test; cd ..          # 期望 106/106
+cd frontend && npm test; cd ..          # 期望 121/121（24 个 suite）
 node scripts/verify/verify-shortcuts.mjs    # 快捷键契约，期望退出码 0
 node scripts/verify/scan-i18n-residue.mjs   # i18n 文案残留，期望退出码 0
 ./scripts/p0-check-emoji.sh frontend/src main.go app.go   # P0 零 emoji，期望退出码 0
-/usr/local/opt/go/bin/go vet ./...           # 注意：go 不在 PATH
+/usr/local/opt/go/bin/go vet ./...           # 注意：go 不在 PATH。⚠ 本机必绿（dist 有产物），别把它当「仓库编得出来」的证据
 node scripts/smoke/render-check.mjs         # 真渲染冒烟（需先 npm run build），期望 PASS
 
 # 交互探针（验「静默失败」类缺陷，render-check 覆盖不到）
@@ -38,26 +49,42 @@ node scripts/probe/probe-theme.mjs                 # 暗色下各区域实际计
 PATH=/usr/local/opt/go/bin:$HOME/go/bin:$PATH ~/go/bin/wails build
 # ⚠ 构建完成要 35-60 秒，产物在 build/bin/inkmark.app —— 别在构建完成前就 ls 它
 open build/bin/inkmark.app
-# ⚠ build 会删掉被跟踪的 frontend/dist/.gitkeep → 每次 build 后必须
-#   git checkout -- frontend/dist/.gitkeep
+# ⚠ vite/wails build 会清空 frontend/dist/，把 .gitkeep 一起删掉（2026-10-11 实测复现）。
+#   每次 build 后复位：git checkout -- frontend/dist/.gitkeep
+#   （它现在重新被跟踪了，所以这条命令有效；`8774a7e` 误删期间会报 pathspec 不匹配）
+#   ⚠ 本地就算忘了复位也验不出后果（本机 dist 有产物）—— 只有干净 clone 才炸。
 ```
 
-**接手时先确认两件事**（本项目最常见的坑）：
+**接手时先确认三件事**（本项目最常见的坑）：
 1. `go` **不在 PATH**，用 `/usr/local/opt/go/bin/go`
 2. shell `grep` 在本仓 UTF-8 文件上**会静默返回空**，且**会匹配注释里的代码**
    → 排查代码一律用专用检索工具（Read/Grep），不要用 shell grep 下结论
+3. **本地 `go vet` 绿不代表仓库编得出来**（本机 `frontend/dist` 有产物）。
+   涉及 embed / gitignore / 构建产物的改动，一律用干净 clone 复验 —— CI 曾在
+   `6bdf3d6`/`f1343eb` 两次栽在这条上（`8774a7e` 误删 `frontend/dist/.gitkeep`），
+   2026-10-11 已修并复验，见 §8
 
 ---
 
 ## 1. 项目是什么
 
 跨平台桌面 Markdown 编辑器。Wails v2.16（Go 壳）+ Vue 3 + Vite 6 + CodeMirror 6。
-GitHub 远端 `Aftery/Inkmark`，`main` 已与 origin 同步（`5ad7434`）。
+GitHub 远端 `Aftery/Inkmark`，`main` 与 origin 同步（`f1343eb`），工作区干净。
 
-### ✅ CI 已在 GitHub 上真实跑通
-`5ad7434` 的 CI 结论 **success**（前两次推送 `b2cbbcb` / `8361c18` 也均 success）。
-这是「本地绿 ≠ runner 绿」这一关的实证 —— 首次推送后最可能出的问题
-（Node 预装版本、`npm ci` 的 lockfile 一致性）已确认不存在。
+### CI 状态（2026-10-11 用公开 API 实测，非回忆）
+| HEAD | 结论 |
+|---|---|
+| `5ad7434` / `21771c7` / `a105c51` | **success**（5 道门禁全绿，实证「本地绿 ≠ runner 绿」这一关可过） |
+| `6bdf3d6` / `f1343eb` | **failure** —— 只有 `Go 静态检查与编译` 红，step 是「静态检查」 |
+
+根因（已在 `/tmp` 干净 clone 上 `go vet` 复现，报错一字不差）：
+`main.go:13:12: pattern all:frontend/dist: no matching files found`，即 `8774a7e`
+删掉 `frontend/dist/.gitkeep` 所致。**其余四道门禁在最新提交上仍是绿的**，
+所以这不是环境漂移（Node 版本 / lockfile 一致性已确认没问题），是仓库自身的回归。
+
+> **状态（2026-10-11）**：占位文件已恢复并重新跟踪，`go vet`/`go build` 在真 clone 上
+> 均退出码 0（复验方法见 §8）。上表两行 failure 是**修复前**的历史记录 ——
+> **推送后才会复绿**，本地未提交的状态对 runner 没有任何影响。
 
 查 CI 状态（本机没装 `gh`，用公开 API）：
 ```bash
@@ -71,7 +98,10 @@ curl -s "https://api.github.com/repos/Aftery/Inkmark/actions/runs?per_page=3" \
 ### 目录速查
 ```
 main.go            应用入口（**按平台差异化窗口形态**：darwin 非无边框+毛玻璃 / linux 无边框）
+                   ⚠ 第 13 行 `//go:embed all:frontend/dist` 要求 dist 目录存在（哪怕只有 .gitkeep）
 app.go             暴露给前端的 Go 方法（文件读写/剪贴板/图像/版本/检查更新/关闭）
+                   OnBeforeClose：关闭守卫对 Linux/GTK 已容错（返回文本 / "0"/"1" / 空串三种形态，
+                   **只有明确命中「不保存退出」或 "1" 才放行**，其余一律视为取消）
 （locales.go 已删：唯一消费方是 buildMenu 的 t(locale,key)，菜单下线后无人使用）
 version.go         版本单一真源（构建时 -ldflags -X main.version= 注入）
 frontend/src/
@@ -102,7 +132,12 @@ frontend/src/
                    AboutDialog / FileTree / Outline / SegmentedControl …
   editor/          createEditor / commands / wysiwyg / outline /
                    slashCommand（斜杠面板 CM 扩展）/ imageDrop / sampleDocs
-  tests/           106 条契约测试（node:test，零依赖）
+                   markdownHighlight.js   ** codeLanguages 必须返回 `.language`**（见 §4 ⑨）
+  preview/         markdown.js（markdown-it + highlight.js：**79 种语言**、
+                   GFM 任务列表 markdown-it-task-lists、标题 id 由 anchors.js 生成）
+                   ⚠ 标题 id 的引号必须是 ASCII 直引号（2026-10-11 修过一次弯引号污染）
+  themes/          editor-wysiwyg.css 是 `.cm-md-*` 的唯一定义处（勿写进 CM theme，会顶破棘轮）
+  tests/           121 条契约测试（node:test，零依赖；24 个 suite）
 scripts/
   emoji-pattern.mjs        P0 emoji 正则唯一真源
   p0-check-emoji.sh        薄封装（Node 实现）
@@ -110,6 +145,8 @@ scripts/
   verify/verify-shortcuts.mjs  键位文档契约（CI 门禁）
   verify/scan-i18n-residue.mjs  i18n 文案残留（CI 门禁）
   verify/verify-i18n-switch.mjs 真浏览器三语切换（手动跑）
+  verify/scripts-verify-icons.mjs  图标 SVG 与 phaseC 规格逐字比对（手动，不在 CI）
+  verify/scripts-verify-theme.mjs  theme.js 优先级逻辑自检（手动，不在 CI）
   smoke/render-check.mjs    真渲染门禁（dev + dist 双路径）
 .github/workflows/ci.yml     5 道门禁
 docs/spec/                   契约文档（见下）
@@ -117,7 +154,7 @@ docs/spec/                   契约文档（见下）
 
 ---
 
-## 2. 最近五轮做了什么
+## 2. 各轮做了什么（第一~七轮；第七轮为 2026-10-11 按 git show 回补）
 
 ### 第一轮：设置面板 + 打印菜单规范化
 - 新增 `components/SettingsPanel.vue`（外观 / 编辑器两分类，7 项）
@@ -182,7 +219,7 @@ docs/spec/                   契约文档（见下）
 |---|---|
 | `useEditorSession.js` | 编辑器实例（写入 `shallowRef` 槽 `editorRef`）+ 行列/字数/预览防抖 + `syncAfterDocReplace` |
 | `useDocumentState.js` | dirty（唯一语义 + `watch` 同步 `SetDirty`）/ 800ms 自动保存 / 快照 / **`switchFile` 边界** / 导出 / 历史 |
-| `useCommands.js` | `registerCommands`（54 条命令的处理器）+ `menuGroups` + 全局 Esc 分层路由 |
+| `useCommands.js` | `registerCommands`（处理器注册面；命令表现为 **55 条**，第五轮时 54，第七轮加 `file.settings`）+ `menuGroups` + 全局 Esc 分层路由 |
 | `useWorkspace.js` | 视图两态 / 专注 / 侧栏 / 打字机 / 窗口置顶 |
 | `useFileAssets.js` | 图片粘贴拖拽落盘（云端图床的预留替换点） |
 | `usePlatform.js` / `useToast.js` / `editor/sampleDocs.js` | 平台识别 / 轻提示 / 两份示例文档 |
@@ -242,6 +279,42 @@ docs/spec/                   契约文档（见下）
 断言 `/node\.state\.doc/` 命中了我自己写的**说明性注释**（「曾写成 node.state.doc
 直接把插件打崩」）。测试内已加 `stripComments()`，所有断言切到剥离后的源码。
 
+### 第七轮：Linux 关闭守卫 + 代码高亮根因 + 标题栏拖拽（`1b645ee`…`f1343eb`，2026-10-07）
+
+> 本轮**没写进 HANDOFF 就提交了**，本节是 2026-10-11 按 `git show` 逐commit 回补的。
+
+四条改动：
+1. **Linux/GTK 关闭守卫容错**（`app.go`）：系统确认框的返回值可能是按钮文本、按钮索引
+   （`"0"`/`"1"`）或空串。原写法 `return choice != "不保存退出"` 在返回索引的平台上
+   会把「取消」当成放行 → 直接丢未保存内容。现改为 switch，只有命中「不保存退出」或
+   `"1"` 才放行，`default` 一律阻止关闭。
+2. **设置入口进命令表**：`useShortcuts.js` 加 `file.settings`（⌘,）、`useCommands.js`
+   接处理器（自绘标题栏当时没有设置入口）；README 快捷键表在 `21868e6` 同步。
+3. **GFM 任务列表 + 高亮语言扩容**：`preview/markdown.js` 接 `markdown-it-task-lists`，
+   highlight.js 注册语言从 22 扩到 78（仍是按需 `import .../lib/languages/x`，不引全量包）；
+   编辑器侧补 `@codemirror/lang-java`（`8774a7e`）与三语 `menu.settings` key。
+4. **三个静默失败 + 一处真机交互回归**（下表）。
+
+| # | 现象 | 真因（实测/源码核实，非推断） | 提交 |
+|---|---|---|---|
+| 1 | 围栏代码块在编辑区完全没有颜色 | **两处叠加，只修一处没用**。(a) `codeLanguages` 回调返回了 `LanguageSupport`，而 lang-markdown 的 `getCodeParser` 取的是 `found.parser`；`LanguageSupport` 没有 `.parser` → **静默退化为纯文本**。正解是返回 `support().language`。(b) `syntaxHighlighting(mdHighlight, { fallback: true })` 与 `defaultHighlightStyle` 并列时，`getHighlighters` 的语义是 `main.length ? main : fallback` —— 有主样式就把 fallback 整体跳过；且默认色板与预览区 `--hl-*` 不同源（违反单一色板原则）。现只注册 `mdHighlight` | `f1343eb`（`8774a7e` 的 Java 语言包没治到根因） |
+| 2 | 真机反馈「无边框平台窗口不能拖动」 | `--wails-draggable: no-drag` 被加在 `.tb-left` / `.tb-right` **布局容器**上。Wails 的 dragTest 只读 `e.target` 的计算值，而自定义属性**会向下继承** → 容器自身占据的 1fr 空白区也变成非拖动区。改为白名单式：root 保持 `drag`，只有 `.tb-menu-btn / .tb-dropdown / .tb-item / .tb-win` 逐个 `no-drag` | `f1343eb` |
+| 3 | 关闭按钮的调用形态不可靠 | 原写法 `window.go?.main?.App?.CloseWindow?.()` 一路可选链——绑定名/形态不符时**静默 no-op**，点了没反应也不报错。改为从 `wailsjs/go/main/App` 具名 import `CloseWindow`，浏览器预览下用 `try/catch` 兜住（这里 catch 只兜「不在 Wails 环境」，不是兜业务失败） | `793838e` |
+| 4 | 围栏底色与预览区不同源 | `.cm-md-codeblock` 用 `--bg-2` → 改 `--surface-warm`；`793838e` 另补了引用块 / 代码块的 `.cm-md-*` 装饰样式 | `f1343eb` |
+
+**本轮欠下的两笔债（2026-10-11 均已修，见 §8 的复验记录）**：
+- `8774a7e` 顺手删了**被跟踪的** `frontend/dist/.gitkeep`（`.gitignore` 用
+  `frontend/dist/*` + `!frontend/dist/.gitkeep` 保它）→ 干净 clone 没有 dist 目录 →
+  `//go:embed all:frontend/dist` 编译不过 → CI `go` 门禁连红两次。
+- `1b645ee` 把 `preview/markdown.js:135` 的 `id="…"` 两个**直引号写成了中文弯引号**
+  （同一提交里连注释中的 `"quotes"` 也被替换，说明是编辑器/输入法所致）。标题 id 从此
+  带 `“ ”`，「插入目录」生成的 `#slug` 链接全部落空。
+- **这两个都没被 121 条测试和其余 4 道门禁抓住**：embed 目录存在性不在测试口径内，
+  标题锚点跳转根本没有门禁。与 §5「假绿灯」同族 —— 覆盖面之外的绿等于没绿。
+
+**顺带清理**：`8774a7e` 把临时验证文件 `test-highlighting.md` 提交进了仓库，`6bdf3d6` 删除；
+工作区现已无残留。
+
 ---
 
 ## 3. 怎么验证（不要只看「构建通过」）
@@ -255,8 +328,10 @@ docs/spec/                   契约文档（见下）
 | 门禁有没有红 | 看**真实退出码**，不要用 `\| tail` —— 管道会把退出码换成 `tail` 的 0 |
 | 改动有没有真效果 | **变异自证**：故意改坏 → 确认报红 → 还原 → 确认复绿 |
 | 门禁本身有没有失效 | 元测试：造违规输入 → 确认门禁能报出。**门禁没有自检等于没装** |
-| 菜单/快捷键对不对 | `node scripts/verify/verify-shortcuts.mjs`（README + 内联速查表 ↔ main.go 三方对齐） |
-| 菜单真实长什么样 | 进程内 `NSApp.mainMenu` 转储（比截图硬，可复核）。方法见 `main.go` 注释 |
+| 菜单/快捷键对不对 | `node scripts/verify/verify-shortcuts.mjs`（README + 应用内速查表 ↔ `useShortcuts.js` 的 `COMMANDS` 三方对齐。原生菜单已在第四轮下线，**别再拿 main.go 当锚点**） |
+| 标题栏菜单真实长什么样 | `useCommands.js` 的 `menuGroups` 是从 `COMMANDS` 派生的，结构对不对看 `TitleBar.vue` 渲染；要交互级取证用 `scripts/probe/` 的 CDP 探针 |
+| **这个仓库能不能编出来** | **干净 clone** 跑 `go vet`（本机 dist 有产物，本地绿不作数）：`git clone --depth 1 file://$PWD /tmp/v && cd /tmp/v && /usr/local/opt/go/bin/go vet ./...` |
+| CI 红在哪个 job / 哪一步 | 公开 API 两步：`…/actions/runs?per_page=6` 取 run id 与结论，再 `…/actions/runs/<id>/jobs` 列 job 与 step 结论（本机没装 `gh`） |
 
 `render-check` 已内建**采集有效性自检**（HTTP 200 前置 + 预期噪声下限）——
 它会先确认「采集链路是活的」再采信结果。这套机制是为了防我那次
@@ -319,13 +394,39 @@ App.vue 真正仍拥有的关键项（`.export-preview` 必须恢复为正常流
 传入的 composable 调用」）并跑过变异自证。
 **教训：静态检查的豁免规则要考虑「被调用方会怎么用它」，不能只看调用点形态。**
 
-### ④ `menuLabels` 匹配、`⚠️` 写注释里 —— 累计 7 次「匹配到注释里的代码」
-本仓在这类错误上栽了 **7 次**（shell grep 静默 / `@media print` 注释误判 /
+### ④ `menuLabels` 匹配、`⚠️` 写注释里 —— 累计 8 次「匹配到注释里的代码」
+本仓在这类错误上栽了 **8 次**（shell grep 静默 / `@media print` 注释误判 /
 JSDoc 示例误判 / grep 匹配被注释的函数 / `indexOf` 命中注释里的 `menuLabels` /
 **在注释里裸写块注释定界符导致自己刚写的注释提前闭合** /
 **本轮：`indexOf('useFileOps({')` 命中 App.vue「顺序契约」注释里的同一字符串，
-导致 tdz 变异脚本把隐患插进了注释里、造不出真实隐患**）。
+导致 tdz 变异脚本把隐患插进了注释里、造不出真实隐患** /
+**第六轮：断言 `/node\.state\.doc/` 命中我自己写的说明性注释，新测试首跑假报 4 条红**）。
 **教训**：匹配前必须剥注释；注释里描述注释语法必须避免裸写定界符。
+
+### ⑨ 「给 markdown 围栏装上语言包，就会有高亮」—— **错（第七轮实测）**
+`8774a7e` 加了 `@codemirror/lang-java` 期待 Java 代码块上色，**颜色一个都没出来**。
+真因是两层静默退化叠加（见 §2 第七轮表 #1）：`codeLanguages` 返回了 `LanguageSupport`，
+而 lang-markdown 取的是 `found.parser`；以及 `fallback: true` 与主样式并列时主样式被整体跳过。
+**判据（可复用）**：接第三方 CodeMirror 扩展的**回调返回值类型**必须以源码/类型定义为准，
+「API 名字看起来对」不算验证；改完要在真编辑器里看见颜色，才算改完。
+
+### ⑩ 「`--wails-draggable: no-drag` 加在容器上，子元素就都安全了」—— **错**
+CSS **自定义属性会向下继承**，而 Wails 的 dragTest 只读 `e.target` 的计算值。
+容器级 no-drag 会把该容器占据的**空白区**一并变成非拖动区 → 真机表现为「窗口拖不动」。
+**判据**：继承型属性的白名单只能落在**叶子可点元素**上，别落在布局容器上。
+
+### ⑪ 「本地 `go vet` 绿 = 这个仓库编得出来」—— **错（第七轮实测，代价是 CI 连红两次）**
+本机 `frontend/dist/` 有构建产物，embed 指令自然通过；干净 clone 里该目录**被
+gitignore 掉了**，只靠一个 `.gitkeep` 占位——而这个占位在 `8774a7e` 被误删。
+**判据**：动到 `//go:embed` 的目标目录、`.gitignore`、「构建产物是否入库」中任一项，
+必须 `git clone file://… /tmp/x && /usr/local/opt/go/bin/go vet ./...` 走一遍。
+本地绿在这个问题上一文不值。
+
+### ⑫ 「`window.go?.main?.App?.X?.()` 有可选链就不会出事」—— **半错**
+可选链把「绑定不存在」也吞成 no-op：点了没反应、不报错、测试全绿（`793838e` 的
+关闭按钮正是这样）。正解是走 `wailsjs/go/main/App` 的**具名 import**，让缺失在
+编译/打包期就暴露；`try/catch` 只用来兜「浏览器预览没有 Wails 环境」这一个场景。
+**判据**：兜底只该出现在**已知的环境分支**上，不该出现在主调用链上（与 §4 ⑤ 同源）。
 
 ---
 
@@ -333,11 +434,17 @@ JSDoc 示例误判 / grep 匹配被注释的函数 / `indexOf` 命中注释里�
 
 | 门禁 | 卡什么 | 命令 |
 |---|---|---|
-| `frontend` | 104 条测试 + vite 构建 | `npm test && npm run build` |
+| `frontend` | 121 条测试 + vite 构建 | `npm test && npm run build` |
 | `go` | vet + build（vet 不做链接，cgo 导出代码要 build 才暴露） | `go vet ./... && go build -o /dev/null .` |
-| `p0-emoji` | 界面不得用 emoji 当图标（含注释） | `./scripts/p0-check-emoji.sh frontend/src` |
-| `docs-contract` | 键位在 README / 速查表 / main.go 三处脱节 | `node scripts/verify/verify-shortcuts.mjs` |
+| `p0-emoji` | 界面不得用 emoji 当图标（含注释） | `./scripts/p0-check-emoji.sh frontend/src main.go app.go` |
+| `docs-contract` | 键位在 README / 应用内速查表 / **`useShortcuts.js` 的 `COMMANDS`** 三处脱节 | `node scripts/verify/verify-shortcuts.mjs` |
 | `i18n-residue` | 新写的用户可见文案漏了 `t()` | `node scripts/verify/scan-i18n-residue.mjs` |
+
+> `docs-contract` 的真源在 2026-10-06 已从 `main.go` 的 `buildMenu` 迁到前端命令表
+> （`ci.yml` 头部注释已同步说明）；`scripts/verify/parse-main-menu.mjs` 如今解析的是
+> `useShortcuts.js`，文件名是历史遗留，别被它误导。
+> 另有**两个手动脚本不在 CI**：`scripts-verify-icons.mjs`（图标与 phaseC 规格逐字比对）、
+> `scripts-verify-theme.mjs`（theme.js 优先级自检）。
 
 ### 两条关键机制
 - **行数债务棘轮**：`frontend/tests/contracts.test.mjs` 的 `LINE_EXEMPTIONS`
@@ -353,6 +460,16 @@ JSDoc 示例误判 / grep 匹配被注释的函数 / `indexOf` 命中注释里�
 2. `scan-i18n-residue.mjs` 退出码恒 0 → 放进 CI 也是永远绿（2026-10-06 修）
 
 **新增/修改任何门禁时，必须做元测试**：造违规输入 → 确认能报红 → 确认退出码非 0。
+
+### 同等重要：门禁**口径之外**的三个盲区（第七轮的两次红/一次静默都出在这儿）
+「五道全绿」不等于「没问题」，下面三处**没有任何门禁守着**，别把绿当保证：
+1. **`//go:embed` 目标目录是否在新 clone 里存在** —— 本机 dist 有产物，永远验不出。
+   唯一有效手段：干净 clone 跑 `go vet`（见 §4 ⑪）。2026-10-11 的 CI 红正是这条，
+   缺陷已修，**但门禁一条也没加**——占位文件的跟踪态没有任何断言守着。
+2. **标题锚点 / 「插入目录」跳转** —— `md._slugs` 生成的 `id` 与 TOC 链接是否对得上，
+   121 条测试里**没有一条**断言渲染出的 `id="…"` 形态。第七轮的弯引号污染正是从这里漏掉，
+   已修，**盲区原样还在**。
+3. **真机交互**（拖拽、红绿灯留白、毛玻璃、斜杠面板手感）—— 见 §6 的 19 项目视清单。
 
 ---
 
@@ -384,17 +501,34 @@ JSDoc 示例误判 / grep 匹配被注释的函数 / `indexOf` 命中注释里�
 13. **打印**：⌘P 只输出正文，无标题栏/侧栏/状态栏/弹层遮罩
 14. **主题**：⇧⌘L 循环（浅 → 深 → 纸感），三套都正常
 
+**第七轮新增的回归项（2026-10-07 改的正是这些，必须目视）**
+
+15. **无边框平台拖窗口**（Linux/Windows）：按住标题栏**空白处**（菜单之间、菜单与
+    文件名之间）应能拖动；点菜单按钮/窗口按钮**不应**带着窗口移动。
+    这条就是 `f1343eb` 修的「容器级 no-drag 把空白区也变成非拖动区」，改法脆弱，
+    **以后往标题栏加元素时，必须给新元素逐个补 `no-drag`**（见 §4 ⑩）。
+16. **代码块高亮**：编辑区里写一个 ```` ```java ```` 围栏，关键字必须**有颜色**，
+    且与右栏/预览区同一套色板（`--hl-*`）。`f1343eb` 之前是全程纯文本，属静默失败。
+17. **Linux 关闭按钮**：自绘 × 必须真的关闭窗口（`793838e` 从可选链改成具名 import）。
+18. **「插入目录」跳转**：菜单「格式 ▸ 插入 ▸ 目录」生成 TOC 后，在阅读态点条目应跳到
+    对应标题。2026-10-11 修掉了锚点引号污染（§8），**逻辑层已用渲染比对验过**，
+    真机点按仍需目视一次。
+19. **GFM 任务列表**：`- [ ]` / `- [x]` 在阅读态应渲染成勾选框（`1b645ee` 新接的
+    `markdown-it-task-lists`），编辑区的 WYSIWYG 装饰已有，两边别只验一边。
+
 ## 7. 已知未做 / 未验证（如实登记）
 
 | 项 | 状态 |
 |---|---|
-| **单栏布局 + 跨平台窗口形态的真机目视** | 自动化只验到「根节点渲染 + 标题栏/编辑区已挂载 + 无异常」，**标题栏拖拽 / 红绿灯留白 / 毛玻璃 / 斜杠面板的真实交互全部需目视**（见 §6 的 14 项） |
+| ✅ **CI `go` 门禁红** | **已修（2026-10-11）**：`frontend/dist/.gitkeep` 按原 blob `dfdc095` 恢复并重新纳入跟踪；真 clone 的 `go vet`/`go build` 均退出码 0。**尚未提交推送**，所以 GitHub 上那两次 failure 还在。见 §8 |
+| ✅ **标题锚点被智能引号污染** | **已修（2026-10-11）**：`preview/markdown.js:135` 的 `id=“…”` 换回 `id="…"`（第 117 行注释一并还原）；渲染比对从 FAIL 转 PASS，构建产物里也确认无弯引号 id。**但没有任何门禁守着它**，同类污染还会再来。见 §5 盲区 2 |
+| **单栏布局 + 跨平台窗口形态的真机目视** | 自动化只验到「根节点渲染 + 标题栏/编辑区已挂载 + 无异常」，**标题栏拖拽 / 红绿灯留白 / 毛玻璃 / 斜杠面板的真实交互全部需目视**（见 §6 的 19 项） |
 | **macOS 透明窗口的代价** | `WebviewIsTransparent` + `WindowIsTranslucent` 在旧款 Intel Mac 上可能掉帧（透明窗口不能被合成器缓存）；本机是 macOS 12，只验到「能编译」，性能未实测 |
 | **Linux（CachyOS）真机** | 无边框 + 自绘标题栏的 Linux 表现**从未在真机跑过**；窗口按钮对接的 `WindowMinimise/WindowToggleMaximise/CloseWindow` 在 Linux 后端的行为需目视 |
 | **「最近打开」功能整体下线** | 它的唯一消费方是原生菜单的子菜单；自绘标题栏未做该入口。若要恢复，需前端加列表 + 重新暴露 Go 的 `GetRecents`（`recents.json` 持久化逻辑仍在 `app.go` 的 `recentsPath` 等函数里，但 `AddRecent` 调用点已删） |
 | **`useOutline` 的阅读态分支未验证** | `setReadingPane` 的注入已在第五轮接回（此前丢失导致阅读态不高亮），但**阅读态的跳转仍未目视** |
-| **CI 未在真实 runner 跑过** | 本地 5 道门禁全绿，但 push 后才知 runner 表现（历史上首次推送已验证过 lockfile 一致性，本轮新增的判据尚未验证） |
-| **`release.yml` 真 runner** | 需 push 一个 `v*` tag 才会触发三平台打包。`ci.yml` 已验证在 runner 上绿，但 `release.yml` **一次都没跑过** |
+| **CI 的 runner 表现** | 已实测（2026-10-11）：`5ad7434`/`21771c7`/`a105c51` success，`6bdf3d6`/`f1343eb` failure（仅 `go` job，见本表第一行）。**「本地绿、runner 绿」在 10-06 那批改动上成立过**，Node 版本与 lockfile 一致性不是问题；当前红是仓库自身回归 |
+| **`release.yml` 真 runner** | 需 push 一个 `v*` tag 才会触发三平台打包。`ci.yml` 在 runner 上跑通过（见上表），但 `release.yml` **一次都没跑过** —— 且 `go` 门禁当前在 runner 上仍是红的（修复已在本地复验，**尚未提交推送**）；**别在复绿前打 tag** |
 | **检查更新** | 仓库**无任何 Release**，所以现在只会返回「无法检查更新」（不谎报「已是最新」）。要等第一个 Release |
 | **macOS 未签名分发** | Gatekeeper 会拦，需 Apple 开发者账号（$99/年）签名+公证 |
 | **「窗口 → 缩放」** | Wails 无「适配内容尺寸」API，用最大化近似（沿用既有裁决） |
@@ -404,22 +538,67 @@ JSDoc 示例误判 / grep 匹配被注释的函数 / `indexOf` 命中注释里�
 | **零多标签页** | ADR-005 已预留 `dirty` 升级路径 |
 | **导出模板文案** | `export/exporters.js` 的 HTML 模板未国际化（Spec §1 明确留待后续） |
 
-## 8. 下一步的三个候选（按建议顺序）
+## 8. 已修记录与下一步候选（2026-10-11）
 
-### P0 · 目视验收第五轮（见 §6 的 14 项，重点是跨平台窗口形态）
-本轮改了**窗口本体**（macOS 非无边框 + 毛玻璃、Linux 无边框）与**装配层结构**，
-自动化只能验到「渲染 + 无异常」。三处高风险：`TitleBarHidden` 下拖动是否有效、
-红绿灯留白是否够 70px、透明窗口在本机 macOS 12 上是否掉帧。
+### ✅ 已完成 · 恢复 `frontend/dist/.gitkeep`（CI `go` 门禁复绿的前提）
+改法：`git show '8774a7e^:frontend/dist/.gitkeep'` 取回原文（三行中文注释）写回并
+`git add` —— blob 校验与删除前**逐字一致**（`dfdc0957…`）。
 
-### P1 · 给新组合式函数补行为测试网
+**复验（这才是重点，本地绿不作数）**：
+```bash
+# 用临时 tag 指向「含暂存修复」的树，做一次真 clone，验完删 tag
+t=$(git write-tree); c=$(git commit-tree "$t" -p HEAD -m tmp)
+git tag inkmark-verify-tmp "$c"
+rm -rf /tmp/x && git clone -q --depth 1 -b inkmark-verify-tmp "file://$PWD" /tmp/x
+ls -a /tmp/x/frontend/dist            # 只有 .gitkeep —— 与新 clone 完全同形
+(cd /tmp/x && /usr/local/opt/go/bin/go vet ./...); echo $?   # 0（修复前是 no matching files found）
+git tag -d inkmark-verify-tmp
+```
+实测结果：`go vet` 退出码 0，`go build -o /dev/null .` 退出码 0
+（只有一条既有的 `ld: warning: object file … built for newer macOS version (13.0)
+than being linked (12.0)`，本机 SDK 与部署目标不一致导致，与本次修复无关）。
+**顺带证实了 §0 那条**：`npm run build` 确实会把 `.gitkeep` 从工作区删掉，
+`git checkout -- frontend/dist/.gitkeep` 现在是有效的复位手段。
+
+### ✅ 已完成 · 修「插入目录」跳转失效（弯引号污染）
+`preview/markdown.js:135` 的两个 U+201D 换回 ASCII `"`（第 117 行注释一并还原）。
+**变异自证**（改前 → 改后，脚本直接跑真 `createRenderer()`）：
+
+| | 渲染出的 `id=` | TOC 目标 | 结果 |
+|---|---|---|---|
+| 改前 | `”你好世界”`、`”install-guide”` | `你好世界`、`install-guide` | **FAIL，0/3 对上** |
+| 改后 | `id="你好世界"` | 同上 | **PASS，3/3 对上** |
+
+另在构建产物里做了正负两头确认：`' id=\"'+g+'\">'` 存在（修复真进了 bundle）、
+`id=` 后跟弯引号 0 处。`npm test` 121/121、其余四道门禁退出码均 0、
+`render-check` PASS（dist 路径，0 console error、0 未捕获异常）。
+
+### P0 · 给这两类缺陷补元守卫（**盲区仍在，最划算的一步**）
+两处缺陷都已修，但**没有任何门禁守着**，同一形态的问题还会第三次发生：
+1. 在 `contracts.test.mjs` 断言 `git ls-files frontend/dist` 非空（占位文件仍被跟踪）。
+   坑的形态是「产物目录被 gitignore，只有占位文件撑着 embed」。
+2. 断言 `createRenderer()` 渲染 `## abc` 得到 `<h2 id="abc">`（直引号），
+   并断言 `insertToc` 生成的 `#slug` 与之一一对应。这条顺带把 anchors 与
+   渲染两侧的同源关系钉住（`editor/anchors.js` 是共用真源）。
+补完记得做元测试：故意把引号改弯 → 断言必须报红；故意 `git rm --cached .gitkeep` →
+断言必须报红。**门禁不自检等于没装**（§5）。
+
+### P1 · 目视验收第七轮（§6 的 15~19 项）
+本轮改的正是**窗口拖动**与**关闭链路**这两条自动化验不到的路径：
+`f1343eb` 把 no-drag 从容器下放到叶子元素（漏一个就点不动，多一个就拖不动），
+`793838e` 改了关闭按钮的调用形态。§6 前 14 项仍待目视（第五轮欠的）。
+
+### P2 · 给新组合式函数补行为测试网
 `useDocumentState` 的 dirty/自动保存/`switchFile` 三个契约目前只有静态断言
 （`SetDirty` 镜像、命令闭合）。可测的纯逻辑已具备：把「标记 → 防抖 → 落盘 → 解脏」
 抽成可注入时钟的纯函数，就能用 node:test 覆盖，而不必上浏览器。
 
-### P2 · 接上文件树的外部变更监听（`treeSignal` 现在是空转的）
+### P3 · 接上文件树的外部变更监听（`treeSignal` 现在是空转的）
 Go 侧 `WatchDir` 未暴露，`reload-signal` 恒为 0。补 fsnotify 后，
 外部改文件/重命名会即时反映到文件树；这需要在 `app.go` 加一个导出方法
 并重新生成 wailsjs 绑定（`wails generate module`）。
+注意与 §4 ⑫ 同族：前端那行 `window.go?.main?.App?.WatchDir?.()` 就算接了 Go，
+用可选链调用也会把「绑定没生成」吞成静默 no-op，接的时候一并改成具名 import。
 
 ## 9. 契约文档索引
 
@@ -439,7 +618,11 @@ Go 侧 `WatchDir` 未暴露，`reload-signal` 恒为 0。补 fsnotify 后，
 
 - `../.workbuddy/memory/MEMORY.md` —— 长期约定（样式契约、Wails 菜单约束、弹层 token 契约）
 - `../.workbuddy/memory/pitfalls.jsonl` —— 踩坑库（**只追加**，同签名只增 episode）
-- `../.workbuddy/memory/2026-10-04.md` / `2026-10-05.md` / `2026-10-06.md` —— 每日工作日志
+- `../.workbuddy/memory/2026-09-28 … 2026-10-06.md` —— 每日工作日志
+
+> ⚠ 日志**止于 2026-10-06**：第七轮那四个提交（10-07）**没有工作日志**，本文 §2 第七轮、
+> §4 ⑨~⑫ 是 2026-10-11 逐 commit `git show` 回补的。以后每轮交付当天就补日志，
+> 别再到「文档落后一周」这种状态。
 
 ---
 
