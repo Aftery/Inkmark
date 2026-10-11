@@ -4,9 +4,10 @@
 > `docs/spec/` 与项目记忆。它记录「做到了什么、怎么验证、哪些坑别再踩」，
 > 而不是流水账。
 >
-> 最后更新：2026-10-11（内容已同步到 `f1343eb`，2026-10-07 那四个提交补记为 §2 第七轮）
+> 最后更新：2026-10-11（内容已同步到 `18c2f28`，即本轮 5 个提交推送后的状态；
+> 2026-10-07 那四个提交补记为 §2 第七轮）
 >
-> ✅ **2026-10-11 已修两处缺陷（已提交到本地 main，尚未推送，所以 runner 上仍是红的）**：
+> ✅ **2026-10-11 已修两处缺陷，并已推送、CI 在 runner 上复绿**：
 > 1. `frontend/dist/.gitkeep` 已按原内容（blob `dfdc095`）恢复并**重新纳入 git 跟踪** ——
 >    之前 `8774a7e` 误删它导致干净 clone 编不过（`main.go:13` 的
 >    `//go:embed all:frontend/dist` 报 `no matching files found`），CI `go` 门禁连红两次。
@@ -14,12 +15,15 @@
 >    之前「插入目录」生成的 `#slug` 与渲染出的 `id=“slug”` 永远对不上，跳转静默失效。
 >    同一提交里第 117 行注释的引号也一并还原。
 >
-> **推送之后才会在 GitHub 上复绿**（三个提交已在本地：占位文件 / 锚点 / 本文件）；
-> 复验手段见 §8（真 clone `go vet` + 渲染锚点比对 + 契约 6 的变异自证）。
-> 同类问题此后再犯会被**契约 6** 拦住，见 §5。
+> **GitHub 上已复绿**（run `38143580960`，2026-10-11T13:32Z，5 个 job 全 success，
+> 含此前连红两次的 `Go 静态检查与编译`）；复验手段见 §8（真 clone `go vet` +
+> 渲染锚点比对 + 契约 6 的变异自证）。同类问题此后再犯会被**契约 6** 拦住，见 §5。
 >
 > **两道元守卫也已落地**（§5 的盲区 1、2 从此有门禁：契约 6 共 5 条判据，
-> 逐条做过变异自证），测试数 121 → **126**。
+> 逐条做过变异自证），测试数 121 → **126**（25 个 suite）。
+> ⚠ 契约 6 的「跟踪态」判据查的是 `git ls-files`（index）而非工作区，
+> 所以 `npm run build` 把 `.gitkeep` 从磁盘删掉后本地仍绿 —— 这是有意的，
+> 但意味着**它只在干净 clone（CI）里才真正验到磁盘形态**。
 >
 > ⚠️ **架构级变更（第四轮）仍然有效**：键位唯一真源从 `main.go` 的 `buildMenu()` 迁到了
 > 前端 `frontend/src/composables/useShortcuts.js` 的 `COMMANDS` 表。
@@ -73,13 +77,14 @@ open build/bin/inkmark.app
 ## 1. 项目是什么
 
 跨平台桌面 Markdown 编辑器。Wails v2.16（Go 壳）+ Vue 3 + Vite 6 + CodeMirror 6。
-GitHub 远端 `Aftery/Inkmark`，`main` 与 origin 同步（`f1343eb`），工作区干净。
+GitHub 远端 `Aftery/Inkmark`，`main` 与 origin 同步（`18c2f28`），工作区干净。
 
 ### CI 状态（2026-10-11 用公开 API 实测，非回忆）
 | HEAD | 结论 |
 |---|---|
 | `5ad7434` / `21771c7` / `a105c51` | **success**（5 道门禁全绿，实证「本地绿 ≠ runner 绿」这一关可过） |
 | `6bdf3d6` / `f1343eb` | **failure** —— 只有 `Go 静态检查与编译` 红，step 是「静态检查」 |
+| `18c2f28`（本轮 5 个提交） | **success**（run `38143580960`）—— 5 个 job 全绿，`Go 静态检查与编译` 的「静态检查」「编译」两步都过 |
 
 根因（已在 `/tmp` 干净 clone 上 `go vet` 复现，报错一字不差）：
 `main.go:13:12: pattern all:frontend/dist: no matching files found`，即 `8774a7e`
@@ -87,8 +92,12 @@ GitHub 远端 `Aftery/Inkmark`，`main` 与 origin 同步（`f1343eb`），工�
 所以这不是环境漂移（Node 版本 / lockfile 一致性已确认没问题），是仓库自身的回归。
 
 > **状态（2026-10-11）**：占位文件已恢复并重新跟踪，`go vet`/`go build` 在真 clone 上
-> 均退出码 0（复验方法见 §8）。上表两行 failure 是**修复前**的历史记录 ——
-> **推送后才会复绿**，本地未提交的状态对 runner 没有任何影响。
+> 均退出码 0（复验方法见 §8），并且**已推送到 origin/main**，`18c2f28` 的 run 全绿。
+> 中间那两行 failure 是修复前的历史记录，保留在此是为了说明「本地绿 ≠ runner 绿」这条
+> 教训的来由 —— 而不是当前状态。
+> ⚠ runner 日志要 admin 权限才能下载（`/actions/runs/{id}/logs` 返回 403），
+> 所以「runner 上跑了 126 条」这一步是**推断**（HEAD 含契约 6、该 job 绿），
+> 不是从日志里读出来的。
 
 查 CI 状态（本机没装 `gh`，用公开 API）：
 ```bash
@@ -530,16 +539,16 @@ gitignore 掉了**，只靠一个 `.gitkeep` 占位——而这个占位在 `877
 
 | 项 | 状态 |
 |---|---|
-| ✅ **CI `go` 门禁红** | **已修 + 已有门禁（2026-10-11）**：`frontend/dist/.gitkeep` 按原 blob `dfdc095` 恢复并重新纳入跟踪；真 clone 的 `go vet`/`go build` 均退出码 0；契约 6 从此守着它的跟踪态。**已提交到本地 main，尚未推送**，GitHub 上那两次 failure 还在。见 §8 |
-| ✅ **标题锚点被智能引号污染** | **已修 + 已有门禁（2026-10-11）**：`preview/markdown.js:135` 的 `id=“…”` 换回 `id="…"`（第 117 行注释一并还原）；渲染比对从 FAIL 转 PASS，构建产物里也确认无弯引号 id。契约 6 守着引号形态与两侧 slug 同源。**同样待推送** |
-| **「剥注释」有两份实现** | `frontend/tests/contracts.test.mjs` 的局部 `stripComments`（契约 3 在用）与 `tests/helpers/lexer.mjs` 的同名导出并存。helpers 版认识模板字面量与 `${}` 嵌套，局部版把反引号当普通字符串边界。同名 import 会撞出 `SyntaxError` 让**整个文件加载失败**。应收敛成一份（先确认契约 3 的行为不变），见 §8 |
+| ✅ **CI `go` 门禁红** | **已修 + 已有门禁 + runner 已复绿（2026-10-11）**：`frontend/dist/.gitkeep` 按原 blob `dfdc095` 恢复并重新纳入跟踪；真 clone 的 `go vet`/`go build` 均退出码 0；契约 6 从此守着它的跟踪态。已随 `18c2f28` 推送，run `38143580960` 五个 job 全 success。见 §8 |
+| ✅ **标题锚点被智能引号污染** | **已修 + 已有门禁（2026-10-11）**：`preview/markdown.js:135` 的 `id=“…”` 换回 `id="…"`（第 117 行注释一并还原）；渲染比对从 FAIL 转 PASS，构建产物里也确认无弯引号 id。契约 6 守着引号形态与两侧 slug 同源，**同批已推送** |
+| **「剥注释」有两份实现** | `frontend/tests/contracts.test.mjs` 的局部 `stripComments`（契约 3 在用）与 `tests/helpers/lexer.mjs` 的同名导出并存。**已实测三处行为差异**：`${}` 里的注释 helpers 会剥、局部版当字符串保留；未闭合单引号跨换行 helpers 断串后照常剥注释、局部版会吞掉后续真注释（**方向上局部版更危险**，正是「匹配到注释里的代码」那一族）；纯模板内容两边一致。同名 import 会撞出 `SyntaxError` 让**整个文件加载失败**。应收敛成一份（收敛前先确认契约 3 的行为不变），见 §8 |
 | **单栏布局 + 跨平台窗口形态的真机目视** | 自动化只验到「根节点渲染 + 标题栏/编辑区已挂载 + 无异常」，**标题栏拖拽 / 红绿灯留白 / 毛玻璃 / 斜杠面板的真实交互全部需目视**（见 §6 的 19 项） |
 | **macOS 透明窗口的代价** | `WebviewIsTransparent` + `WindowIsTranslucent` 在旧款 Intel Mac 上可能掉帧（透明窗口不能被合成器缓存）；本机是 macOS 12，只验到「能编译」，性能未实测 |
 | **Linux（CachyOS）真机** | 无边框 + 自绘标题栏的 Linux 表现**从未在真机跑过**；窗口按钮对接的 `WindowMinimise/WindowToggleMaximise/CloseWindow` 在 Linux 后端的行为需目视 |
 | **「最近打开」功能整体下线** | 它的唯一消费方是原生菜单的子菜单；自绘标题栏未做该入口。若要恢复，需前端加列表 + 重新暴露 Go 的 `GetRecents`（`recents.json` 持久化逻辑仍在 `app.go` 的 `recentsPath` 等函数里，但 `AddRecent` 调用点已删） |
 | **`useOutline` 的阅读态分支未验证** | `setReadingPane` 的注入已在第五轮接回（此前丢失导致阅读态不高亮），但**阅读态的跳转仍未目视** |
-| **CI 的 runner 表现** | 已实测（2026-10-11）：`5ad7434`/`21771c7`/`a105c51` success，`6bdf3d6`/`f1343eb` failure（仅 `go` job，见本表第一行）。**「本地绿、runner 绿」在 10-06 那批改动上成立过**，Node 版本与 lockfile 一致性不是问题；当前红是仓库自身回归 |
-| **`release.yml` 真 runner** | 需 push 一个 `v*` tag 才会触发三平台打包。`ci.yml` 在 runner 上跑通过（见上表），但 `release.yml` **一次都没跑过** —— 且 `go` 门禁当前在 runner 上仍是红的（修复已在本地提交，**尚未推送**）；**别在复绿前打 tag** |
+| **CI 的 runner 表现** | 已实测（2026-10-11）：`5ad7434`/`21771c7`/`a105c51` success，`6bdf3d6`/`f1343eb` failure（仅 `go` job），**`18c2f28` success**（run `38143580960`，五 job 全绿）。「本地绿、runner 绿」这一关现在是通过的；那两行 failure 是仓库自身回归（占位文件被删），已修 |
+| **`release.yml` 真 runner** | 需 push 一个 `v*` tag 才会触发三平台打包。`ci.yml` 在 `18c2f28` 上已复绿（见上表），但 `release.yml` **一次都没跑过** —— 打第一个 tag 时它是首次执行，三平台构建的坑（Linux 的 webkit2_41 tag、macOS 签名）都还没被它验过 |
 | **检查更新** | 仓库**无任何 Release**，所以现在只会返回「无法检查更新」（不谎报「已是最新」）。要等第一个 Release |
 | **macOS 未签名分发** | Gatekeeper 会拦，需 Apple 开发者账号（$99/年）签名+公证 |
 | **「窗口 → 缩放」** | Wails 无「适配内容尺寸」API，用最大化近似（沿用既有裁决） |
@@ -551,7 +560,12 @@ gitignore 掉了**，只靠一个 `.gitkeep` 占位——而这个占位在 `877
 
 ## 8. 已修记录与下一步候选（2026-10-11）
 
-### ✅ 已完成 · 恢复 `frontend/dist/.gitkeep`（CI `go` 门禁复绿的前提）
+> **本轮已落远端**：`54f6488`（占位文件）→ `d7f6eb3`（锚点引号）→ `6701bd3`（本文件同步）
+> → `583a535`（契约 6）→ `18c2f28`（本文件记门禁落地），5 个提交都在 `origin/main`，
+> CI run `38143580960` 五个 job 全 success。下面三段是「怎么验的」，接手时不必重跑，
+> 但**改动同类路径时照抄这些手段**。
+
+### ✅ 已完成 · 恢复 `frontend/dist/.gitkeep`（已推送，CI `go` 门禁已复绿）
 改法：`git show '8774a7e^:frontend/dist/.gitkeep'` 取回原文（三行中文注释）写回并
 `git add` —— blob 校验与删除前**逐字一致**（`dfdc0957…`）。
 
@@ -570,6 +584,13 @@ git tag -d inkmark-verify-tmp
 than being linked (12.0)`，本机 SDK 与部署目标不一致导致，与本次修复无关）。
 **顺带证实了 §0 那条**：`npm run build` 确实会把 `.gitkeep` 从工作区删掉，
 `git checkout -- frontend/dist/.gitkeep` 现在是有效的复位手段。
+
+**推送后再验一次（2026-10-11，`18c2f28`）**：上面那套是用临时 tag 造的树，
+这次直接 `git clone` 远端提交上来的 HEAD，结果同形 —— `frontend/dist` 里只有
+`.gitkeep`、`go vet`/`go build` 退出码均 0；在同一个干净 clone 里软链 `node_modules`
+后跑 `node --test tests/contracts.test.mjs` 得 **37/37 绿**，说明「跟踪态」判据
+在新 clone 上不会假红。runner 侧同理：CI 的 checkout 就是干净 clone，
+`Go 静态检查与编译` 已 success。
 
 ### ✅ 已完成 · 修「插入目录」跳转失效（弯引号污染）
 `preview/markdown.js:135` 的两个 U+201D 换回 ASCII `"`（第 117 行注释一并还原）。
@@ -603,13 +624,20 @@ than being linked (12.0)`，本机 SDK 与部署目标不一致导致，与本�
 | 删掉 `.gitignore` 的反向豁免行 | 反向豁免 |
 | 把 `go:embed all:frontend/dist` 改成别的路径 | 指针用例 |
 
+**CI 侧**：契约 6 随 `583a535` 入库，`18c2f28` 的 `前端测试与构建` job success，
+说明这 5 条判据在 runner 的**干净 checkout** 上跑过且没有假红（跟踪态那条最怕的就是这个）。
+⚠ 「runner 上跑了 126 条」这个数字本身是**推断**（HEAD 含该文件 + 该步绿）——
+下载 job 日志需要仓库 admin（`/actions/runs/{id}/logs` 返回 403），本机也没装 `gh`。
+
 **补门禁时踩到的新坑（不是「匹配到注释」那一族，是加载期就炸）**：`contracts.test.mjs` 里
 **已有一个局部 `stripComments`**（契约 3 打印块在用），再从 helpers `import { stripComments }`
 会 `SyntaxError: Identifier has already been declared` —— 而且是**整个测试文件加载失败、
 37 条一起红**，不是只红新加的那条。已用别名 `stripCommentsLexer` 绕开。
-**登记为债**：同一个「剥注释」口径现在有两份实现（局部函数 + `helpers/lexer.mjs`），
-helpers 版认识模板字面量与 `${}` 嵌套，局部版只把反引号当普通字符串边界。
-应收敛成一份，收敛前先确认契约 3 的行为不变（它有自己的一条危险场景用例）。
+**登记为债**：同一个「剥注释」口径现在有两份实现（局部函数 + `helpers/lexer.mjs`）。
+**三处差异已实测**（不是读代码猜的）：`${}` 里的注释 helpers 会剥、局部版当字符串保留；
+未闭合单引号跨换行时 helpers 断串后照常剥后面的 `//` 注释、局部版会把那行注释一起吞进
+「字符串」里（**方向上局部版更危险** —— 它会让「匹配到注释里的代码」这一族复活）；
+纯模板内容两边一致。应收敛成一份，收敛前先确认契约 3 的行为不变（它有自己的一条危险场景用例）。
 
 ### P1 · 目视验收第七轮（§6 的 15~19 项）
 本轮改的正是**窗口拖动**与**关闭链路**这两条自动化验不到的路径：
