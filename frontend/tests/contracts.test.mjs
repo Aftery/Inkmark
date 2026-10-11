@@ -25,7 +25,9 @@ import { readFileSync, readdirSync, statSync, existsSync, writeFileSync, rmSync 
 import { createHash } from 'node:crypto'
 import { fileURLToPath } from 'node:url'
 import { dirname, join, relative, sep } from 'node:path'
+import { execFileSync } from 'node:child_process'
 import { countTotalLines, countEffectiveLines, LINE_METRIC } from './helpers/line-metric.mjs'
+import { stripComments as stripCommentsLexer } from './helpers/lexer.mjs'
 
 // ---------------------------------------------------------------------------
 // 路径解析：全部相对本文件定位，保证从任意 cwd 调用都能跑
@@ -1053,5 +1055,131 @@ describe('契约 5 · 行数门禁（有效代码行 ≤300）', () => {
           warn.join('\n  - ')
       )
     }
+  })
+})
+
+// ===========================================================================
+// 契约 6：embed 占位文件 + 标题锚点的引号形态
+// ===========================================================================
+/**
+ * 【为什么这两条必须进 CI —— 它们的共同点是「本地怎么跑都是绿的」】
+ *
+ *   1) frontend/dist/.gitkeep 的跟踪态
+ *      main.go 用 go:embed all:frontend/dist 内嵌前端产物，而 .gitignore 把
+ *      frontend/dist/* 全排除、只反向豁免这一个占位文件。本机 dist 里有真实
+ *      构建产物，所以本地 go vet 永远过；干净 clone（CI runner 与别人的机器）
+ *      没有这个文件就直接编不过。2026-10-07 的 8774a7e 误删它，GitHub 上
+ *      连续两次 failure，本地一次也没报出来。
+ *
+ *   2) 标题 id 的引号形态
+ *      1b645ee 把 preview/markdown.js 里 heading_open 模板的 ASCII 直引号写成了
+ *      中文弯引号（同一提交连注释里的直引号也被换掉，是输入法/编辑器所为）。
+ *      浏览器把弯引号读进属性值，渲染出的 id 成了 “slug”，而「插入目录」
+ *      （editor/commands.js 的 insertToc）生成的是 #slug —— 两边永远对不上，
+ *      点目录条目静默不跳。121 条测试与其余四道门禁全绿。
+ *
+ * 这两处正是 docs/HANDOFF.md 5 里登记的「门禁口径之外的盲区」。缺陷本身已修，
+ * 但**修一次不等于不会再犯**，所以在这里补锚点，而不是只写进文档。
+ *
+ * 【注意】所有匹配都跑在**剥注释后的源码**上。本仓已 8 次栽在「匹配到注释里的代码」，
+ * 而本条尤其致命：注释里恰恰会出现「弯引号」这个被检查的对象本身（markdown.js 的
+ * typographer 注释就是活例子）。
+ * 这里用的是 helpers/lexer.mjs 的版本（别名 stripCommentsLexer）—— 本文件另有一个
+ * **同名局部函数**（契约 3 的打印块在用），不起别名会直接 SyntaxError 撞标识符。
+ * 两者都会保留模板字面量的内容，差别在 helpers 版还认识 `${}` 里的嵌套。
+ * 两份 stripComments 并存本身是债（口径应当只有一份真源），已登记进 docs/HANDOFF.md。
+ */
+
+/** 产出 HTML / 锚点的文件：弯引号一旦混进这些文件的代码里，就是静默失效 */
+const HTML_EMITTERS = [
+  'frontend/src/preview/markdown.js',
+  'frontend/src/editor/anchors.js',
+  'frontend/src/editor/commands.js',
+  'frontend/src/export/exporters.js',
+]
+
+describe('契约 6 · embed 占位与标题锚点（第七轮两处静默缺陷的门禁化）', () => {
+  const mainGo = readStable(join(REPO, 'main.go'))
+  const gitignore = readStable(join(REPO, '.gitignore'))
+  const markdownSrc = readStable(join(REPO, 'frontend/src/preview/markdown.js'))
+  for (const p of HTML_EMITTERS) readStable(join(REPO, p))
+
+  test('指针用例：main.go 仍靠 go:embed 内嵌 frontend/dist（判据锚点不得静默消失）', () => {
+    assert.ok(
+      /go:embed\s+all:frontend\/dist/.test(mainGo),
+      'main.go 里的 go:embed all:frontend/dist 不见了 —— 要么嵌入方式真的换了' +
+        '（那下面几条判据要跟着改锚点，别留死规则），要么是被误删。' +
+        '本条存在的意义就是防止「检查消失却无人报错」。'
+    )
+  })
+
+  test('frontend/dist/.gitkeep 必须仍被 git 跟踪（干净 clone 编得过的前提）', () => {
+    let tracked
+    try {
+      tracked = execFileSync('git', ['ls-files', '--', 'frontend/dist/.gitkeep'], {
+        cwd: REPO,
+        encoding: 'utf8',
+      }).trim()
+    } catch (err) {
+      assert.fail(
+        `无法执行 git ls-files 来判定占位文件的跟踪态（${err.message}）。` +
+          '本条判据依赖 git，宁可显式报错也不静默放行 —— 静默放行就是第 3 次假绿灯。'
+      )
+    }
+    assert.equal(
+      tracked,
+      'frontend/dist/.gitkeep',
+      'frontend/dist/.gitkeep 不在版本控制里了。干净 clone 因此没有 frontend/dist 目录，' +
+        'main.go 的 go:embed all:frontend/dist 会报 no matching files found，' +
+        'CI 的 Go 门禁直接红（2026-10-07 的 8774a7e 就是这么栽的）。' +
+        '复位：git checkout -- frontend/dist/.gitkeep（vite build 会把它从工作区删掉，' +
+        '但只要在 index 里就还能取回来）。'
+    )
+  })
+
+  test('.gitignore 保留 !frontend/dist/.gitkeep 反向豁免（否则复位后再也 add 不回来）', () => {
+    assert.ok(
+      gitignore.includes('!frontend/dist/.gitkeep'),
+      '.gitignore 里那条反向豁免没了。frontend/dist/* 仍被忽略，占位文件即使存在也' +
+        '加不进 index —— 下一次 build 之后就又是「干净 clone 编不过」，而且这次是无声的。'
+    )
+  })
+
+  test('heading_open 的 id 用 ASCII 直引号，且与 anchors 的 slug 同源', () => {
+    const code = stripCommentsLexer(markdownSrc)
+    assert.ok(
+      code.includes('id="${md._slugs.slug(text)}">'),
+      'preview/markdown.js 的 heading_open 不再逐字输出 id="…slug…" 形态。' +
+        '引号若变成中文弯引号，渲染出的 id 会带 “ ”，「插入目录」的 #slug 全部落空' +
+        '（点了不跳、不报错）。若模板是有意的合理改动，请连同本判据一起更新，别留死规则。'
+    )
+    // 两侧必须共用同一个 slug 真源，否则「渲染侧」和「目录侧」会各自漂移
+    const commandsCode = stripCommentsLexer(readStable(join(REPO, 'frontend/src/editor/commands.js')))
+    assert.ok(
+      /from '\.\.\/editor\/anchors(\.js)?'/.test(markdownSrc) && /createSlugCounter/.test(markdownSrc),
+      'preview/markdown.js 不再从 editor/anchors 取 createSlugCounter —— 标题 id 的生成' +
+        '规则出现了第二份真源。'
+    )
+    assert.ok(
+      /createSlugCounter/.test(commandsCode),
+      'editor/commands.js 的 insertToc 不再用 createSlugCounter 生成目录链接目标，' +
+        '与渲染侧的 id 规则脱钩。'
+    )
+  })
+
+  test('产出 HTML 的文件里，代码（剥注释后）不得出现中文弯引号', () => {
+    const hits = []
+    for (const p of HTML_EMITTERS) {
+      const code = stripCommentsLexer(read(join(REPO, p)))
+      const m = code.match(/[\u201c\u201d\u2018\u2019]/g)
+      if (m) hits.push(`${p}：${m.length} 处（${[...new Set(m)].join(' ')}）`)
+    }
+    assert.deepEqual(
+      hits,
+      [],
+      '这些文件的**代码位置**（字符串/模板字面量算代码，注释已剥离）出现了中文弯引号。' +
+        '典型成因是输入法或编辑器把 ASCII 引号「智能替换」了 —— 它不会让构建失败，' +
+        '只会让 HTML 属性、锚点、URL 静默失真。'
+    )
   })
 })
