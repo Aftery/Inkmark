@@ -6,7 +6,7 @@
 >
 > 最后更新：2026-10-11（内容已同步到 `f1343eb`，2026-10-07 那四个提交补记为 §2 第七轮）
 >
-> ✅ **2026-10-11 已修两处缺陷（本地复验通过，尚未提交/推送，所以 runner 上仍是红的）**：
+> ✅ **2026-10-11 已修两处缺陷（已提交到本地 main，尚未推送，所以 runner 上仍是红的）**：
 > 1. `frontend/dist/.gitkeep` 已按原内容（blob `dfdc095`）恢复并**重新纳入 git 跟踪** ——
 >    之前 `8774a7e` 误删它导致干净 clone 编不过（`main.go:13` 的
 >    `//go:embed all:frontend/dist` 报 `no matching files found`），CI `go` 门禁连红两次。
@@ -14,8 +14,12 @@
 >    之前「插入目录」生成的 `#slug` 与渲染出的 `id=“slug”` 永远对不上，跳转静默失效。
 >    同一提交里第 117 行注释的引号也一并还原。
 >
-> **推送之后才会在 GitHub 上复绿**；复验手段见 §8（真 clone `go vet` + 渲染锚点比对）。
-> ⚠ 这两类缺陷**至今没有门禁守着**（元守卫未补），同类问题还会再来，见 §5「口径之外的盲区」。
+> **推送之后才会在 GitHub 上复绿**（三个提交已在本地：占位文件 / 锚点 / 本文件）；
+> 复验手段见 §8（真 clone `go vet` + 渲染锚点比对 + 契约 6 的变异自证）。
+> 同类问题此后再犯会被**契约 6** 拦住，见 §5。
+>
+> **两道元守卫也已落地**（§5 的盲区 1、2 从此有门禁：契约 6 共 5 条判据，
+> 逐条做过变异自证），测试数 121 → **126**。
 >
 > ⚠️ **架构级变更（第四轮）仍然有效**：键位唯一真源从 `main.go` 的 `buildMenu()` 迁到了
 > 前端 `frontend/src/composables/useShortcuts.js` 的 `COMMANDS` 表。
@@ -31,7 +35,7 @@
 cd /Users/aftery/Desktop/myapp/inkmark
 
 # 门禁全跑一遍（约 2 分钟，与 CI 口径一致）
-cd frontend && npm test; cd ..          # 期望 121/121（24 个 suite）
+cd frontend && npm test; cd ..          # 期望 126/126（25 个 suite）
 node scripts/verify/verify-shortcuts.mjs    # 快捷键契约，期望退出码 0
 node scripts/verify/scan-i18n-residue.mjs   # i18n 文案残留，期望退出码 0
 ./scripts/p0-check-emoji.sh frontend/src main.go app.go   # P0 零 emoji，期望退出码 0
@@ -137,7 +141,8 @@ frontend/src/
                    GFM 任务列表 markdown-it-task-lists、标题 id 由 anchors.js 生成）
                    ⚠ 标题 id 的引号必须是 ASCII 直引号（2026-10-11 修过一次弯引号污染）
   themes/          editor-wysiwyg.css 是 `.cm-md-*` 的唯一定义处（勿写进 CM theme，会顶破棘轮）
-  tests/           121 条契约测试（node:test，零依赖；24 个 suite）
+  tests/           126 条契约测试（node:test，零依赖；25 个 suite）
+                   契约 6 = embed 占位文件跟踪态 + 标题锚点引号形态（2026-10-11 新增）
 scripts/
   emoji-pattern.mjs        P0 emoji 正则唯一真源
   p0-check-emoji.sh        薄封装（Node 实现）
@@ -309,8 +314,10 @@ docs/spec/                   契约文档（见下）
 - `1b645ee` 把 `preview/markdown.js:135` 的 `id="…"` 两个**直引号写成了中文弯引号**
   （同一提交里连注释中的 `"quotes"` 也被替换，说明是编辑器/输入法所致）。标题 id 从此
   带 `“ ”`，「插入目录」生成的 `#slug` 链接全部落空。
-- **这两个都没被 121 条测试和其余 4 道门禁抓住**：embed 目录存在性不在测试口径内，
+- **这两个当时都没被 121 条测试和其余 4 道门禁抓住**：embed 目录存在性不在测试口径内，
   标题锚点跳转根本没有门禁。与 §5「假绿灯」同族 —— 覆盖面之外的绿等于没绿。
+  （2026-10-11 已由**契约 6** 收口，见 §5 与 §8；历史结论保留在此处，是为了记住
+  「绿过一次」并不等于「验到了」。）
 
 **顺带清理**：`8774a7e` 把临时验证文件 `test-highlighting.md` 提交进了仓库，`6bdf3d6` 删除；
 工作区现已无残留。
@@ -434,7 +441,7 @@ gitignore 掉了**，只靠一个 `.gitkeep` 占位——而这个占位在 `877
 
 | 门禁 | 卡什么 | 命令 |
 |---|---|---|
-| `frontend` | 121 条测试 + vite 构建 | `npm test && npm run build` |
+| `frontend` | 126 条测试 + vite 构建 | `npm test && npm run build` |
 | `go` | vet + build（vet 不做链接，cgo 导出代码要 build 才暴露） | `go vet ./... && go build -o /dev/null .` |
 | `p0-emoji` | 界面不得用 emoji 当图标（含注释） | `./scripts/p0-check-emoji.sh frontend/src main.go app.go` |
 | `docs-contract` | 键位在 README / 应用内速查表 / **`useShortcuts.js` 的 `COMMANDS`** 三处脱节 | `node scripts/verify/verify-shortcuts.mjs` |
@@ -461,15 +468,18 @@ gitignore 掉了**，只靠一个 `.gitkeep` 占位——而这个占位在 `877
 
 **新增/修改任何门禁时，必须做元测试**：造违规输入 → 确认能报红 → 确认退出码非 0。
 
-### 同等重要：门禁**口径之外**的三个盲区（第七轮的两次红/一次静默都出在这儿）
-「五道全绿」不等于「没问题」，下面三处**没有任何门禁守着**，别把绿当保证：
-1. **`//go:embed` 目标目录是否在新 clone 里存在** —— 本机 dist 有产物，永远验不出。
-   唯一有效手段：干净 clone 跑 `go vet`（见 §4 ⑪）。2026-10-11 的 CI 红正是这条，
-   缺陷已修，**但门禁一条也没加**——占位文件的跟踪态没有任何断言守着。
-2. **标题锚点 / 「插入目录」跳转** —— `md._slugs` 生成的 `id` 与 TOC 链接是否对得上，
-   121 条测试里**没有一条**断言渲染出的 `id="…"` 形态。第七轮的弯引号污染正是从这里漏掉，
-   已修，**盲区原样还在**。
-3. **真机交互**（拖拽、红绿灯留白、毛玻璃、斜杠面板手感）—— 见 §6 的 19 项目视清单。
+### 门禁**口径之外**的盲区：两处已收口，一处收不了（第七轮的两次红都出在这儿）
+「五道全绿」不等于「没问题」。第七轮暴露的两个盲区，2026-10-11 已由**契约 6**（5 条判据）
+纳入 CI 口径：
+1. ~~占位文件的跟踪态没有断言守着~~ → **已收口**：契约 6 断言 `frontend/dist/.gitkeep`
+   仍在 `git ls-files` 里、`.gitignore` 的反向豁免还在、`main.go` 的 `go:embed` 锚点未消失。
+   纪律仍然有效：**涉及 embed / gitignore / 构建产物的改动，要用干净 clone 复验一次**
+   （见 §4 ⑪），门禁只在事后兜底。
+2. ~~标题锚点 / 「插入目录」跳转没有任何断言~~ → **已收口**：契约 6 断言 heading_open
+   逐字输出 `id="${…}">`、两侧同取自 `editor/anchors` 的 `createSlugCounter`，
+   并且「产出 HTML 的文件在剥注释后不得出现中文弯引号」。
+   ⚠ 但这条只覆盖到**静态形态**，真机点按是否跳转仍属目视项（§6 第 18 项）。
+3. **真机交互**（拖拽、红绿灯留白、毛玻璃、斜杠面板手感）—— 无法进门禁，见 §6 的 19 项。
 
 ---
 
@@ -520,15 +530,16 @@ gitignore 掉了**，只靠一个 `.gitkeep` 占位——而这个占位在 `877
 
 | 项 | 状态 |
 |---|---|
-| ✅ **CI `go` 门禁红** | **已修（2026-10-11）**：`frontend/dist/.gitkeep` 按原 blob `dfdc095` 恢复并重新纳入跟踪；真 clone 的 `go vet`/`go build` 均退出码 0。**尚未提交推送**，所以 GitHub 上那两次 failure 还在。见 §8 |
-| ✅ **标题锚点被智能引号污染** | **已修（2026-10-11）**：`preview/markdown.js:135` 的 `id=“…”` 换回 `id="…"`（第 117 行注释一并还原）；渲染比对从 FAIL 转 PASS，构建产物里也确认无弯引号 id。**但没有任何门禁守着它**，同类污染还会再来。见 §5 盲区 2 |
+| ✅ **CI `go` 门禁红** | **已修 + 已有门禁（2026-10-11）**：`frontend/dist/.gitkeep` 按原 blob `dfdc095` 恢复并重新纳入跟踪；真 clone 的 `go vet`/`go build` 均退出码 0；契约 6 从此守着它的跟踪态。**已提交到本地 main，尚未推送**，GitHub 上那两次 failure 还在。见 §8 |
+| ✅ **标题锚点被智能引号污染** | **已修 + 已有门禁（2026-10-11）**：`preview/markdown.js:135` 的 `id=“…”` 换回 `id="…"`（第 117 行注释一并还原）；渲染比对从 FAIL 转 PASS，构建产物里也确认无弯引号 id。契约 6 守着引号形态与两侧 slug 同源。**同样待推送** |
+| **「剥注释」有两份实现** | `frontend/tests/contracts.test.mjs` 的局部 `stripComments`（契约 3 在用）与 `tests/helpers/lexer.mjs` 的同名导出并存。helpers 版认识模板字面量与 `${}` 嵌套，局部版把反引号当普通字符串边界。同名 import 会撞出 `SyntaxError` 让**整个文件加载失败**。应收敛成一份（先确认契约 3 的行为不变），见 §8 |
 | **单栏布局 + 跨平台窗口形态的真机目视** | 自动化只验到「根节点渲染 + 标题栏/编辑区已挂载 + 无异常」，**标题栏拖拽 / 红绿灯留白 / 毛玻璃 / 斜杠面板的真实交互全部需目视**（见 §6 的 19 项） |
 | **macOS 透明窗口的代价** | `WebviewIsTransparent` + `WindowIsTranslucent` 在旧款 Intel Mac 上可能掉帧（透明窗口不能被合成器缓存）；本机是 macOS 12，只验到「能编译」，性能未实测 |
 | **Linux（CachyOS）真机** | 无边框 + 自绘标题栏的 Linux 表现**从未在真机跑过**；窗口按钮对接的 `WindowMinimise/WindowToggleMaximise/CloseWindow` 在 Linux 后端的行为需目视 |
 | **「最近打开」功能整体下线** | 它的唯一消费方是原生菜单的子菜单；自绘标题栏未做该入口。若要恢复，需前端加列表 + 重新暴露 Go 的 `GetRecents`（`recents.json` 持久化逻辑仍在 `app.go` 的 `recentsPath` 等函数里，但 `AddRecent` 调用点已删） |
 | **`useOutline` 的阅读态分支未验证** | `setReadingPane` 的注入已在第五轮接回（此前丢失导致阅读态不高亮），但**阅读态的跳转仍未目视** |
 | **CI 的 runner 表现** | 已实测（2026-10-11）：`5ad7434`/`21771c7`/`a105c51` success，`6bdf3d6`/`f1343eb` failure（仅 `go` job，见本表第一行）。**「本地绿、runner 绿」在 10-06 那批改动上成立过**，Node 版本与 lockfile 一致性不是问题；当前红是仓库自身回归 |
-| **`release.yml` 真 runner** | 需 push 一个 `v*` tag 才会触发三平台打包。`ci.yml` 在 runner 上跑通过（见上表），但 `release.yml` **一次都没跑过** —— 且 `go` 门禁当前在 runner 上仍是红的（修复已在本地复验，**尚未提交推送**）；**别在复绿前打 tag** |
+| **`release.yml` 真 runner** | 需 push 一个 `v*` tag 才会触发三平台打包。`ci.yml` 在 runner 上跑通过（见上表），但 `release.yml` **一次都没跑过** —— 且 `go` 门禁当前在 runner 上仍是红的（修复已在本地提交，**尚未推送**）；**别在复绿前打 tag** |
 | **检查更新** | 仓库**无任何 Release**，所以现在只会返回「无法检查更新」（不谎报「已是最新」）。要等第一个 Release |
 | **macOS 未签名分发** | Gatekeeper 会拦，需 Apple 开发者账号（$99/年）签名+公证 |
 | **「窗口 → 缩放」** | Wails 无「适配内容尺寸」API，用最大化近似（沿用既有裁决） |
@@ -570,18 +581,35 @@ than being linked (12.0)`，本机 SDK 与部署目标不一致导致，与本�
 | 改后 | `id="你好世界"` | 同上 | **PASS，3/3 对上** |
 
 另在构建产物里做了正负两头确认：`' id=\"'+g+'\">'` 存在（修复真进了 bundle）、
-`id=` 后跟弯引号 0 处。`npm test` 121/121、其余四道门禁退出码均 0、
+`id=` 后跟弯引号 0 处。`npm test` 121/121（补契约 6 后为 126/126）、其余四道门禁退出码均 0、
 `render-check` PASS（dist 路径，0 console error、0 未捕获异常）。
 
-### P0 · 给这两类缺陷补元守卫（**盲区仍在，最划算的一步**）
-两处缺陷都已修，但**没有任何门禁守着**，同一形态的问题还会第三次发生：
-1. 在 `contracts.test.mjs` 断言 `git ls-files frontend/dist` 非空（占位文件仍被跟踪）。
-   坑的形态是「产物目录被 gitignore，只有占位文件撑着 embed」。
-2. 断言 `createRenderer()` 渲染 `## abc` 得到 `<h2 id="abc">`（直引号），
-   并断言 `insertToc` 生成的 `#slug` 与之一一对应。这条顺带把 anchors 与
-   渲染两侧的同源关系钉住（`editor/anchors.js` 是共用真源）。
-补完记得做元测试：故意把引号改弯 → 断言必须报红；故意 `git rm --cached .gitkeep` →
-断言必须报红。**门禁不自检等于没装**（§5）。
+### ✅ 已完成 · 两道元守卫落地（契约 6，5 条判据，121 → 126 条测试）
+新增在 `frontend/tests/contracts.test.mjs` 末尾的 `契约 6 · embed 占位与标题锚点`：
+
+| 判据 | 卡什么 |
+|---|---|
+| 指针用例 | `main.go` 仍写着 `go:embed all:frontend/dist` —— 防「判据锚点静默消失」 |
+| 跟踪态 | `git ls-files frontend/dist/.gitkeep` 必须非空（干净 clone 编得过的前提） |
+| 反向豁免 | `.gitignore` 的 `!frontend/dist/.gitkeep` 还在（否则 build 后再也 add 不回来） |
+| id 形态 | `preview/markdown.js` 逐字含 `id="${md._slugs.slug(text)}">`；且渲染侧与 `insertToc` 两侧同取自 `editor/anchors` 的 `createSlugCounter` |
+| 弯引号 | 4 个「产出 HTML」的文件（markdown / anchors / commands / exporters）**剥注释后**代码里不得出现 `“ ” ‘ ’` |
+
+**元测试（变异自证，四条各造一次违规，逐条报红后还原）**：
+| 注入的违规 | 报红的判据 |
+|---|---|
+| 把 id 的两端换回 U+201D | id 形态 + 弯引号（2 条同时红） |
+| `git rm --cached frontend/dist/.gitkeep`（复现 `8774a7e`） | 跟踪态 |
+| 删掉 `.gitignore` 的反向豁免行 | 反向豁免 |
+| 把 `go:embed all:frontend/dist` 改成别的路径 | 指针用例 |
+
+**补门禁时踩到的新坑（不是「匹配到注释」那一族，是加载期就炸）**：`contracts.test.mjs` 里
+**已有一个局部 `stripComments`**（契约 3 打印块在用），再从 helpers `import { stripComments }`
+会 `SyntaxError: Identifier has already been declared` —— 而且是**整个测试文件加载失败、
+37 条一起红**，不是只红新加的那条。已用别名 `stripCommentsLexer` 绕开。
+**登记为债**：同一个「剥注释」口径现在有两份实现（局部函数 + `helpers/lexer.mjs`），
+helpers 版认识模板字面量与 `${}` 嵌套，局部版只把反引号当普通字符串边界。
+应收敛成一份，收敛前先确认契约 3 的行为不变（它有自己的一条危险场景用例）。
 
 ### P1 · 目视验收第七轮（§6 的 15~19 项）
 本轮改的正是**窗口拖动**与**关闭链路**这两条自动化验不到的路径：
