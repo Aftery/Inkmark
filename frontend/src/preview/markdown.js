@@ -114,7 +114,7 @@ export function createRenderer() {
     html: false,          // 不渲染原始 HTML，防注入（本地工具可开，默认关）
     linkify: true,        // 自动识别 URL
     breaks: true,         // 单个换行转成 <br>，符合写作直觉
-    typographer: true,    // 智能标点：”quotes” → “curly”
+    typographer: true,    // 智能标点："quotes" → “curly”
     highlight(str, lang) {
       if (lang && hljs.getLanguage(lang)) {
         try {
@@ -132,7 +132,7 @@ export function createRenderer() {
   md.renderer.rules.heading_open = (tokens, idx) => {
     const inline = tokens[idx + 1]
     const text = inline && inline.type === 'inline' ? inline.content : ''
-    return `<${tokens[idx].tag} id=”${md._slugs.slug(text)}”>`
+    return `<${tokens[idx].tag} id="${md._slugs.slug(text)}">`
   }
   return md
 }
