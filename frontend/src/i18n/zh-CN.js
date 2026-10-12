@@ -57,6 +57,7 @@ export default {
   'statusbar.lineCol': '行 {line}, 列 {col}',
   'statusbar.words': '{count} 字',
   'statusbar.zoomTitle': '切换缩放（90 / 100 / 110 / 125%）',
+  'statusbar.tableHint': '第 {line} 行像表格但未渲染：缺分隔行，请在表头下加一行 | --- |',
 
   // ---- 工具条 ----
   'toolbar.label': '格式化工具条',

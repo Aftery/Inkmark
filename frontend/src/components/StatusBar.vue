@@ -9,6 +9,7 @@
 import { computed } from 'vue'
 import AppIcon from './icons/AppIcon.vue'
 import { t } from '../i18n/index.js'
+import { tableHint } from '../composables/useTableHint.js'
 
 const props = defineProps({
   status: { type: String, default: 'saved' }, // 'saved' | 'saving' | 'unsaved' | 'error'
@@ -33,6 +34,13 @@ const meta = computed(() => {
   const m = META[props.status] || META.saved
   return { ...m, text: t(m.key) }
 })
+
+// 「表格没渲染」提示：模块级单例（composables/useTableHint），
+// 不经 props 传入 —— App.vue 是 ≤150 行硬上限的装配层，不为它加行。
+// 常驻显示而非 toast：这是「用户没察觉」的静默失败，提示必须不消失。
+const hintText = computed(() =>
+  tableHint.value ? t('statusbar.tableHint', { line: tableHint.value.line }) : ''
+)
 </script>
 
 <template>
@@ -41,6 +49,9 @@ const meta = computed(() => {
       <AppIcon :name="meta.icon" size="inline" :label="meta.text.replace(/…$/, '')" />
       <span>{{ meta.text }}</span>
     </span>
+
+    <!-- 表格未渲染提示：常驻直到改对，故给 role=status 让读屏器也能听到 -->
+    <span v-if="hintText" class="sb-hint" role="status">{{ hintText }}</span>
 
     <span class="sb-spring" aria-hidden="true"></span>
 
@@ -97,6 +108,15 @@ const meta = computed(() => {
 }
 
 .sb-spring { flex: 1; }
+
+/* 表格未渲染提示：warn 色 + 与保存态留间距，常驻不消失 */
+.sb-hint {
+  color: var(--warn);
+  margin-left: var(--space-3);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 
 .sb-item { color: var(--muted); }
 .sb-num {

@@ -42,6 +42,7 @@ export default {
   'statusbar.lineCol': '{line} 行, {col} 列',
   'statusbar.words': '{count} 文字',
   'statusbar.zoomTitle': 'ズームを切り替え（90 / 100 / 110 / 125%）',
+  'statusbar.tableHint': '{line} 行目はテーブルのように見えますが未描画です：ヘッダーの下に区切り行 | --- | を追加してください',
 
   // ---- ツールバー ----
   'toolbar.label': '書式ツールバー',

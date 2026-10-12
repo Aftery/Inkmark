@@ -4,8 +4,29 @@
 > `docs/spec/` 与项目记忆。它记录「做到了什么、怎么验证、哪些坑别再踩」，
 > 而不是流水账。
 >
-> 最后更新：2026-10-11（内容已同步到 `18c2f28`，即本轮 5 个提交推送后的状态；
-> 2026-10-07 那四个提交补记为 §2 第七轮）
+> 最后更新：2026-10-12（新增第八轮：表格未渲染提示；README 同步重写）
+>
+> ✅ **2026-10-12 第八轮：给「表格没渲染」加了状态栏常驻提示**。
+> 用户连续两次截图报「表格完全没渲染」——**实测确认不是缺陷**：他写的
+> `|-ds-| --sd-|`（分隔行含字母）与 `|| ||`（压根没分隔行）都不满足 GFM，
+> 解析器判为普通段落是正确行为，与 GitHub/Typora 一致。真正的缺陷是
+> **它什么都不告诉用户**（典型的静默失败）。故新增提示而非改渲染：
+> `editor/tableHint.js`（纯函数判定）+ `composables/useTableHint.js`（模块级
+> 单例）+ `StatusBar.vue` 常驻提示条 + 三档 i18n。
+> **测试 126 → 141**（新增 15 条，本仓**首次写真行为测试**：真 `EditorState`
+> + `ensureSyntaxTree`，此前全是源码正则断言）；新增
+> `scripts/probe/probe-table-hint.mjs`（CDP 真按键，**9/9 通过**）。
+> 三个实测坑与一次「两条用例零覆盖」的教训见 §2 第八轮与 §4 ⑬⑭⑮。
+>
+> ⚠ **本轮再次撞上「因为错误的原因而通过」的测试**（老问题的第 9、10 次）：
+> 围栏代码块与普通引用块两条用例当时全绿，但变异自证发现它们**根本没触到**
+> 被测规则（代码块内容是 `CodeText` 不是 `Paragraph`；引用块第二行以 `>`
+> 开头不是管道行）。换成三行形态才真正击穿。**全绿不等于覆盖**。
+>
+> ⚠ **README 已于 2026-10-12 全量重写**：旧版停更在第四轮之前，仍在宣传
+> 双栏 / 滚动联动 / 原生菜单 / `App.vue` 1352 行等早已下线或已完成的内容，
+> 且声称「图片、分割线可走斜杠面板」（实际面板只有代码块 / 表格 / 待办 /
+> 引用四项）。接手时若发现 README 与代码不符，以代码为准并顺手修。
 >
 > ✅ **2026-10-11 已修两处缺陷，并已推送、CI 在 runner 上复绿**：
 > 1. `frontend/dist/.gitkeep` 已按原内容（blob `dfdc095`）恢复并**重新纳入 git 跟踪** ——
@@ -39,7 +60,7 @@
 cd /Users/aftery/Desktop/myapp/inkmark
 
 # 门禁全跑一遍（约 2 分钟，与 CI 口径一致）
-cd frontend && npm test; cd ..          # 期望 126/126（25 个 suite）
+cd frontend && npm test; cd ..          # 期望 141/141（28 个 suite）
 node scripts/verify/verify-shortcuts.mjs    # 快捷键契约，期望退出码 0
 node scripts/verify/scan-i18n-residue.mjs   # i18n 文案残留，期望退出码 0
 ./scripts/p0-check-emoji.sh frontend/src main.go app.go   # P0 零 emoji，期望退出码 0
@@ -47,10 +68,13 @@ node scripts/verify/scan-i18n-residue.mjs   # i18n 文案残留，期望退出�
 node scripts/smoke/render-check.mjs         # 真渲染冒烟（需先 npm run build），期望 PASS
 
 # 交互探针（验「静默失败」类缺陷，render-check 覆盖不到）
+# ⚠ vite 冷启动约 18s；且沙箱内后台任务起不来 vite，须在同一条命令里
+#   (vite &) → 轮询 ready → 跑探针 → pkill
 cd frontend && npx vite --port 5599 --strictPort   # 另开终端起 dev server
 cd .. && node scripts/probe/probe-slash.mjs         # 斜杠面板：输入 / 后按 Enter 是否真插入
 node scripts/probe/probe-wysiwyg.mjs               # 表格/分割线/图片装饰是否产出 DOM
 node scripts/probe/probe-theme.mjs                 # 暗色下各区域实际计算色
+node scripts/probe/probe-table-hint.mjs            # 表格提示：缺分隔行时出现、改对后消失
 
 # 构建 + 启动
 # ⚠️ 在 WorkBuddy 沙箱内跑会被 safe-delete shim 拦（vite 的 emptyDir 触发熔断）→ 需提权
@@ -139,18 +163,23 @@ frontend/src/
     usePlatform.js       平台识别（Environment 权威 + navigator 同步初判）
     useToast.js          轻提示
     useOutline.js        大纲高亮 + 跳转（自持度量失效：resize / 视图切换）
+    useTableHint.js      表格未渲染提示（**模块级单例**：useEditorSession 写、StatusBar 读，
+                         不经 props —— App.vue 是 150 行硬上限，加不了行）
     useDialog / useFileOps / useShortcutsHelp
   components/      TitleBar（跨平台）/ Sidebar / SlashCommand / StatusBar /
                    HistoryPanel / SettingsPanel / InputDialog / ShortcutsDialog /
                    AboutDialog / FileTree / Outline / SegmentedControl …
   editor/          createEditor / commands / wysiwyg / outline /
-                   slashCommand（斜杠面板 CM 扩展）/ imageDrop / sampleDocs
+                   slashCommand（斜杠面板 CM 扩展）/ imageDrop / sampleDocs /
+                   tableHint（表格未渲染检测，**纯函数**；⚠ 不可进 wysiwyg.js 的 block 装饰）
                    markdownHighlight.js   ** codeLanguages 必须返回 `.language`**（见 §4 ⑨）
   preview/         markdown.js（markdown-it + highlight.js：**79 种语言**、
                    GFM 任务列表 markdown-it-task-lists、标题 id 由 anchors.js 生成）
                    ⚠ 标题 id 的引号必须是 ASCII 直引号（2026-10-11 修过一次弯引号污染）
   themes/          editor-wysiwyg.css 是 `.cm-md-*` 的唯一定义处（勿写进 CM theme，会顶破棘轮）
-  tests/           126 条契约测试（node:test，零依赖；25 个 suite）
+  tests/           141 条测试（node:test，零依赖；28 个 suite）
+                   ⚠ 第八轮起含**真行为测试**（真 EditorState + ensureSyntaxTree），
+                     此前全是源码正则断言 —— 详见 §2 第八轮
                    契约 6 = embed 占位文件跟踪态 + 标题锚点引号形态（2026-10-11 新增）
 scripts/
   emoji-pattern.mjs        P0 emoji 正则唯一真源
@@ -328,6 +357,40 @@ docs/spec/                   契约文档（见下）
   （2026-10-11 已由**契约 6** 收口，见 §5 与 §8；历史结论保留在此处，是为了记住
   「绿过一次」并不等于「验到了」。）
 
+### 第八轮：表格未渲染提示 + README 全量重写（2026-10-12）
+
+**起因**：用户两次截图报「表格完全没渲染」。**实测确认不是缺陷** ——
+用编辑器同款解析器验证：`|-ds-| --sd-|` 的分隔行含字母（GFM 只允许 `-` 与
+首尾 `:`）、`|| ||` 压根没有分隔行，两段都判为 `Document→Paragraph`，
+markdown-it 同样输出 `<p>`。合法表格对照则产出全套 `Table*` 节点。
+**真正的缺陷是它什么都不告诉用户** —— 标准行为，但本仓对待静默失败的立场
+是「要么提示，要么别让用户撞」。
+
+**新增 4 个文件 + 3 处接线**：
+| 文件 | 职责 |
+|---|---|
+| `editor/tableHint.js`（92 行） | 纯函数 `detectSuspectTable(state)`：顶层 `Paragraph` + 连续 ≥2 行 `pipeRow` → 疑似未渲染，返回 `{line, lines}` |
+| `composables/useTableHint.js`（53 行） | 模块级单例（与 `usePlatform` 同构）+ `checkTableHint` / `clearTableHint` |
+| `tests/table-hint.test.mjs`（15 条） | **本仓首次真行为测试**（真 `EditorState`，此前全是源码正则断言） |
+| `scripts/probe/probe-table-hint.mjs` | CDP 真按键探针，9/9 通过 |
+
+**两个架构约束决定了方案形状（勿"优化"掉）**：
+1. **不能进 `wysiwyg.js`**：该文件头明令「绝无 block 装饰」（CM6 抛 RangeError），
+   插不进提示行；且它只负责渲染装饰，不该承担诊断职责。
+2. **不能走 props 串联**：`App.vue` 是 ≤150 行硬上限且零余量，故用
+   「模块级 ref + 组件直接 import」（先例：`TitleBar` import `isDarwin`）。
+3. **不用 toast**：3200ms 自动消失，而这是「用户没察觉」的问题，提示必须常驻。
+
+**接线要点**：`onEditorUpdate` 调 `checkTableHint`；`syncAfterDocReplace`
+必须**手工补算**（`replaceDocument` 走 `setState` 不触发 updateListener，
+否则切文档后上一份的提示会残留）；`onBeforeUnmount` 必须 `clearTableHint`。
+
+**本轮再次撞上「因为错误的原因而通过」（老问题第 9、10 次）**：围栏代码块与
+普通引用块两条用例当时全绿，但变异自证发现它们**根本没触到被测规则** ——
+代码块内容是 `CodeText` 而非 `Paragraph`（压根进不到判定）；引用块第二行以
+`>` 开头不是 `pipeRow`（被另一条规则挡掉）。换成**三行形态**才真正击穿顶层判定。
+**教训：断言全绿不等于规则被覆盖；要问「它是因为哪一条规则才通过的」。**
+
 **顺带清理**：`8774a7e` 把临时验证文件 `test-highlighting.md` 提交进了仓库，`6bdf3d6` 删除；
 工作区现已无残留。
 
@@ -444,13 +507,32 @@ gitignore 掉了**，只靠一个 `.gitkeep` 占位——而这个占位在 `877
 编译/打包期就暴露；`try/catch` 只用来兜「浏览器预览没有 Wails 环境」这一个场景。
 **判据**：兜底只该出现在**已知的环境分支**上，不该出现在主调用链上（与 §4 ⑤ 同源）。
 
+### ⑬ 「用户说表格没渲染 = 我们的渲染坏了」—— **第八轮实测：不是**
+用户写的两段文本（`|-ds-| --sd-|`、`|| ||`）都不满足 GFM，解析器判为段落是
+**正确行为**，与 GitHub / Typora / VS Code 一致。**判据：先证明输入合法，
+再讨论渲染**。GFM 表格要求「第 2 行是分隔行，且单元格只含 `-` 与首尾 `:`」——
+分隔行写在第 3 行也不算表格（我的探针先写错成第 3 行，报了两个假 FAIL）。
+
+### ⑭ 「`markdown()` 就是编辑器用的那个解析器」—— **错（第八轮实测）**
+`@codemirror/lang-markdown` 的默认 `markdown()` 用 **commonmark**（无 GFM），
+而 `createEditor.js` 传的是 `markdown({ base: markdownLanguage })` —— 那是扩展了
+GFM 的版本。实测同一段合法表格：默认 `markdown()` → `Document, Paragraph`（认不出
+表格！），`base: markdownLanguage` → `Document, Table, …`。
+**判据**：写涉及解析的测试必须**复制生产代码的扩展参数**，否则合法输入会被判成
+异常（假红），生产代码改错也验不出来（假绿）。与 §4 ⑨「API 名字对 ≠ 行为对」同族。
+
+### ⑮ 「无头环境里 `syntaxTree(state)` 就是完整语法树」—— **错（第八轮实测）**
+无头构造的 `EditorState` 上，`syntaxTree(state)` 只给**部分**树（3 行文档只解析出
+`Document + Paragraph`），必须用 `ensureSyntaxTree(state, doc.length, 5000)` 强制
+完整解析。**判据**：解析类测试断言前，先 dump 一遍节点名确认「你看到的树就是完整树」。
+
 ---
 
 ## 5. 门禁体系（5 道，全在 CI）
 
 | 门禁 | 卡什么 | 命令 |
 |---|---|---|
-| `frontend` | 126 条测试 + vite 构建 | `npm test && npm run build` |
+| `frontend` | 141 条测试 + vite 构建 | `npm test && npm run build` |
 | `go` | vet + build（vet 不做链接，cgo 导出代码要 build 才暴露） | `go vet ./... && go build -o /dev/null .` |
 | `p0-emoji` | 界面不得用 emoji 当图标（含注释） | `./scripts/p0-check-emoji.sh frontend/src main.go app.go` |
 | `docs-contract` | 键位在 README / 应用内速查表 / **`useShortcuts.js` 的 `COMMANDS`** 三处脱节 | `node scripts/verify/verify-shortcuts.mjs` |
@@ -534,6 +616,16 @@ gitignore 掉了**，只靠一个 `.gitkeep` 占位——而这个占位在 `877
     真机点按仍需目视一次。
 19. **GFM 任务列表**：`- [ ]` / `- [x]` 在阅读态应渲染成勾选框（`1b645ee` 新接的
     `markdown-it-task-lists`），编辑区的 WYSIWYG 装饰已有，两边别只验一边。
+
+**第八轮新增（2026-10-12）**
+
+20. **表格未渲染提示**（CDP 探针已 9/9 通过，但仍需目视一次）：敲入
+    `| a | b |` 回车 `| c | d |` → 状态栏左侧应常驻橙色提示并带行号；
+    在**第 2 行**补上 `| --- | --- |` → 提示立刻消失。
+    ⚠ 眼睛要看的是**提示的可读性与位置**（会不会被右侧行/列信息挤掉、
+    长文案会不会溢出），这些探针验不了。
+21. **提示的误报体感**：连续写管道表格期间提示常驻是否显得吵？判定规则是
+    「顶层段落 + 连续 ≥2 行管道行」，若发现写作时莫名被提示，把这条报回来。
 
 ## 7. 已知未做 / 未验证（如实登记）
 

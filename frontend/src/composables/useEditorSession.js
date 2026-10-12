@@ -22,6 +22,7 @@ import { createEditor, centerCursor } from '../editor/createEditor'
 import { createRenderer, render } from '../preview/markdown'
 import { DEFAULT_DOC } from '../editor/sampleDocs'
 import { t } from '../i18n/index.js'
+import { checkTableHint, clearTableHint } from './useTableHint.js'
 
 const PREVIEW_DEBOUNCE_MS = 120
 
@@ -97,6 +98,9 @@ export function useEditorSession({
     const pos = u.state.selection.main.head
     const line = u.state.doc.lineAt(pos)
     caret.value = { line: line.number, col: pos - line.from + 1 }
+    // 「表格没渲染」提示：每次更新都查一遍（纯读语法树，开销可忽略），
+    // 命中与否由 useTableHint 内部逐字段比较后决定是否触发重渲染。
+    checkTableHint(u.state)
     // 打字机模式：输入后把光标行滚到视口中部（rAF 避开 update 事务内再 dispatch）
     if (typewriterOn?.value && u.docChanged) {
       requestAnimationFrame(() => centerCursor(editorRef.value))
@@ -114,6 +118,9 @@ export function useEditorSession({
     cancelPendingPreview() // 丢弃输入期待渲染内容，防止稍后覆盖刚打开/恢复的文档
     markdown.value = content
     caret.value = { line: 1, col: 1 }
+    // 整份替换不触发 updateListener（见上），故手工重算表格提示，
+    // 否则上一份文档的提示会残留到新文档
+    if (editorRef.value) checkTableHint(editorRef.value.state)
     nextTick(() => onOutlineRefresh?.())
   }
 
@@ -149,6 +156,7 @@ export function useEditorSession({
 
   onBeforeUnmount(() => {
     cancelPendingPreview()
+    clearTableHint()
     editorRef.value?.destroy()
     editorRef.value = null
   })

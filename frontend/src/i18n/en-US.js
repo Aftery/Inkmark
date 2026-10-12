@@ -42,6 +42,7 @@ export default {
   'statusbar.lineCol': 'Ln {line}, Col {col}',
   'statusbar.words': '{count} words',
   'statusbar.zoomTitle': 'Cycle zoom (90 / 100 / 110 / 125%)',
+  'statusbar.tableHint': 'Line {line} looks like a table but is not rendered: add a delimiter row | --- | under the header',
 
   'toolbar.label': 'Formatting toolbar',
   'toolbar.undo': 'Undo',
