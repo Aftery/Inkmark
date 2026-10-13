@@ -26,6 +26,27 @@
  */
 import { ref, watch } from 'vue'
 import { t } from '../i18n/index.js'
+
+/**
+ * fs:changed 到来时是否该重载文件树（纯函数，导出供测试直接 import）。
+ *
+ * 语义：**严格相等，不做任何归一化**。payload 是 watcher.go watchLoop 推送的
+ * 「被监听根目录」原样字符串，folderPath 是前端当初传给 WatchDir 的同一个
+ * 字符串 —— 两者同源，严格相等即正确；尾部斜杠差异在这种同源关系下不可能
+ * 出现，容忍它只会把别的目录的事件放进来。
+ *
+ * 空串一律 false：WatchDir('') 是停机态，不会有事件带空 payload 回来；
+ * folderPath 为空说明没开文件夹，无所谓重载。非字符串（Go 侧契约漂移）
+ * 同样 false —— 宁可漏一次刷新，不可错刷。
+ */
+export function shouldReloadTree(payload, folderPath) {
+  return (
+    typeof payload === 'string' && payload !== '' &&
+    typeof folderPath === 'string' && folderPath !== '' &&
+    payload === folderPath
+  )
+}
+
 export function useFileOps(deps) {
   const {
     // 编辑器与文档
@@ -41,11 +62,28 @@ export function useFileOps(deps) {
   } = deps
 
   // 文件树外部变更信号：watch(folderPath) 的副产物，传给 FileTree 触发重载。
-  // 注：Go 侧的 WatchDir 目前未在 app.go 暴露（treeSignal 因此从不自增），
-  // 保留它是给后续 fsnotify 接线留位；去掉它 FileTree 的 reload-signal prop 就空了。
+  // （早期注释称「WatchDir 未在 app.go 暴露、treeSignal 从不自增」是看漏了：
+  //   watcher.go 与 app.go 同包，方法早已暴露；缺的只是下面的 fs:changed 订阅。）
   const treeSignal = ref(0)
   watch(folderPath, (p) => {
     try { window.go?.main?.App?.WatchDir?.(p || '') } catch { /* 浏览器预览无绑定 */ }
+  })
+
+  // 订阅 Go 侧 fsnotify 去抖后推送的 fs:changed（watcher.go watchLoop：
+  // 250ms 去抖、payload 为被监听根目录）。仅当 payload 就是当前文件夹时才
+  // 自增 treeSignal —— 守卫语义与边界见 shouldReloadTree。
+  //
+  // 为什么不 import wailsjs/runtime 的 EventsOn：那个绑定展开是
+  // `window.runtime.EventsOnMultiple(...)` 直取，浏览器预览（vite dev 无
+  // Wails runtime）下会抛 Cannot read properties of undefined。这里用与
+  // 上一行 WatchDir 相同的可选链形态，预览环境下静默不订阅。
+  //
+  // 为什么不退订：本 composable 随 App setup 创建一次、与 app 同生命周期；
+  // 且 runtime 的 EventsOff(eventName) 会摘掉该事件名的**全部**回调，
+  // 将来若有第二个订阅者会被误伤 —— 两害相权，不退订。
+  window.runtime?.EventsOn?.('fs:changed', (payload) => {
+    if (!shouldReloadTree(payload, folderPath.value)) return
+    treeSignal.value++
   })
 
   /** 打开 / 切换文件的唯一落点：整份替换文档 + 同步全部派生状态。 */

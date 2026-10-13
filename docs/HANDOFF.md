@@ -4,7 +4,23 @@
 > `docs/spec/` 与项目记忆。它记录「做到了什么、怎么验证、哪些坑别再踩」，
 > 而不是流水账。
 >
-> 最后更新：2026-10-12（新增第八轮：表格未渲染提示；README 同步重写）
+> 最后更新：2026-10-13（新增第九轮：文件树外部变更监听接线 + stripComments 收敛 + 导出字体裁决）
+>
+> ✅ **2026-10-13 第九轮：清掉三笔债**（详见 §2 第九轮）：
+> ① **文件树外部变更监听接线** —— 文档原记「`WatchDir` 未在 app.go 暴露所以
+> `treeSignal` 空转」是**过时的错误说法**（`watcher.go` 与 `app.go` 同包，方法早已
+> 暴露，绑定也在册）；真正缺的是**前端没订阅 `fs:changed` 事件**。本轮补上订阅
+> （`shouldReloadTree` 纯函数守卫 + `window.runtime?.EventsOn?.()` 浏览器兜底），
+> 后端顺带修了一个真实缺陷：切换/停止文件夹时旧监听的去抖定时器会推出**陈旧
+> payload**（代际校验修复）。
+> ② **`stripComments` 双实现收敛** —— 删除 `contracts.test.mjs` 局部版，统一
+> `helpers/lexer.mjs`。实测第四处差异比登记的三处更尖锐：**局部版对正则字面量里
+> 的引号/反引号全盲**（`commands.js` 的 `FENCE_RE` 一个反引号即假言入串，此后
+> 成片注释没被剥掉 —— 实测两版对该文件输出 **37 行不同**，非空白字符数
+> local 8378 / lexer 7209，差 1169）。收敛后契约行为零变化（14 个 .vue 逐字节比对证实）。
+> ③ **导出字体偏好裁决**：不跟随（OPEN-DECISIONS 已关闭，未决项清零）。
+> **测试 141 → 155**（新增 14 条，含 7 条经真实 `useFileOps()` 驱动的订阅行为
+> 测试——stub `window.runtime.EventsOn` 捕获真实回调，不走正则模拟）。
 >
 > ✅ **2026-10-12 第八轮：给「表格没渲染」加了状态栏常驻提示**。
 > 用户连续两次截图报「表格完全没渲染」——**实测确认不是缺陷**：他写的
@@ -60,7 +76,7 @@
 cd /Users/aftery/Desktop/myapp/inkmark
 
 # 门禁全跑一遍（约 2 分钟，与 CI 口径一致）
-cd frontend && npm test; cd ..          # 期望 141/141（28 个 suite）
+cd frontend && npm test; cd ..          # 期望 155/155（31 个 suite）
 node scripts/verify/verify-shortcuts.mjs    # 快捷键契约，期望退出码 0
 node scripts/verify/scan-i18n-residue.mjs   # i18n 文案残留，期望退出码 0
 ./scripts/p0-check-emoji.sh frontend/src main.go app.go   # P0 零 emoji，期望退出码 0
@@ -177,7 +193,7 @@ frontend/src/
                    GFM 任务列表 markdown-it-task-lists、标题 id 由 anchors.js 生成）
                    ⚠ 标题 id 的引号必须是 ASCII 直引号（2026-10-11 修过一次弯引号污染）
   themes/          editor-wysiwyg.css 是 `.cm-md-*` 的唯一定义处（勿写进 CM theme，会顶破棘轮）
-  tests/           141 条测试（node:test，零依赖；28 个 suite）
+  tests/           155 条测试（node:test，零依赖；31 个 suite）
                    ⚠ 第八轮起含**真行为测试**（真 EditorState + ensureSyntaxTree），
                      此前全是源码正则断言 —— 详见 §2 第八轮
                    契约 6 = embed 占位文件跟踪态 + 标题锚点引号形态（2026-10-11 新增）
@@ -197,7 +213,7 @@ docs/spec/                   契约文档（见下）
 
 ---
 
-## 2. 各轮做了什么（第一~七轮；第七轮为 2026-10-11 按 git show 回补）
+## 2. 各轮做了什么（第一~九轮；第七轮为 2026-10-11 按 git show 回补）
 
 ### 第一轮：设置面板 + 打印菜单规范化
 - 新增 `components/SettingsPanel.vue`（外观 / 编辑器两分类，7 项）
@@ -396,6 +412,67 @@ markdown-it 同样输出 `<p>`。合法表格对照则产出全套 `Table*` 节�
 
 ---
 
+### 第九轮：文件树外部变更监听接线 + stripComments 收敛 + 导出字体裁决（2026-10-13）
+
+**起因**：盘点 §7 未决项后，按「价值 × 风险」优先级清三笔债。走专家团精简路径
+（存量维护，跳过调研/PRD/设计，门禁一道不减），开发与独立验证分离。
+
+**① 文件树外部变更监听（`treeSignal` 空转）——先纠正一个文档谎言**
+
+HANDOFF/README 原记「Go 侧 `WatchDir` 未在 app.go 暴露，故 `treeSignal` 从不自增」。
+**实测该说法不成立**：`watcher.go`（`dd86e96` 引入）与 `app.go` 同属 `package main`，
+`WatchDir` 方法早已暴露，`frontend/wailsjs/go/main/App.js:77` 绑定也在册，
+`useFileOps.js` 也早已调用。**真正缺的是前端没有任何代码订阅 `fs:changed` 事件**。
+
+| 文件 | 改动 |
+|---|---|
+| `composables/useFileOps.js` | 新增导出纯函数 `shouldReloadTree(payload, folderPath)`（严格相等 + 非空 + 类型守卫，不归一化——同源字符串不可能有斜杠差异，容忍它只会放进别处事件）；setup 内 `window.runtime?.EventsOn?.('fs:changed', cb)` 订阅，仅当 `payload === folderPath.value` 时 `treeSignal.value++`；修正第 44 行过时注释 |
+| `watcher.go` | 修真实缺陷：去抖回调原来只校验 `a.ctx != nil`，**不校验监听是否仍存活**——切换/停止文件夹时旧监听残留的 250ms 定时器会把已失效目录推给前端（陈旧 payload → 刷新错误的树）。改为代际校验：取消旧监听与 `watchGen` 自增在同一把 `watchMu` 临界区内，`fire` 读代号走同一把锁 —— **临界区内无中间态**。**残余（QA 复验指出，如实登记）**：`fire` 在解锁之后才 `EventsEmit`，属读-后用非原子，理论上仍可能发出一次陈旧事件；功能上由前端 `shouldReloadTree` 守卫兜底，即前文所称「双防线」 |
+| `tests/watcher-wiring.test.mjs`（新，14 条） | 5 条纯函数守卫语义 + **7 条经真实 `useFileOps()` 驱动的订阅行为**（stub `window.runtime.EventsOn` 捕获真实回调，不走正则模拟）+ 2 条跨文件事件名集合比对契约 |
+
+**为什么订阅点不退订**：runtime 的 `EventsOff(eventName)` 会摘掉该事件**全部**回调，
+将来若有第二个订阅者会被误伤；本监听与 app 同生命周期，不退订是有意为之。
+**为什么不用具名 import `wailsjs/runtime`**（HANDOFF P3 原建议，已证伪）：
+该绑定展开为 `window.runtime.EventsOnMultiple(...)` 直取，浏览器预览（vite dev 无
+Wails runtime）下必抛。可选链兜底只出现在**已知的环境分支**上，符合 §4 ⑫ 的判据。
+
+**② stripComments 双实现收敛（§7 登记的债）**
+
+`contracts.test.mjs` 局部版（契约 3 的 `collectPrintBlocks` 在用）删除，统一
+`helpers/lexer.mjs` 版（-89 行；契约 6 原本就用它，仅去别名）。
+**收敛前实证**：对契约 3 实际扫描的 14 个 .vue 逐字节比对两份实现输出——**0 差异**；
+契约 6 只是改名。全 src 树 49 个文件中 3 个有差异（`useEditorSession.js` /
+`commands.js` / `exporters.js`），方向全部是**局部版该剥没剥**。
+除 §7 已登记的三处差异，本轮实测到**第四处更尖锐的**（见 §4 ⑯）。
+
+**③ 导出字体偏好裁决**：OPEN-DECISIONS 关闭为**不跟随**（导出物是分发格式，
+把作者本地偏好写死进 HTML/PDF 会让排版随机器漂移；保持主题级 `--font-body`
+才能任何机器导出一致）。实现零改动，未决项登记册清零。
+
+**验证**：`npm test` 141 → **155/155**；p0-emoji / i18n 残留 / verify-shortcuts /
+`go vet` / `go build -o /dev/null ./...` 全过；`wails generate module` 绑定零 diff
+（仅 runtime.js 权限位 100644→100755，已 chmod 复位）；变异自证两侧各一次
+（前端订阅名改错 → 行为 + 契约测试双红；Go 侧事件名改错 → 契约测试红）。
+**独立验证者**（QA）另做复验，不采信开发自检结论。
+
+**QA 复验判定 fail，并当场抓到一处「测试假绿灯」（本项目头号敌人）**：
+`watcher-wiring.test.mjs` 里两条「浏览器预览兜底」用例**形同虚设** —— 它们先在
+用例内设 `globalThis.window = {}`，**再**调 `mountOps()`，而 `mountOps()` 无条件
+把 window 重设成带 `runtime.EventsOn` 的形态，前置条件被瞬间覆盖，缺失 runtime
+的路径**从未真正进入**。QA 的判定性实证：把 `useFileOps.js` 的
+`window.runtime?.EventsOn?.(…)` 改成无兜底的直取（真机浏览器必抛），这两条用例
+**依然 2 pass**。修法：把「形态」提为 `mountOps({ installRuntime })` 显式入参
+（`full` / `no-runtime` / `no-eventson`），并补「订阅数必须为 0」的断言；
+修后同样注入 → **2 fail**，还原后 14/14 绿。
+**教训（§4 ⑰）：helper 里的无条件初始化会静默覆盖用例的前置条件 —— 失败路径
+测试必须让「失败条件」成为被测函数的显式入参，而不是用例里的一次全局赋值。**
+
+QA 另指出 3 处文档数字失真（README suite 数 29→实测 31、HANDOFF 两处 141/28 旧值、
+`commands.js` 差异「300+ 行/全部」实为 37 行）与 1 处措辞需打折（`fire` 的
+read-then-act 非原子），均已按实测改正（见上文与 §4 ⑯）。
+
+---
+
 ## 3. 怎么验证（不要只看「构建通过」）
 
 本项目吃过两次教训：**「进程存活」不等于「界面渲染出来了」**（白屏时进程照样活着），
@@ -526,13 +603,38 @@ GFM 的版本。实测同一段合法表格：默认 `markdown()` → `Document,
 `Document + Paragraph`），必须用 `ensureSyntaxTree(state, doc.length, 5000)` 强制
 完整解析。**判据**：解析类测试断言前，先 dump 一遍节点名确认「你看到的树就是完整树」。
 
+### ⑯ 「两份 stripComments 行为有差异，收敛就会动到契约」—— **第九轮实测：差异比登记的更尖锐，但契约零变化**
+§7 原登记三处差异（`${}` 插值注释、未闭合引号跨换行、纯模板一致）。第九轮实测到
+**第四处更尖锐的**：局部版对**正则字面量里的引号/反引号全盲** —— `commands.js` 的
+`FENCE_RE = /^\s*(```|~~~)/` 一个反引号即假言入串，此后成片注释漏剥。
+**实测数字**（不要凭感觉写「全部/几百行」）：两版对该文件输出 **37 行不同**，
+非空白字符数 local 8378 / lexer 7209（差 1169）。
+（方向上局部版漏剥，正是「匹配到注释里的代码」那族失效，§5 门禁最怕的东西）。
+收敛方式：删局部版、统一 `helpers/lexer.mjs`。
+**收敛前实证契约行为不变**：对契约 3 实际扫描的 14 个 .vue **逐字节比对**两份实现
+输出——0 差异；契约 6 原本就用 helpers 版（仅去别名）；155/155 无一条断言被弱化。
+**教训：「两份实现行为有差异」≠「收敛会改变契约」——先对真实输入集合做逐字节比对
+再下结论，别拿差异清单当回归预测；但也别因此说「差不多」就留着不改。**
+
+### ⑰ 「用例里先设好前置条件，再调被测函数」—— **错（第九轮 QA 复验实证）**
+`watcher-wiring.test.mjs` 的两条「浏览器预览兜底」用例写成：
+`globalThis.window = {}` → `mountOps({...})`。但 `mountOps()` 内部**无条件**
+`globalThis.window = { runtime: { EventsOn } }` —— 前置条件被 helper 静默覆盖，
+「缺失 runtime」的路径从未进入，用例恒绿。**判定性实证**：把被测代码里的
+`window.runtime?.EventsOn?.(…)` 改成无兜底直取（真机必抛），两条用例**依然 2 pass**。
+**判据**：任何「失败路径 / 降级路径」的用例，必须让**失败条件成为被测函数的显式
+入参**（这里是 `mountOps({ installRuntime: 'no-runtime' })`），而不是用例里的一次
+全局赋值；并且断言要打在**该路径特有的可观测差异**上（这里补「订阅数必须为 0」），
+不能只写 `assert.doesNotThrow` —— 后者对「压根没执行到那行」毫无区分力。
+同族问题：本仓 §5 的「因为错误的原因而通过」（第 9~11 次）。
+
 ---
 
 ## 5. 门禁体系（5 道，全在 CI）
 
 | 门禁 | 卡什么 | 命令 |
 |---|---|---|
-| `frontend` | 141 条测试 + vite 构建 | `npm test && npm run build` |
+| `frontend` | 155 条测试 + vite 构建 | `npm test && npm run build` |
 | `go` | vet + build（vet 不做链接，cgo 导出代码要 build 才暴露） | `go vet ./... && go build -o /dev/null .` |
 | `p0-emoji` | 界面不得用 emoji 当图标（含注释） | `./scripts/p0-check-emoji.sh frontend/src main.go app.go` |
 | `docs-contract` | 键位在 README / 应用内速查表 / **`useShortcuts.js` 的 `COMMANDS`** 三处脱节 | `node scripts/verify/verify-shortcuts.mjs` |
@@ -570,7 +672,7 @@ GFM 的版本。实测同一段合法表格：默认 `markdown()` → `Document,
    逐字输出 `id="${…}">`、两侧同取自 `editor/anchors` 的 `createSlugCounter`，
    并且「产出 HTML 的文件在剥注释后不得出现中文弯引号」。
    ⚠ 但这条只覆盖到**静态形态**，真机点按是否跳转仍属目视项（§6 第 18 项）。
-3. **真机交互**（拖拽、红绿灯留白、毛玻璃、斜杠面板手感）—— 无法进门禁，见 §6 的 19 项。
+3. **真机交互**（拖拽、红绿灯留白、毛玻璃、斜杠面板手感）—— 无法进门禁，见 §6 的 22 项。
 
 ---
 
@@ -627,14 +729,24 @@ GFM 的版本。实测同一段合法表格：默认 `markdown()` → `Document,
 21. **提示的误报体感**：连续写管道表格期间提示常驻是否显得吵？判定规则是
     「顶层段落 + 连续 ≥2 行管道行」，若发现写作时莫名被提示，把这条报回来。
 
+**第九轮新增（2026-10-13）**
+
+22. **文件树外部变更监听**（fsnotify，沙箱内无法验证，`wails dev` 真机确认）：
+    ① 打开一个文件夹，在**外部**（Finder / 终端）往里新建或删除一个文件 →
+    文件树应在约 250ms 去抖后自动刷新；② 切到另一个文件夹后，往**旧**文件夹
+    扔文件，树**不应**刷新（代际校验 + 前端相等守卫双防线，验的就是这个）；
+    ③ 关闭文件夹（打开空文档）后，往原目录扔文件，无任何刷新。
+    已知未修项不影响验收：去抖边界双发（同 root 多刷一次）、fsnotify 内部
+    错误时监听静默死亡（`w.Errors` 被吞，建议后续至少记日志）。
+
 ## 7. 已知未做 / 未验证（如实登记）
 
 | 项 | 状态 |
 |---|---|
 | ✅ **CI `go` 门禁红** | **已修 + 已有门禁 + runner 已复绿（2026-10-11）**：`frontend/dist/.gitkeep` 按原 blob `dfdc095` 恢复并重新纳入跟踪；真 clone 的 `go vet`/`go build` 均退出码 0；契约 6 从此守着它的跟踪态。已随 `18c2f28` 推送，run `38143580960` 五个 job 全 success。见 §8 |
 | ✅ **标题锚点被智能引号污染** | **已修 + 已有门禁（2026-10-11）**：`preview/markdown.js:135` 的 `id=“…”` 换回 `id="…"`（第 117 行注释一并还原）；渲染比对从 FAIL 转 PASS，构建产物里也确认无弯引号 id。契约 6 守着引号形态与两侧 slug 同源，**同批已推送** |
-| **「剥注释」有两份实现** | `frontend/tests/contracts.test.mjs` 的局部 `stripComments`（契约 3 在用）与 `tests/helpers/lexer.mjs` 的同名导出并存。**已实测三处行为差异**：`${}` 里的注释 helpers 会剥、局部版当字符串保留；未闭合单引号跨换行 helpers 断串后照常剥注释、局部版会吞掉后续真注释（**方向上局部版更危险**，正是「匹配到注释里的代码」那一族）；纯模板内容两边一致。同名 import 会撞出 `SyntaxError` 让**整个文件加载失败**。应收敛成一份（收敛前先确认契约 3 的行为不变），见 §8 |
-| **单栏布局 + 跨平台窗口形态的真机目视** | 自动化只验到「根节点渲染 + 标题栏/编辑区已挂载 + 无异常」，**标题栏拖拽 / 红绿灯留白 / 毛玻璃 / 斜杠面板的真实交互全部需目视**（见 §6 的 19 项） |
+| ✅ **「剥注释」有两份实现** | **已收敛（2026-10-13，第九轮）**：删除 `contracts.test.mjs` 局部版（-89 行），统一 `tests/helpers/lexer.mjs` 版；契约 6 原本就用它（仅去别名）。收敛前实证：契约 3 扫描的 14 个 .vue 逐字节比对两份输出 **0 差异**，155/155 无断言弱化。原登记的三处差异之外实测到第四处（局部版对正则字面量里的引号全盲 —— 对 `commands.js` 实测 37 行输出不同，非空白字符数 local 8378 / lexer 7209），见 §4 ⑯。教训：差异存在 ≠ 契约会变，先逐字节比对再下结论；反过来「差异很小」也不能当作不修的理由 |
+| **单栏布局 + 跨平台窗口形态的真机目视** | 自动化只验到「根节点渲染 + 标题栏/编辑区已挂载 + 无异常」，**标题栏拖拽 / 红绿灯留白 / 毛玻璃 / 斜杠面板的真实交互全部需目视**（见 §6 的 22 项） |
 | **macOS 透明窗口的代价** | `WebviewIsTransparent` + `WindowIsTranslucent` 在旧款 Intel Mac 上可能掉帧（透明窗口不能被合成器缓存）；本机是 macOS 12，只验到「能编译」，性能未实测 |
 | **Linux（CachyOS）真机** | 无边框 + 自绘标题栏的 Linux 表现**从未在真机跑过**；窗口按钮对接的 `WindowMinimise/WindowToggleMaximise/CloseWindow` 在 Linux 后端的行为需目视 |
 | **「最近打开」功能整体下线** | 它的唯一消费方是原生菜单的子菜单；自绘标题栏未做该入口。若要恢复，需前端加列表 + 重新暴露 Go 的 `GetRecents`（`recents.json` 持久化逻辑仍在 `app.go` 的 `recentsPath` 等函数里，但 `AddRecent` 调用点已删） |
@@ -645,7 +757,7 @@ GFM 的版本。实测同一段合法表格：默认 `markdown()` → `Document,
 | **macOS 未签名分发** | Gatekeeper 会拦，需 Apple 开发者账号（$99/年）签名+公证 |
 | **「窗口 → 缩放」** | Wails 无「适配内容尺寸」API，用最大化近似（沿用既有裁决） |
 | **关闭窗口** | Wails v2.16 **没有 `WindowClose`**，只有强制退出的 `Quit`。自建 `App.CloseWindow()`（先问 `OnBeforeClose` 再 Quit）。故 ⌘Q 之类的「退出应用」快捷键**未设**——自绘菜单里也没有「退出」项（macOS 走红绿灯，Linux 走自绘 ×） |
-| **`treeSignal` 是空转的** | 文件树的 `reload-signal` 来自 `useFileOps` 的 `treeSignal`，但 Go 侧 `WatchDir` **未在 app.go 暴露**（`window.go?.main?.App?.WatchDir?.()` 恒为 undefined），故该 ref 从不自增、目录外部变更不会自动刷新。本轮原样保留（给后续 fsnotify 接线留位），**未删**是有意为之 |
+| ✅ **`treeSignal` 空转** | **已接线（2026-10-13，第九轮）**。原记录「Go 侧 `WatchDir` 未暴露」不成立——`watcher.go` 与 `app.go` 同包，方法早已暴露、绑定在册；真正缺的是**前端没订阅 `fs:changed`**。已补：`useFileOps.js` 的 `shouldReloadTree(payload, folderPath)` 纯函数守卫（严格相等才自增）+ `window.runtime?.EventsOn?.()` 订阅 + 14 条测试（含 7 条真实驱动）。`watcher.go` 另修去抖回调陈旧 payload 缺陷（代际校验）。**待 `wails dev` 真机确认三场景**：① 目录内新建/删除文件树即时刷新；② 切文件夹后旧目录迟到事件不触发；③ 空串停止后无事件推送。遗留 advisory：去抖边界双发、`w.Errors` 静默吞掉 |
 | **无拼写检查** | 刻意不做：CM 的 lint 对 CJK 基本无效，中文场景是伪需求 |
 | **零多标签页** | ADR-005 已预留 `dirty` 升级路径 |
 | **导出模板文案** | `export/exporters.js` 的 HTML 模板未国际化（Spec §1 明确留待后续） |
@@ -741,12 +853,18 @@ than being linked (12.0)`，本机 SDK 与部署目标不一致导致，与本�
 （`SetDirty` 镜像、命令闭合）。可测的纯逻辑已具备：把「标记 → 防抖 → 落盘 → 解脏」
 抽成可注入时钟的纯函数，就能用 node:test 覆盖，而不必上浏览器。
 
-### P3 · 接上文件树的外部变更监听（`treeSignal` 现在是空转的）
-Go 侧 `WatchDir` 未暴露，`reload-signal` 恒为 0。补 fsnotify 后，
-外部改文件/重命名会即时反映到文件树；这需要在 `app.go` 加一个导出方法
-并重新生成 wailsjs 绑定（`wails generate module`）。
-注意与 §4 ⑫ 同族：前端那行 `window.go?.main?.App?.WatchDir?.()` 就算接了 Go，
-用可选链调用也会把「绑定没生成」吞成静默 no-op，接的时候一并改成具名 import。
+### P3 · 接上文件树的外部变更监听 —— **已落地（2026-10-13，第九轮）**
+
+原记录有两处不成立，如实改写：①「Go 侧 `WatchDir` 未暴露」**错**——`watcher.go`
+与 `app.go` 同属 `package main`，方法早已暴露，`wailsjs/go/main/App.js:77` 绑定
+也在册，`useFileOps.js` 也早已调用；真正缺的是**前端没订阅 `fs:changed` 事件**。
+②「接的时候一并改成具名 import」**不应采纳**——具名 import `wailsjs/runtime` 的
+`EventsOn` 会展开为 `window.runtime.EventsOnMultiple(...)` 直取，浏览器预览
+（vite dev 无 Wails runtime）下必抛；本任务用 `window.runtime?.EventsOn?.()`
+可选链兜底（与 §4 ⑫ 的判据一致：兜底只出现在已知的环境分支上）。
+已落地内容见 §2 第九轮：`shouldReloadTree` 纯函数守卫 + 订阅 + 14 条测试
+（含 7 条真实驱动）；`watcher.go` 顺带修了去抖回调陈旧 payload 缺陷。
+**剩余：`wails dev` 真机确认三场景**（§7 treeSignal 行）。
 
 ## 9. 契约文档索引
 

@@ -178,7 +178,7 @@ inkmark/
     │   └── themes/          # tokens/design-tokens.css（Token 唯一真源）+ index.css（唯一样式入口）
     │                        #   + app-shell.css / platform-darwin.css / editor-wysiwyg.css
     │                        #   + theme.js（主题解析）/ prefs.js（偏好唯一真源）
-    ├── tests/           # node:test 测试网（141 条测试 / 28 个 suite，零第三方依赖），需 Node ≥22
+    ├── tests/           # node:test 测试网（155 条测试 / 31 个 suite，零第三方依赖），需 Node ≥22
     └── wailsjs/         # Wails 自动生成的 IPC 绑定（勿手改）
 ```
 
@@ -212,7 +212,7 @@ npm install
 
 npm run dev      # 本地开发服务器
 npm run build    # 生产构建 → frontend/dist
-npm test         # 测试网（141 条测试，零第三方依赖），【需 Node ≥22】
+npm test         # 测试网（155 条测试，零第三方依赖），【需 Node ≥22】
 ```
 
 > - `npm test` 用的是 Node **内置** `node:test`（无第三方测试依赖），因此**必须 Node ≥22**；低版本会报 `node --test` 不可用。
@@ -223,7 +223,7 @@ npm test         # 测试网（141 条测试，零第三方依赖），【需 No
 ### 门禁脚本（与 CI 同口径）
 
 ```bash
-cd frontend && npm test                                    # 测试网，期望 141/141
+cd frontend && npm test                                    # 测试网，期望 155/155
 node scripts/verify/verify-shortcuts.mjs                   # 快捷键三方对齐（README ↔ 速查表 ↔ COMMANDS）
 node scripts/verify/scan-i18n-residue.mjs                  # i18n 文案残留
 ./scripts/p0-check-emoji.sh frontend/src main.go app.go    # P0 零 emoji
@@ -266,6 +266,8 @@ node scripts/probe/probe-table-hint.mjs            # 缺分隔行时表格提示
 14. **窗口形态按平台差异化**：darwin 用 `Frameless:false` + `mac.TitleBarHidden()`（隐藏长条、保留红绿灯、内容全尺寸）+ 透明 + 半透明（系统 Vibrant 毛玻璃）；Linux/Windows 用 `Frameless:true` 无边框纯净模式，标题栏与窗口按钮全自绘。一套参数走天下会同时踩「macOS 丢红绿灯」与「无边框平台不能拖」两个坑。
 15. **静默失败必须主动提示**：用户写 `| a | b |` 却没看到表格时，标准 Markdown 的行为是「当普通段落渲染、不报错」。这在本仓属于典型的静默失败（构建绿、测试绿、运行时无异常），所以额外做了状态栏常驻提示：判定复用**编辑器同一棵语法树**（顶层 `Paragraph` + 连续 ≥2 行管道行 → 判定为疑似未渲染），**常驻而非 toast**（toast 3.2 秒就消失，而这是「用户没察觉」的问题），且**只读不写文档**。注意 GFM 要求分隔行在**第 2 行**且只含 `-`/`:`，这正是用户最常踩空的规则。
 
+16. **跨层事件名是契约，必须两侧锁名 + 变异自证**：Go 侧 `EventsEmit(a.ctx, "fs:changed", root)` 与前端 `EventsOn('fs:changed', …)` 靠字符串对接，单侧改名不会报错、只会静默失效（本仓最恨的失效模式）。所以测试里有一条**跨文件集合比对契约**（两侧事件名集合必须逐字相等），且变异自证过：前端名改错 → 行为 + 契约测试双红；Go 侧名改错 → 契约测试红。同理，浏览器预览（vite dev 无 Wails runtime）下的订阅必须可选链兜底——具名 import `wailsjs/runtime` 会展开为 `window.runtime.EventsOnMultiple(...)` 直取而必抛，兜底只允许出现在**已知的环境分支**上。**降级路径的用例必须让「降级条件」成为被测代码的显式入参**（`mountOps({ installRuntime: 'no-runtime' })`），不能在用例里靠一次全局赋值当前置条件——helper 里的无条件初始化会静默覆盖它，用例就此变成恒绿的摆设（第九轮 QA 实测抓到过，见 HANDOFF §4 ⑰）。
+
 ## 已知问题与待办
 
 > 本节如实登记**未完成**与**未验证**项。原「暂无」说法已移除——README 声称无待办是失真的。
@@ -273,17 +275,17 @@ node scripts/probe/probe-table-hint.mjs            # 缺分隔行时表格提示
 | # | 项 | 状态 / 说明 |
 |---|-----|------------|
 | 1 | **Windows / Linux 无边框形态未真机验证** | 窗口形态已按平台分流，但无边框拖拽、自绘窗口按钮、关闭守卫**从未在真实 Windows / Linux 上跑过**；导出 PDF 在这些平台降级为系统打印 |
-| 2 | **真机目视清单未过** | 自动化只验到「根节点渲染 + 标题栏/编辑区已挂载 + 无异常」。标题栏拖拽、红绿灯留白、毛玻璃、斜杠面板、GFM 任务列表、代码块高亮、「插入目录」跳转等交互**全部需目视**，完整 19 项见 [`docs/HANDOFF.md`](docs/HANDOFF.md) §6 |
+| 2 | **真机目视清单未过** | 自动化只验到「根节点渲染 + 标题栏/编辑区已挂载 + 无异常」。标题栏拖拽、红绿灯留白、毛玻璃、斜杠面板、GFM 任务列表、代码块高亮、「插入目录」跳转等交互**全部需目视**，完整 22 项见 [`docs/HANDOFF.md`](docs/HANDOFF.md) §6 |
 | 3 | **macOS 透明窗口的代价** | `WebviewIsTransparent` + `WindowIsTranslucent` 在旧款 Intel Mac 上可能掉帧（透明窗口不能被合成器缓存）；本机是 macOS 12，只验到「能编译」，性能未实测 |
 | 4 | **Linux（CachyOS）真机** | 无边框 + 自绘标题栏的 Linux 表现从未在真机跑过；窗口按钮对接的 `WindowMinimise / WindowToggleMaximise / CloseWindow` 在 Linux 后端的行为需目视 |
 | 5 | **「最近打开」功能整体下线** | 它的唯一消费方是原生菜单的子菜单；自绘标题栏未做该入口。若要恢复，需前端加列表 + 重新暴露 Go 的 `GetRecents`（`recents.json` 持久化逻辑仍在 `app.go`） |
-| 6 | **文件树外部变更监听空转** | `watcher.go` 的 fsnotify 已实现，但 Go 侧 `WatchDir` **未在 app.go 暴露**，前端 `treeSignal` 从不自增、目录外部变更不会自动刷新（有意保留给后续接线） |
+| 6 | **文件树外部变更监听已接线，待真机确认** | 2026-10-13 落地：前端 `useFileOps` 订阅 `fs:changed`（payload 为根目录路径，仅当与当前 `folderPath` 严格相等才自增 `treeSignal`，`FileTree` 收信号后重拉目录）；Go 侧 `watcher.go` 另修一个真实缺陷——切换/停止文件夹时，旧监听残留的去抖定时器会把已失效目录的 `fs:changed` 推给前端（代际校验修复）。沙箱内无法验证真实 fsnotify 事件，需 `wails dev` 真机确认三场景：① 监听目录内新建/删除文件后树即时刷新；② 切到另一文件夹后旧目录的迟到事件不再触发；③ 关闭文件夹（空串）后无事件推送。另有两项已知未修：去抖边界双发（同 root 多刷一次，无正确性影响）、`w.Errors` 静默吞掉（fsnotify 内部错误时监听静默死亡，建议至少记日志） |
 | 7 | **`useOutline` 阅读态分支未目视** | `setReadingPane` 的注入已接回（曾丢失导致阅读态不高亮），但阅读态的跳转仍未目视 |
 | 8 | **`release.yml` 从未跑过** | 需 push 一个 `v*` tag 才会触发三平台打包；三平台构建的坑（Linux 的 webkit2_41 tag、macOS 签名）都还没被它验过 |
 | 9 | **检查更新** | 仓库**无任何 Release**，所以现在只会返回「无法检查更新」（不谎报「已是最新」） |
 | 10 | **macOS 未签名分发** | Gatekeeper 会拦，需 Apple 开发者账号（$99/年）签名 + 公证 |
 | 11 | **无「退出应用」快捷键** | Wails v2.16 没有 `WindowClose`，⌘Q 未设；关闭走 macOS 红绿灯 / Linux 自绘 ×（`App.CloseWindow()`） |
-| 12 | **导出产物不跟随正文字体偏好（OPEN）** | 导出 HTML / PDF 仍读主题级 `--font-body`，**不跟随**用户「正文字体」偏好。当前倾向**不跟随**（导出物是分发格式，应保持主题级稳定排版），待用户确认。见 [`docs/decisions/OPEN-DECISIONS.md`](docs/decisions/OPEN-DECISIONS.md) |
+| 12 | **导出产物不跟随正文字体偏好（已裁决）** | 2026-10-13 裁决**不跟随**：导出物是分发格式，把作者本地偏好写死进 HTML/PDF 会让排版随机器漂移；保持主题级 `--font-body` 保证任何机器导出一致。用户偏好是本地阅读体验，不是文档内容。重开条件见 [`docs/decisions/OPEN-DECISIONS.md`](docs/decisions/OPEN-DECISIONS.md) |
 | 13 | **零多标签页 / 多文档** | 当前一次只开一个文档。ADR-005 已预留 `dirty` 语义的升级路径，多文档需重新定义「关闭哪个文档」的判定 |
 | 14 | **无拼写检查（刻意不做）** | CodeMirror 的 lint 对 CJK 基本无效，中文写作场景是**伪需求**，故不引入。英文拼写需自行接第三方 lint 扩展 |
 | 15 | **导出模板文案未国际化** | `export/exporters.js` 的 HTML 模板未接 `t()`（Spec 明确留待后续） |

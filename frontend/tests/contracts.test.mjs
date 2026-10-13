@@ -27,7 +27,7 @@ import { fileURLToPath } from 'node:url'
 import { dirname, join, relative, sep } from 'node:path'
 import { execFileSync } from 'node:child_process'
 import { countTotalLines, countEffectiveLines, LINE_METRIC } from './helpers/line-metric.mjs'
-import { stripComments as stripCommentsLexer } from './helpers/lexer.mjs'
+import { stripComments } from './helpers/lexer.mjs'
 
 // ---------------------------------------------------------------------------
 // 路径解析：全部相对本文件定位，保证从任意 cwd 调用都能跑
@@ -438,89 +438,19 @@ describe('契约 2 · ⌘P 键位唯一性（已职责转移，用例移除）',
 // ===========================================================================
 
 /**
- * 剥掉 CSS/JS 注释，返回「原样长度的字符串」：
- * 注释内的字符替换为空格（保留换行以维持行号），注释外的字符原样保留。
+ * 剥注释口径的唯一真源：helpers/lexer.mjs 的 stripComments（文件顶部 import）。
  *
- * [注意] 这是缺陷 2 的修复核心。早先直接按行扫 `@media print`，
- * 于是**块注释里提到「@media print」的那一行被当成真实规则** ——
- * 实测 SettingsPanel.vue:263 就是这种情形，被误判成一个 print 块。
- * 危险场景已构造验证：把某组件的 @media print 整块删掉、只在注释里留字样，
- * 早先的判据**认为通过** → 打印时遮罩会印出来（用户才骂）。
- * 这与「shell grep 静默无输出」「unquote() 后判引号恒 false」同源：
- * *解析器把「看起来像」当成「是」*。
+ * 本文件曾有一个同名局部实现（契约 3 的打印块在用），已收敛删除。删除的理由
+ * 不是「重复代码难看」，而是**局部版是错的**：它把反引号当普通字符串、不认识
+ * 正则字面量 —— 实测 commands.js 的 `const FENCE_RE = /^\s*(```|~~~)/` 里一个
+ * 反引号就让它假言入串，其后 300+ 行的真注释全部没被剥掉，正是本仓记录过 8 次
+ * 的「匹配到注释里的代码」那族静默失效。helpers 版认识模板插值与正则字面量，
+ * 是更正确的那份（差异面实测记录见 docs/HANDOFF.md）。
+ *
+ * [保留动机] 契约 3 依赖「先剥注释再找 @media print」：注释里提到 @media print
+ * 的那一行曾被当成真实规则（SettingsPanel.vue:263 实测误判），剥注释是缺陷 2
+ * 修复的核心，口径只能有一份。
  */
-function stripComments(src) {
-  let out = ''
-  let i = 0
-  const n = src.length
-  // 状态：normal | line-comment | block-comment | in-string
-  let state = 'normal'
-  let quote = ''
-  while (i < n) {
-    const c = src[i]
-    const c2 = src.slice(i, i + 2)
-    if (state === 'normal') {
-      if (c2 === '//') {
-        out += '  '
-        i += 2
-        state = 'line-comment'
-        continue
-      }
-      if (c2 === '/*') {
-        out += '  '
-        i += 2
-        state = 'block-comment'
-        continue
-      }
-      if (c === '"' || c === "'" || c === '`') {
-        state = 'in-string'
-        quote = c
-        out += c
-        i++
-        continue
-      }
-      out += c
-      i++
-      continue
-    }
-    if (state === 'line-comment') {
-      if (c === '\n') {
-        out += '\n'
-        state = 'normal'
-      } else {
-        out += ' ' // 注释内容抹成空格，长度不变
-      }
-      i++
-      continue
-    }
-    if (state === 'block-comment') {
-      if (c2 === '*/') {
-        out += '  '
-        i += 2
-        state = 'normal'
-        continue
-      }
-      out += c === '\n' ? '\n' : ' '
-      i++
-      continue
-    }
-    // state === 'in-string'：字符串内部的注释符号不算注释
-    if (c === '\\') {
-      out += src.slice(i, i + 2)
-      i += 2
-      continue
-    }
-    if (c === quote) {
-      state = 'normal'
-      out += c
-      i++
-      continue
-    }
-    out += c
-    i++
-  }
-  return out
-}
 
 /**
  * 取出 .vue 文件里所有 @media print 块（连同所属 <style> 是否 scoped）。
@@ -1084,10 +1014,9 @@ describe('契约 5 · 行数门禁（有效代码行 ≤300）', () => {
  * 【注意】所有匹配都跑在**剥注释后的源码**上。本仓已 8 次栽在「匹配到注释里的代码」，
  * 而本条尤其致命：注释里恰恰会出现「弯引号」这个被检查的对象本身（markdown.js 的
  * typographer 注释就是活例子）。
- * 这里用的是 helpers/lexer.mjs 的版本（别名 stripCommentsLexer）—— 本文件另有一个
- * **同名局部函数**（契约 3 的打印块在用），不起别名会直接 SyntaxError 撞标识符。
- * 两者都会保留模板字面量的内容，差别在 helpers 版还认识 `${}` 里的嵌套。
- * 两份 stripComments 并存本身是债（口径应当只有一份真源），已登记进 docs/HANDOFF.md。
+ * 剥注释口径只有一份真源：helpers/lexer.mjs 的 stripComments。本文件早先另有一个
+ * 同名局部实现（契约 3 在用），已收敛删除 —— 它不认识模板插值与正则字面量，
+ * 会把 `${}` 里的注释当字符串内容保留，一见正则里的引号就假言入串、成片停剥注释。
  */
 
 /** 产出 HTML / 锚点的文件：弯引号一旦混进这些文件的代码里，就是静默失效 */
@@ -1146,7 +1075,7 @@ describe('契约 6 · embed 占位与标题锚点（第七轮两处静默缺陷�
   })
 
   test('heading_open 的 id 用 ASCII 直引号，且与 anchors 的 slug 同源', () => {
-    const code = stripCommentsLexer(markdownSrc)
+    const code = stripComments(markdownSrc)
     assert.ok(
       code.includes('id="${md._slugs.slug(text)}">'),
       'preview/markdown.js 的 heading_open 不再逐字输出 id="…slug…" 形态。' +
@@ -1154,7 +1083,7 @@ describe('契约 6 · embed 占位与标题锚点（第七轮两处静默缺陷�
         '（点了不跳、不报错）。若模板是有意的合理改动，请连同本判据一起更新，别留死规则。'
     )
     // 两侧必须共用同一个 slug 真源，否则「渲染侧」和「目录侧」会各自漂移
-    const commandsCode = stripCommentsLexer(readStable(join(REPO, 'frontend/src/editor/commands.js')))
+    const commandsCode = stripComments(readStable(join(REPO, 'frontend/src/editor/commands.js')))
     assert.ok(
       /from '\.\.\/editor\/anchors(\.js)?'/.test(markdownSrc) && /createSlugCounter/.test(markdownSrc),
       'preview/markdown.js 不再从 editor/anchors 取 createSlugCounter —— 标题 id 的生成' +
@@ -1170,7 +1099,7 @@ describe('契约 6 · embed 占位与标题锚点（第七轮两处静默缺陷�
   test('产出 HTML 的文件里，代码（剥注释后）不得出现中文弯引号', () => {
     const hits = []
     for (const p of HTML_EMITTERS) {
-      const code = stripCommentsLexer(read(join(REPO, p)))
+      const code = stripComments(read(join(REPO, p)))
       const m = code.match(/[\u201c\u201d\u2018\u2019]/g)
       if (m) hits.push(`${p}：${m.length} 处（${[...new Set(m)].join(' ')}）`)
     }
