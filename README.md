@@ -155,9 +155,10 @@ inkmark/
 │   ├── p0-check-emoji.sh        # P0-1 emoji 扫描（零容忍，CI 门禁之一）
 │   ├── smoke/render-check.mjs   # 真渲染冒烟（dev + dist 双路径）
 │   ├── probe/                   # CDP 交互探针（斜杠面板 / WYSIWYG 装饰 / 主题计算色 / 表格提示）
-│   └── verify/                  # 快捷键契约 / i18n 残留 / 图标与主题校验脚本
+│   └── verify/                  # 快捷键契约 / i18n 残留 / 目视清单同步 / 图标与主题校验脚本
 ├── docs/                # 交接说明 HANDOFF.md、架构决策（architecture/ADR-00x）、规格（spec/）、
-│                        #   悬而未决登记册（decisions/OPEN-DECISIONS.md）
+│                        #   悬而未决登记册（decisions/OPEN-DECISIONS.md）、
+│                        #   真机目视验收工具（qa/：visual-checklist.html + VERIFICATION-LOG.md）
 └── frontend/
     ├── src/
     │   ├── App.vue          # 装配层（≤150 行硬上限）：实例槽 + 依赖序装配 + 模板，逻辑全在 composables/
@@ -229,6 +230,7 @@ node scripts/verify/scan-i18n-residue.mjs                  # i18n 文案残留
 ./scripts/p0-check-emoji.sh frontend/src main.go app.go    # P0 零 emoji
 /usr/local/opt/go/bin/go vet ./...                          # Go 静态检查（注意：go 不在 PATH）
 node scripts/smoke/render-check.mjs                        # 真渲染冒烟（需先 npm run build）
+node scripts/verify/verify-visual-checklist.mjs             # 目视清单副本 ↔ HANDOFF §6 同步（退出码 1=漂移 / 2=解析失效）
 ```
 
 ### 交互探针（验「静默失败」类缺陷，render-check 覆盖不到）
@@ -275,7 +277,7 @@ node scripts/probe/probe-table-hint.mjs            # 缺分隔行时表格提示
 | # | 项 | 状态 / 说明 |
 |---|-----|------------|
 | 1 | **Windows / Linux 无边框形态未真机验证** | 窗口形态已按平台分流，但无边框拖拽、自绘窗口按钮、关闭守卫**从未在真实 Windows / Linux 上跑过**；导出 PDF 在这些平台降级为系统打印 |
-| 2 | **真机目视清单未过** | 自动化只验到「根节点渲染 + 标题栏/编辑区已挂载 + 无异常」。标题栏拖拽、红绿灯留白、毛玻璃、斜杠面板、GFM 任务列表、代码块高亮、「插入目录」跳转等交互**全部需目视**，完整 22 项见 [`docs/HANDOFF.md`](docs/HANDOFF.md) §6 |
+| 2 | **真机目视清单未过** | 自动化只验到「根节点渲染 + 标题栏/编辑区已挂载 + 无异常」。标题栏拖拽、红绿灯留白、毛玻璃、斜杠面板、GFM 任务列表、代码块高亮、「插入目录」跳转等交互**全部需目视**，完整 22 项见 [`docs/HANDOFF.md`](docs/HANDOFF.md) §6。**现在有可执行副本了**：打开 [`docs/qa/visual-checklist.html`](docs/qa/visual-checklist.html)（单文件、双击即开、零依赖）逐项勾选并导出 Markdown，追加进 [`docs/qa/VERIFICATION-LOG.md`](docs/qa/VERIFICATION-LOG.md) 留痕——清单副本与 §6 真源的编号/标题由门禁 4 第二步机检守着 |
 | 3 | **macOS 透明窗口的代价** | `WebviewIsTransparent` + `WindowIsTranslucent` 在旧款 Intel Mac 上可能掉帧（透明窗口不能被合成器缓存）；本机是 macOS 12，只验到「能编译」，性能未实测 |
 | 4 | **Linux（CachyOS）真机** | 无边框 + 自绘标题栏的 Linux 表现从未在真机跑过；窗口按钮对接的 `WindowMinimise / WindowToggleMaximise / CloseWindow` 在 Linux 后端的行为需目视 |
 | 5 | **「最近打开」功能整体下线** | 它的唯一消费方是原生菜单的子菜单；自绘标题栏未做该入口。若要恢复，需前端加列表 + 重新暴露 Go 的 `GetRecents`（`recents.json` 持久化逻辑仍在 `app.go`） |

@@ -630,14 +630,15 @@ GFM 的版本。实测同一段合法表格：默认 `markdown()` → `Document,
 
 ---
 
-## 5. 门禁体系（5 道，全在 CI）
+## 5. 门禁体系（5 个 job / 6 项检查，全在 CI）
 
 | 门禁 | 卡什么 | 命令 |
 |---|---|---|
 | `frontend` | 155 条测试 + vite 构建 | `npm test && npm run build` |
 | `go` | vet + build（vet 不做链接，cgo 导出代码要 build 才暴露） | `go vet ./... && go build -o /dev/null .` |
 | `p0-emoji` | 界面不得用 emoji 当图标（含注释） | `./scripts/p0-check-emoji.sh frontend/src main.go app.go` |
-| `docs-contract` | 键位在 README / 应用内速查表 / **`useShortcuts.js` 的 `COMMANDS`** 三处脱节 | `node scripts/verify/verify-shortcuts.mjs` |
+| `docs-contract` ① | 键位在 README / 应用内速查表 / **`useShortcuts.js` 的 `COMMANDS`** 三处脱节 | `node scripts/verify/verify-shortcuts.mjs` |
+| `docs-contract` ② | 目视清单副本（`docs/qa/visual-checklist.html`）与 **HANDOFF §6 真源**的编号/标题漂移 | `node scripts/verify/verify-visual-checklist.mjs` |
 | `i18n-residue` | 新写的用户可见文案漏了 `t()` | `node scripts/verify/scan-i18n-residue.mjs` |
 
 > `docs-contract` 的真源在 2026-10-06 已从 `main.go` 的 `buildMenu` 迁到前端命令表
@@ -645,6 +646,9 @@ GFM 的版本。实测同一段合法表格：默认 `markdown()` → `Document,
 > `useShortcuts.js`，文件名是历史遗留，别被它误导。
 > 另有**两个手动脚本不在 CI**：`scripts-verify-icons.mjs`（图标与 phaseC 规格逐字比对）、
 > `scripts-verify-theme.mjs`（theme.js 优先级自检）。
+> ⚠ `scripts-verify-icons.mjs` 内含 U+2717「✗」字形，落在 P0 emoji 正则的码点区间内。
+> 当前 emoji 门禁只扫 `frontend/src` + `main.go` + `app.go`，故它从未被扫到；**若哪天
+> 把扫描面扩到 `scripts/`，这条会立刻变红**。这是已知的（有意保留的）边界，不是待修缺陷。
 
 ### 两条关键机制
 - **行数债务棘轮**：`frontend/tests/contracts.test.mjs` 的 `LINE_EXEMPTIONS`
@@ -680,6 +684,16 @@ GFM 的版本。实测同一段合法表格：默认 `markdown()` → `Document,
 
 自动化只验到「根节点渲染 + 标题栏/编辑区已挂载 + 零异常」，**交互全没被人看过**。
 **第五轮后清单已重写**（旧的原生菜单项、视图四态相关项已随功能下线）。
+
+> **这份清单有可执行副本了（2026-10-13 新增）**：
+> 1. 打开 `docs/qa/visual-checklist.html`（单文件、双击即开、零依赖）逐项勾选，
+>    记结论（通过/不通过/不适用）与备注；平台/验证人/日期填好后**点「导出 Markdown」**。
+> 2. 把导出结果**追加**到 `docs/qa/VERIFICATION-LOG.md` 末尾（append-only，不改历史行）。
+> 3. 本节仍是**唯一真源**（「要验什么」）；HTML 是它的副本、LOG 是「验过什么」。
+>    两份副本的**编号与标题**由门禁 4 的第二步机检守着
+>    （`node scripts/verify/verify-visual-checklist.mjs`，退出码 1=漂移 / 2=解析失效不可采信）。
+> **已知边界**：守卫只比对**编号+标题**，不比对正文要点（正文允许精简，但不许改义）。
+> 清单**未做 `@media print`**（打印会带上工具栏），设计用途是屏幕并在应用旁使用。
 
 1. **macOS 窗口形态**：窗口顶部**没有**原生长条，但**红绿灯在**；标题栏整体吃系统
    毛玻璃材质（拖动标题栏空白处窗口应跟随移动）
@@ -874,7 +888,10 @@ than being linked (12.0)`，本机 SDK 与部署目标不一致导致，与本�
 | `docs/spec/SPEC-app-menu-release-v1.md` | 应用菜单 + 发布流程（含 Wails 能力边界） |
 | `docs/spec/SPEC-i18n-v1.md` | 国际化契约（三语、零依赖选型、6 条已知坑） |
 | `docs/design/settings-panel-spec.md` | 设置面板设计 + 裁决记录 R1~R4 |
-| `docs/decisions/OPEN-DECISIONS.md` | 悬而未决登记册（导出是否跟随字体偏好） |
+| `docs/decisions/OPEN-DECISIONS.md` | 悬而未决登记册（**当前 0 未决 / 1 已决**：导出不跟随字体偏好） |
+| `docs/qa/visual-checklist.html` | §6 目视清单的可执行副本（单文件、零依赖、导出 Markdown 留痕） |
+| `docs/qa/VERIFICATION-LOG.md` | append-only 验证记录：「验过什么、结论如何」（§6 是「要验什么」） |
+| `scripts/verify/verify-visual-checklist.mjs` | 上两者的编号/标题同步守卫（门禁 4 第二步） |
 | `docs/architecture/ADR-004.md` | 快捷键裁决（⌘B 归大纲、加粗用 ⌘⇧B） |
 | `docs/architecture/ADR-005` | `dirty` 语义（多文档的升级路径） |
 

@@ -1,0 +1,971 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Inkmark · 真机目视验收清单</title>
+<!--
+  Inkmark · 真机目视验收清单（单文件 · 零依赖 · 零构建）
+  ============================================================================
+  【这个文件为什么存在】
+  docs/HANDOFF.md §6「需要你人工确认的事」列出的交互项（窗口拖拽、红绿灯留白、
+  毛玻璃、斜杠面板、fsnotify 三场景……）无法进门禁，只能在真机上肉眼确认。
+  此前它们只写在文档里：验完就忘、没有痕迹，下次接手不知道哪几项验过、
+  在哪个平台验的、结论如何 —— 与「恒绿的假用例」是同一类病。
+  本文件把 §6 变成可勾选、可存档、可导出、且能被脚本守住不失真的清单。
+
+  【真源纪律】
+  本文件的清单项与编号【唯一真源 = docs/HANDOFF.md §6】。若两者不一致，
+  以 §6 为准 —— 且 scripts/verify/verify-visual-checklist.mjs 会报红拦住漂移。
+
+  【单文件约束】
+  双击用浏览器直接打开（file:// 直开）：不引 CDN、不引 npm、不 fetch、
+  无任何外部资源。所有逻辑与样式内联。
+
+  【配色 Token 来源】
+  下方 :root / 暗色块镜像自 frontend/src/themes/tokens/design-tokens.css
+  （项目色板唯一真源）。本文件是离线单文件、无法 import 应用 CSS，故按
+  「同源色值」镜像一份；除镜像块内的字面值外，其余样式一律 var(...) 引用。
+  若 design-tokens.css 变更（尤其 --accent / --bg / --fg / 语义色），此处需同步。
+-->
+<style>
+/* ==========================================================================
+   一、Token 镜像（浅色）—— 逐值抄自 design-tokens.css 的亮色主题块。
+   约束：字面色值【只允许】出现在本镜像块与暗色镜像块；
+        其余所有声明一律 var(...)。唯一例外 #fff / #000。
+   ========================================================================== */
+:root {
+  /* A1-identity */
+  --bg:            #FFFFFF;
+  --surface:       #F7F8FA;
+  --fg:            #16171D;
+  --muted:         #6B6E7A;
+  --accent:        #4F46E5;
+  --border:        #E5E6EC;
+  /* B-slot */
+  --fg-2:          #40434E;
+  --surface-warm:  #F3F4F8;
+  --meta:          #8A8D99;
+  --border-soft:   #EEEFF4;
+  /* A2-semantic */
+  --surface-2:     #EEF0F4;
+  --overlay:       rgba(22, 23, 29, 0.32);
+  --border-strong: #D3D5DE;
+  --accent-hover:  #4338CA;
+  --accent-active: #3730A3;
+  --accent-soft:   #EEEDFB;
+  --accent-on:     #FFFFFF;
+  --success: #3E7D55;  --success-soft: #E8F2EB;
+  --warn:    #AD7B15;  --warn-soft:    #F7EFDD;
+  --danger:  #B23B31;  --danger-soft:  #F8E9E7;
+  --info:    #35699B;  --info-soft:    #E8F0F7;
+  /* 结构尺度（与主题无关部分，逐值抄自 design-tokens.css §三） */
+  --text-xs:   0.75rem;
+  --text-sm:   0.8125rem;
+  --text-base: 0.9375rem;
+  --text-lg:   1.125rem;
+  --text-xl:   1.25rem;
+  --text-2xl:  1.5rem;
+  --weight-read:      400;
+  --weight-emphasize: 510;
+  --weight-announce:  590;
+  --leading-body: 1.7;
+  --leading-ui:   1.4;
+  --leading-tight: 1.3;
+  --tracking-display: -0.01em;
+  --tracking-small:    0.01em;
+  --tracking-caps:     0.06em;
+  --space-1:  4px;  --space-2:  8px;  --space-3:  12px; --space-4:  16px;
+  --space-5:  20px; --space-6:  24px; --space-8:  32px; --space-10: 40px;
+  --space-12: 48px; --space-16: 64px;
+  --radius-sm:   6px;
+  --radius-md:   8px;
+  --radius-lg:   12px;
+  --radius-pill: 9999px;
+  --elev-flat:   none;
+  --elev-ring:   0 0 0 1px var(--border);
+  --elev-raised: 0 1px 2px rgba(16, 17, 22, 0.05), 0 4px 12px rgba(16, 17, 22, 0.07);
+  --focus-ring: 0 0 0 3px color-mix(in srgb, var(--accent) 32%, transparent);
+  --motion-fast: 120ms; --motion-base: 180ms; --motion-slow: 240ms;
+  --ease-standard: cubic-bezier(0.2, 0, 0, 1);
+  --ease-out:      cubic-bezier(0.16, 1, 0.3, 1);
+  --font-ui: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", "PingFang SC", "Noto Sans SC", "Microsoft YaHei", sans-serif;
+  --font-mono: "SF Mono", "JetBrains Mono", "Fira Code", Menlo, Consolas, "Courier New", monospace;
+}
+
+/* ==========================================================================
+   一·B、Token 镜像（暗色）—— 逐值抄自 design-tokens.css 的 :root[data-theme='dark']。
+   本文件是独立文档，用 prefers-color-scheme 触发（应用内是 data-theme 切换）。
+   ========================================================================== */
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg:            #14151A;
+    --surface:       #101116;
+    --fg:            #E7E8ED;
+    --muted:         #8A8D99;
+    --accent:        #6E76F0;
+    --border:        #2A2C34;
+    --fg-2:          #B4B7C2;
+    --surface-warm:  #1C1E25;
+    --meta:          #6A6D78;
+    --border-soft:   #20222A;
+    --surface-2:     #21232B;
+    --overlay:       rgba(0, 0, 0, 0.55);
+    --border-strong: #3A3D47;
+    --accent-hover:  #8A91F5;
+    --accent-active: #9AA0F7;
+    --accent-soft:   #1E2040;
+    --accent-on:     #0B0C10;
+    --success: #5FAE7E;  --success-soft: #1E2A22;
+    --warn:    #D3A94E;  --warn-soft:    #2E2618;
+    --danger:  #DF7268;  --danger-soft:  #2E1E1C;
+    --info:    #7BA8D6;  --info-soft:    #1C2530;
+    --elev-raised: 0 1px 2px rgba(0, 0, 0, 0.35), 0 6px 18px rgba(0, 0, 0, 0.45);
+  }
+}
+
+/* ==========================================================================
+   二、基础
+   ========================================================================== */
+* { box-sizing: border-box; }
+
+html { color-scheme: light dark; }
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--fg);
+  font-family: var(--font-ui);
+  font-size: var(--text-base);
+  line-height: var(--leading-body);
+  letter-spacing: 0;
+}
+
+code, .mono { font-family: var(--font-mono); font-size: 0.92em; }
+
+code {
+  background: var(--surface-2);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-sm);
+  padding: 0.05em 0.35em;
+}
+
+.wrap {
+  max-width: 960px;
+  margin: 0 auto;
+  padding: var(--space-8) var(--space-5) var(--space-16);
+}
+
+a { color: var(--accent); }
+
+/* ---- 焦点可见（键盘可达） ---- */
+:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+  border-radius: var(--radius-sm);
+}
+
+/* ==========================================================================
+   三、页头与真源提示
+   ========================================================================== */
+.page-head h1 {
+  margin: 0 0 var(--space-1);
+  font-size: var(--text-2xl);
+  font-weight: var(--weight-announce);
+  letter-spacing: var(--tracking-display);
+  line-height: var(--leading-tight);
+}
+.page-head .sub {
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--text-sm);
+}
+
+.source-note {
+  margin: var(--space-5) 0 0;
+  padding: var(--space-3) var(--space-4);
+  background: var(--surface-warm);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  font-size: var(--text-sm);
+  color: var(--fg-2);
+}
+.source-note strong { color: var(--fg); font-weight: var(--weight-emphasize); }
+
+/* ==========================================================================
+   四、元信息面板（平台 / 验证人 / 日期）
+   ========================================================================== */
+.meta {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: var(--space-4);
+  margin: var(--space-6) 0 0;
+  padding: var(--space-5);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+}
+.field { display: flex; flex-direction: column; gap: var(--space-1); }
+.field > label {
+  font-size: var(--text-xs);
+  letter-spacing: var(--tracking-caps);
+  text-transform: uppercase;
+  color: var(--meta);
+  font-weight: var(--weight-emphasize);
+}
+.field select,
+.field input {
+  width: 100%;
+  min-height: 40px;
+  padding: var(--space-2) var(--space-3);
+  background: var(--bg);
+  color: var(--fg);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  font: inherit;
+  font-size: var(--text-sm);
+}
+.field select:hover, .field input:hover { border-color: var(--muted); }
+
+/* ==========================================================================
+   五、进度
+   ========================================================================== */
+.progress-block { margin: var(--space-6) 0 0; }
+.progress-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: var(--space-3);
+  margin-bottom: var(--space-2);
+}
+.progress-top .count { font-weight: var(--weight-emphasize); }
+.progress-top .count .num { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+.progress-top .breakdown { color: var(--muted); font-size: var(--text-sm); }
+.progress-track {
+  height: 8px;
+  background: var(--surface-2);
+  border-radius: var(--radius-pill);
+  overflow: hidden;
+}
+.progress-fill {
+  height: 100%;
+  width: 0;
+  background: var(--accent);
+  border-radius: var(--radius-pill);
+  transition: width var(--motion-base) var(--ease-out);
+}
+
+/* ==========================================================================
+   六、工具栏
+   ========================================================================== */
+.toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin: var(--space-5) 0 0;
+}
+button {
+  font: inherit;
+  font-size: var(--text-sm);
+  font-weight: var(--weight-emphasize);
+  min-height: 40px;
+  padding: var(--space-2) var(--space-4);
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-strong);
+  background: var(--surface);
+  color: var(--fg);
+  cursor: pointer;
+  transition: background-color var(--motion-fast) var(--ease-standard),
+              border-color var(--motion-fast) var(--ease-standard),
+              color var(--motion-fast) var(--ease-standard);
+}
+button:hover { background: var(--surface-2); border-color: var(--muted); }
+button:active { transform: translateY(0); background: var(--surface-warm); }
+button.primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-on);
+}
+button.primary:hover { background: var(--accent-hover); border-color: var(--accent-hover); }
+button.primary:active { background: var(--accent-active); border-color: var(--accent-active); }
+button.danger { color: var(--danger); border-color: var(--border-strong); }
+button.danger:hover { background: var(--danger-soft); border-color: var(--danger); }
+
+/* ==========================================================================
+   七、清单分组与条目
+   ========================================================================== */
+.group { margin: var(--space-10) 0 0; }
+.group-head {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-3);
+  margin: 0 0 var(--space-3);
+  padding-bottom: var(--space-2);
+  border-bottom: 1px solid var(--border);
+}
+.group-head h2 {
+  margin: 0;
+  font-size: var(--text-lg);
+  font-weight: var(--weight-announce);
+  letter-spacing: var(--tracking-display);
+}
+.group-head .group-meta { color: var(--meta); font-size: var(--text-sm); }
+
+.list { list-style: none; margin: 0; padding: 0; }
+.item {
+  padding: var(--space-4) 0;
+  border-bottom: 1px solid var(--border-soft);
+}
+.item:last-child { border-bottom: none; }
+
+.item-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+}
+.item-check {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  cursor: pointer;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.item-check input[type="checkbox"] {
+  width: 18px;
+  height: 18px;
+  flex: none;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+.item-num {
+  flex: none;
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: var(--text-sm);
+  color: var(--meta);
+  min-width: 2ch;
+  text-align: right;
+}
+.item-title {
+  font-weight: var(--weight-emphasize);
+  font-size: var(--text-base);
+}
+.item.checked .item-title { color: var(--success); }
+
+.item .conclusion {
+  flex: none;
+  min-height: 36px;
+  padding: var(--space-1) var(--space-2);
+  font: inherit;
+  font-size: var(--text-sm);
+  background: var(--bg);
+  color: var(--fg-2);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+}
+.conclusion[data-state="pass"]   { color: var(--success); border-color: var(--success); }
+.conclusion[data-state="fail"]   { color: var(--danger);  border-color: var(--danger); }
+.conclusion[data-state="na"]     { color: var(--muted); }
+
+.item-detail {
+  margin: var(--space-2) 0 0;
+  color: var(--fg-2);
+  font-size: var(--text-sm);
+  line-height: var(--leading-body);
+}
+.item-detail strong { color: var(--fg); font-weight: var(--weight-emphasize); }
+
+.item-note {
+  margin-top: var(--space-2);
+  width: 100%;
+  min-height: 38px;
+  padding: var(--space-2) var(--space-3);
+  background: var(--bg);
+  color: var(--fg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  font: inherit;
+  font-size: var(--text-sm);
+}
+.item-note::placeholder { color: var(--meta); }
+.item-note:hover { border-color: var(--border-strong); }
+
+/* ==========================================================================
+   八、导出区
+   ========================================================================== */
+.export { margin: var(--space-10) 0 0; }
+.export summary {
+  cursor: pointer;
+  font-weight: var(--weight-emphasize);
+  font-size: var(--text-base);
+  padding: var(--space-3) 0;
+}
+.export textarea {
+  width: 100%;
+  min-height: 300px;
+  margin-top: var(--space-3);
+  padding: var(--space-4);
+  background: var(--surface-warm);
+  color: var(--fg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  line-height: var(--leading-body);
+  resize: vertical;
+  white-space: pre;
+}
+
+footer.foot {
+  margin: var(--space-10) 0 0;
+  padding-top: var(--space-5);
+  border-top: 1px solid var(--border);
+  color: var(--meta);
+  font-size: var(--text-sm);
+}
+
+.toast {
+  position: fixed;
+  left: 50%;
+  bottom: var(--space-6);
+  transform: translateX(-50%);
+  background: var(--fg);
+  color: var(--bg);
+  padding: var(--space-2) var(--space-4);
+  border-radius: var(--radius-pill);
+  font-size: var(--text-sm);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity var(--motion-base) var(--ease-out);
+}
+.toast.show { opacity: 1; }
+
+/* ---- 尊重减少动效偏好 ---- */
+@media (prefers-reduced-motion: reduce) {
+  * { transition-duration: 1ms !important; }
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header class="page-head">
+    <h1>Inkmark · 真机目视验收清单</h1>
+    <p class="sub">用于登记 §6 各项交互在真机上的目视结论，避免「验完就忘、无痕可查」。</p>
+    <p class="source-note" role="note">
+      <strong>真源：</strong>本清单的条目与编号以 <code>docs/HANDOFF.md</code> §6
+      「需要你人工确认的事」为准；若本文件与 §6 不一致，<strong>以 §6 为准</strong>。
+      两者的一致性由 <code>scripts/verify/verify-visual-checklist.mjs</code> 守住（漂移即报红）。
+    </p>
+  </header>
+
+  <section class="meta" aria-label="验收元信息">
+    <div class="field">
+      <label for="platform">平台</label>
+      <select id="platform" aria-label="验收所在平台">
+        <option value="">未选择</option>
+        <option value="macOS">macOS</option>
+        <option value="Linux">Linux</option>
+        <option value="Windows">Windows</option>
+      </select>
+    </div>
+    <div class="field">
+      <label for="verifier">验证人</label>
+      <input id="verifier" type="text" placeholder="你的名字 / 代号" aria-label="验证人" autocomplete="off">
+    </div>
+    <div class="field">
+      <label for="date">日期</label>
+      <input id="date" type="date" aria-label="验证日期">
+    </div>
+  </section>
+
+  <section class="progress-block" aria-label="验收进度">
+    <div class="progress-top">
+      <span class="count">已验 <span class="num" id="done-count">0</span> / <span class="num" id="total-count">0</span></span>
+      <span class="breakdown" id="breakdown" aria-live="polite"></span>
+    </div>
+    <div class="progress-track" role="progressbar" aria-label="已验条目占比"
+         aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" id="progressbar">
+      <div class="progress-fill" id="progress-fill"></div>
+    </div>
+  </section>
+
+  <div class="toolbar" role="group" aria-label="清单操作">
+    <button type="button" class="primary" id="btn-export">生成导出 Markdown</button>
+    <button type="button" id="btn-copy">复制到剪贴板</button>
+    <button type="button" id="btn-download">下载 .md</button>
+    <button type="button" class="danger" id="btn-clear">清空全部</button>
+  </div>
+
+  <main id="groups" aria-label="验收清单"></main>
+
+  <details class="export">
+    <summary>导出结果（可粘贴回仓库 / 追加到 docs/qa/VERIFICATION-LOG.md）</summary>
+    <textarea id="export-out" readonly aria-label="导出的 Markdown 结果"
+      placeholder="点上方「生成导出 Markdown」后，这里会显示可直接粘贴的结果。"></textarea>
+  </details>
+
+  <footer class="foot">
+    <p>本文件为离线单文件（无外部依赖、无网络请求）。数据保存在浏览器 localStorage，刷新不丢。</p>
+    <p>追加式验证记录见 <code>docs/qa/VERIFICATION-LOG.md</code>（只追加，不改历史行）。</p>
+  </footer>
+</div>
+
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+<!--
+  ============================================================================
+  清单数据（唯一真源快照 = docs/HANDOFF.md §6）
+  ----------------------------------------------------------------------------
+  以 JSON 内嵌（type="application/json"，浏览器不会执行、file:// 下可直接读
+  textContent，无需 fetch）。scripts/verify/verify-visual-checklist.mjs 比对的就是
+  这里的 { n, title } 集合与 HANDOFF §6 的集合。改此处必须同步 §6，反之亦然。
+  detail 为纯文本，用 **粗体** 与 `行内代码` 两种标记，由渲染器安全转义后再解析。
+  ============================================================================
+-->
+<script type="application/json" id="inkmark-checklist-source">
+[
+  { "n": 1, "group": "基础清单（第五轮后重写）", "title": "macOS 窗口形态",
+    "detail": "窗口顶部**没有**原生长条，但**红绿灯在**；标题栏整体吃系统毛玻璃材质（拖动标题栏空白处窗口应跟随移动）。" },
+  { "n": 2, "group": "基础清单（第五轮后重写）", "title": "macOS 红绿灯留白",
+    "detail": "自绘菜单（「文件 / 编辑 / 格式 / 视图 / 窗口 / 帮助」）整体右移约 70px，**不被红绿灯压住**；右侧**不应**出现自绘窗口按钮。" },
+  { "n": 3, "group": "基础清单（第五轮后重写）", "title": "Linux / Windows 窗口形态",
+    "detail": "无边框；右侧有最小化/最大化/关闭三按钮；按住标题栏空白处可拖动窗口（`--wails-draggable`）。" },
+  { "n": 4, "group": "基础清单（第五轮后重写）", "title": "关闭守卫",
+    "detail": "两个入口都要试：macOS 点红绿灯 / Linux 点自绘 ×；文档有未保存更改时应弹**系统**确认框，选「取消」则窗口不关。" },
+  { "n": 5, "group": "基础清单（第五轮后重写）", "title": "菜单",
+    "detail": "逐个展开；点菜单项生效；**点菜单外部自动关闭**；悬停另一项切换。" },
+  { "n": 6, "group": "基础清单（第五轮后重写）", "title": "脏状态圆点",
+    "detail": "改动文档后标题栏文件名左侧出现红点；⌘S 保存后消失；鼠标悬停红点的 title 应显示「未保存的更改」（不是 key 原文）。" },
+  { "n": 7, "group": "基础清单（第五轮后重写）", "title": "斜杠命令面板",
+    "detail": "**新行行首**输入 `/`，面板在光标下方弹出；`↑↓` 切换、`Enter` 插入（**斜杠不残留**）、`Esc` 关闭；行中输入 `/` 应正常打出斜杠。" },
+  { "n": 8, "group": "基础清单（第五轮后重写）", "title": "图片粘贴",
+    "detail": "复制一张图片后 `⌘V`，应在光标处插入 `![](assets/...)`，且**同级目录出现 assets/**；文档未落盘时应提示「先保存」而不是静默失败。" },
+  { "n": 9, "group": "基础清单（第五轮后重写）", "title": "快捷键速查",
+    "detail": "`⌘/` 打开后**表格有内容**（第五轮修掉的空表回归项）。" },
+  { "n": 10, "group": "基础清单（第五轮后重写）", "title": "阅读态大纲",
+    "detail": "`view.outline` 切到阅读态后点大纲条目应能跳转（第五轮修回的 `setReadingPane` 注入）。" },
+  { "n": 11, "group": "基础清单（第五轮后重写）", "title": "缩放",
+    "detail": "⌘= / ⌘- / ⌘0，状态栏与正文字号同步变化。" },
+  { "n": 12, "group": "基础清单（第五轮后重写）", "title": "三语切换",
+    "detail": "设置 → 外观 → 语言，界面与标题栏菜单同步变、刷新后保持。" },
+  { "n": 13, "group": "基础清单（第五轮后重写）", "title": "打印",
+    "detail": "⌘P 只输出正文，无标题栏/侧栏/状态栏/弹层遮罩。" },
+  { "n": 14, "group": "基础清单（第五轮后重写）", "title": "主题",
+    "detail": "⇧⌘L 循环（浅 → 深 → 纸感），三套都正常。" },
+  { "n": 15, "group": "第七轮新增的回归项（2026-10-07）", "title": "无边框平台拖窗口",
+    "detail": "（Linux/Windows）按住标题栏**空白处**（菜单之间、菜单与文件名之间）应能拖动；点菜单按钮/窗口按钮**不应**带着窗口移动。`f1343eb` 修的正是「容器级 no-drag 把空白区也变成非拖动区」，改法脆弱，以后往标题栏加元素时须给新元素逐个补 `no-drag`（见 §4 ⑩）。" },
+  { "n": 16, "group": "第七轮新增的回归项（2026-10-07）", "title": "代码块高亮",
+    "detail": "编辑区里写一个 `java` 围栏代码块，关键字必须**有颜色**，且与预览区同一套色板（`--hl-*`）。`f1343eb` 之前是全程纯文本，属静默失败。" },
+  { "n": 17, "group": "第七轮新增的回归项（2026-10-07）", "title": "Linux 关闭按钮",
+    "detail": "自绘 × 必须真的关闭窗口（`793838e` 从可选链改成具名 import）。" },
+  { "n": 18, "group": "第七轮新增的回归项（2026-10-07）", "title": "「插入目录」跳转",
+    "detail": "菜单「格式 ▸ 插入 ▸ 目录」生成 TOC 后，在阅读态点条目应跳到对应标题。2026-10-11 修掉了锚点引号污染（§8），逻辑层已用渲染比对验过，真机点按仍需目视一次。" },
+  { "n": 19, "group": "第七轮新增的回归项（2026-10-07）", "title": "GFM 任务列表",
+    "detail": "`- [ ]` / `- [x]` 在阅读态应渲染成勾选框（`1b645ee` 新接的 `markdown-it-task-lists`）；编辑区的 WYSIWYG 装饰已有，两边别只验一边。" },
+  { "n": 20, "group": "第八轮新增（2026-10-12）", "title": "表格未渲染提示",
+    "detail": "（CDP 探针已 9/9 通过，但仍需目视一次）敲入 `| a | b |` 回车 `| c | d |`，状态栏左侧应常驻橙色提示并带行号；在**第 2 行**补上 `| --- | --- |` 后提示立刻消失。眼睛要看的是**提示的可读性与位置**（会不会被右侧行/列信息挤掉、长文案会不会溢出），这些探针验不了。" },
+  { "n": 21, "group": "第八轮新增（2026-10-12）", "title": "提示的误报体感",
+    "detail": "连续写管道表格期间提示常驻是否显得吵？判定规则是「顶层段落 + 连续 ≥2 行管道行」，若发现写作时莫名被提示，把这条报回来。" },
+  { "n": 22, "group": "第九轮新增（2026-10-13）", "title": "文件树外部变更监听",
+    "detail": "（fsnotify，沙箱内无法验证，`wails dev` 真机确认）① 打开一个文件夹，在**外部**（Finder / 终端）往里新建或删除一个文件，文件树应在约 250ms 去抖后自动刷新；② 切到另一个文件夹后往**旧**文件夹扔文件，树**不应**刷新（代际校验 + 前端相等守卫双防线，验的就是这个）；③ 关闭文件夹（打开空文档）后往原目录扔文件，无任何刷新。已知未修项不影响验收：去抖边界双发（同 root 多刷一次）、fsnotify 内部错误时监听静默死亡（`w.Errors` 被吞，建议后续至少记日志）。" }
+]
+</script>
+
+<script>
+/* ==========================================================================
+   清单渲染与交互（原生 JS，无依赖）
+   ========================================================================== */
+(function () {
+  'use strict';
+
+  var STORAGE_KEY = 'inkmark-visual-checklist-v1';
+  var CONCLUSIONS = [
+    { value: '未验',   state: 'todo' },
+    { value: '通过',   state: 'pass' },
+    { value: '不通过', state: 'fail' },
+    { value: '不适用', state: 'na' }
+  ];
+
+  /* ---- 读取内嵌清单数据（真源快照） ---- */
+  var sourceEl = document.getElementById('inkmark-checklist-source');
+  var CHECKLIST = JSON.parse(sourceEl.textContent);
+
+  /* ---- 状态 ---- */
+  var state = loadState();
+
+  function todayLocal() {
+    // 取本地时间组装 YYYY-MM-DD，避免 toISOString() 的 UTC 时差把日期拨错一天
+    var d = new Date();
+    var mm = String(d.getMonth() + 1).padStart(2, '0');
+    var dd = String(d.getDate()).padStart(2, '0');
+    return d.getFullYear() + '-' + mm + '-' + dd;
+  }
+
+  function defaultItem() { return { conclusion: '未验', note: '' }; }
+
+  // 无论有没有存档，items 都必须覆盖清单里【全部】编号：
+  // 交互处理器与导出都直接读 state.items[n]（不做空值兜底），
+  // 若这里漏建条目，首次点击就会 TypeError —— 故归一化只在一个地方做。
+  function normalizeItems(prevItems) {
+    var items = {};
+    CHECKLIST.forEach(function (it) {
+      var prev = prevItems && prevItems[String(it.n)];
+      items[String(it.n)] = {
+        conclusion: prev && isConclusion(prev.conclusion) ? prev.conclusion : '未验',
+        note: prev && typeof prev.note === 'string' ? prev.note : ''
+      };
+    });
+    return items;
+  }
+
+  function loadState() {
+    var raw = null;
+    try { raw = localStorage.getItem(STORAGE_KEY); } catch (e) { raw = null; }
+    var parsed = null;
+    if (raw) {
+      try { parsed = JSON.parse(raw); } catch (e) { parsed = null; }
+    }
+    var p = parsed && typeof parsed === 'object' ? parsed : {};
+    // 存档损坏（parsed 为空）时不静默清空用户已填的备注以外内容之外的东西——
+    // 这里只是退回默认态；用户仍可自行「清空全部」，且损坏已被 console 记录。
+    if (raw && !parsed) console.warn('存档解析失败，退回默认态。');
+    return {
+      platform: typeof p.platform === 'string' ? p.platform : '',
+      verifier: typeof p.verifier === 'string' ? p.verifier : '',
+      date: typeof p.date === 'string' && p.date ? p.date : todayLocal(),
+      items: normalizeItems(p.items)
+    };
+  }
+
+  function isConclusion(v) {
+    return CONCLUSIONS.some(function (c) { return c.value === v; });
+  }
+
+  function saveState() {
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+    } catch (e) {
+      console.warn('写入 localStorage 失败（可能被隐私模式禁用）：', e);
+    }
+  }
+
+  /* ---- 转义 + 行内标记（**粗体** / `代码`）---- */
+  function escapeHtml(s) {
+    return String(s)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
+  }
+  function inline(s) {
+    // 先转义，再安全地还原受控标记（内容为静态真源快照，非用户输入）
+    return escapeHtml(s)
+      .replace(/`([^`]+)`/g, '<code>$1</code>')
+      .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+  }
+
+  function stateOf(conclusion) {
+    var found = CONCLUSIONS.find(function (c) { return c.value === conclusion; });
+    return found ? found.state : 'todo';
+  }
+
+  /* ---- 渲染清单 ---- */
+  var groupsEl = document.getElementById('groups');
+  var itemEls = {}; // n -> { li, checkbox, select, note, titleEl }
+
+  function render() {
+    var groups = [];
+    var seen = {};
+    CHECKLIST.forEach(function (it) {
+      if (!seen[it.group]) { seen[it.group] = true; groups.push(it.group); }
+    });
+
+    groups.forEach(function (g, gi) {
+      var members = CHECKLIST.filter(function (it) { return it.group === g; });
+      var section = document.createElement('section');
+      section.className = 'group';
+      section.setAttribute('aria-label', g);
+
+      var head = document.createElement('div');
+      head.className = 'group-head';
+      var h2 = document.createElement('h2');
+      h2.textContent = g;
+      var meta = document.createElement('span');
+      meta.className = 'group-meta';
+      meta.textContent = members.length + ' 项';
+      head.appendChild(h2);
+      head.appendChild(meta);
+      section.appendChild(head);
+
+      var ul = document.createElement('ul');
+      ul.className = 'list';
+
+      members.forEach(function (it) {
+        var li = document.createElement('li');
+        li.className = 'item';
+        li.dataset.n = String(it.n);
+
+        var rec = state.items[String(it.n)] || defaultItem();
+
+        var headRow = document.createElement('div');
+        headRow.className = 'item-head';
+
+        var label = document.createElement('label');
+        label.className = 'item-check';
+        var cb = document.createElement('input');
+        cb.type = 'checkbox';
+        cb.checked = rec.conclusion === '通过';
+        cb.setAttribute('aria-label', '第 ' + it.n + ' 项通过');
+        var num = document.createElement('span');
+        num.className = 'item-num';
+        num.textContent = String(it.n);
+        var title = document.createElement('span');
+        title.className = 'item-title';
+        title.textContent = it.title;
+        label.appendChild(cb);
+        label.appendChild(num);
+        label.appendChild(title);
+
+        var select = document.createElement('select');
+        select.className = 'conclusion';
+        select.setAttribute('aria-label', '第 ' + it.n + ' 项结论');
+        CONCLUSIONS.forEach(function (c) {
+          var opt = document.createElement('option');
+          opt.value = c.value;
+          opt.textContent = c.value;
+          select.appendChild(opt);
+        });
+        select.value = rec.conclusion;
+        select.dataset.state = stateOf(rec.conclusion);
+
+        headRow.appendChild(label);
+        headRow.appendChild(select);
+        li.appendChild(headRow);
+
+        var detail = document.createElement('p');
+        detail.className = 'item-detail';
+        detail.innerHTML = inline(it.detail);
+        li.appendChild(detail);
+
+        var note = document.createElement('input');
+        note.type = 'text';
+        note.className = 'item-note';
+        note.value = rec.note;
+        note.placeholder = '备注（可选）：现象 / 复现条件 / 结论依据';
+        note.setAttribute('aria-label', '第 ' + it.n + ' 项备注');
+        li.appendChild(note);
+
+        itemEls[it.n] = { li: li, checkbox: cb, select: select, note: note };
+        ul.appendChild(li);
+      });
+
+      section.appendChild(ul);
+      groupsEl.appendChild(section);
+    });
+
+    document.getElementById('total-count').textContent = String(CHECKLIST.length);
+  }
+
+  /* ---- 同步单条到状态 + 视图 ---- */
+  function setConclusion(n, value, source) {
+    var rec = state.items[String(n)];
+    rec.conclusion = value;
+    saveState();
+    var els = itemEls[n];
+    if (!els) return;
+    els.select.value = value;
+    els.select.dataset.state = stateOf(value);
+    if (source !== 'checkbox') els.checkbox.checked = value === '通过';
+    els.li.classList.toggle('checked', value === '通过');
+    updateProgress();
+  }
+
+  /* ---- 进度 ---- */
+  function updateProgress() {
+    var total = CHECKLIST.length;
+    var done = 0, pass = 0, fail = 0, na = 0;
+    CHECKLIST.forEach(function (it) {
+      var c = state.items[String(it.n)].conclusion;
+      if (c === '通过') { done++; pass++; }
+      else if (c === '不通过') { done++; fail++; }
+      else if (c === '不适用') { done++; na++; }
+    });
+    var pct = total ? Math.round((done / total) * 100) : 0;
+
+    document.getElementById('done-count').textContent = String(done);
+    document.getElementById('breakdown').textContent =
+      '通过 ' + pass + ' · 不通过 ' + fail + ' · 不适用 ' + na;
+    var bar = document.getElementById('progress-fill');
+    bar.style.width = pct + '%';
+    var track = document.getElementById('progressbar');
+    track.setAttribute('aria-valuenow', String(pct));
+  }
+
+  /* ---- 事件接线 ---- */
+  function wire() {
+    Object.keys(itemEls).forEach(function (nKey) {
+      var n = Number(nKey);
+      var els = itemEls[nKey];
+
+      els.checkbox.addEventListener('change', function () {
+        setConclusion(n, els.checkbox.checked ? '通过' : '未验', 'checkbox');
+      });
+      els.select.addEventListener('change', function () {
+        setConclusion(n, els.select.value, 'select');
+      });
+      els.note.addEventListener('input', function () {
+        state.items[String(n)].note = els.note.value;
+        saveState();
+      });
+    });
+
+    var platformEl = document.getElementById('platform');
+    var verifierEl = document.getElementById('verifier');
+    var dateEl = document.getElementById('date');
+    platformEl.value = state.platform;
+    verifierEl.value = state.verifier;
+    dateEl.value = state.date;
+
+    platformEl.addEventListener('change', function () { state.platform = platformEl.value; saveState(); });
+    verifierEl.addEventListener('input', function () { state.verifier = verifierEl.value; saveState(); });
+    dateEl.addEventListener('change', function () { state.date = dateEl.value; saveState(); });
+
+    document.getElementById('btn-export').addEventListener('click', exportMarkdown);
+    document.getElementById('btn-copy').addEventListener('click', copyMarkdown);
+    document.getElementById('btn-download').addEventListener('click', downloadMarkdown);
+    document.getElementById('btn-clear').addEventListener('click', clearAll);
+  }
+
+  /* ---- 导出 Markdown ---- */
+  function buildMarkdown() {
+    var total = CHECKLIST.length;
+    var done = 0, pass = 0, fail = 0, na = 0;
+    CHECKLIST.forEach(function (it) {
+      var c = state.items[String(it.n)].conclusion;
+      if (c === '通过') { done++; pass++; }
+      else if (c === '不通过') { done++; fail++; }
+      else if (c === '不适用') { done++; na++; }
+    });
+
+    var lines = [];
+    lines.push('## 真机目视验收记录');
+    lines.push('');
+    lines.push('- 平台：' + (state.platform || '（未选择）'));
+    lines.push('- 验证人：' + (state.verifier || '（未填）'));
+    lines.push('- 日期：' + (state.date || '（未填）'));
+    lines.push('- 汇总：已验 ' + done + ' / ' + total +
+      '（通过 ' + pass + ' / 不通过 ' + fail + ' / 不适用 ' + na + '）');
+    lines.push('');
+    lines.push('| 编号 | 项 | 结论 | 备注 |');
+    lines.push('|---|---|---|---|');
+    CHECKLIST.forEach(function (it) {
+      var rec = state.items[String(it.n)];
+      var note = (rec.note || '').replace(/\|/g, '\\|').replace(/\n/g, ' ');
+      lines.push('| ' + it.n + ' | ' + it.title + ' | ' + rec.conclusion + ' | ' + note + ' |');
+    });
+    lines.push('');
+    lines.push('> 清单项与编号以 `docs/HANDOFF.md` §6 为准；本记录由 `docs/qa/visual-checklist.html` 导出，' +
+      '追加到 `docs/qa/VERIFICATION-LOG.md` 末尾（只追加，不改历史行）。');
+    return lines.join('\n');
+  }
+
+  function exportMarkdown() {
+    var out = document.getElementById('export-out');
+    var details = document.querySelector('.export');
+    out.value = buildMarkdown();
+    details.open = true;
+    out.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    toast('已生成导出 Markdown');
+  }
+
+  function copyMarkdown() {
+    var out = document.getElementById('export-out');
+    if (!out.value) out.value = buildMarkdown();
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      // file:// 下 clipboard API 可能不存在或被拒；失败时退回 execCommand 路径
+      navigator.clipboard.writeText(out.value).then(
+        function () { toast('已复制到剪贴板'); },
+        function () { legacyCopy(out); }
+      );
+    } else {
+      legacyCopy(out);
+    }
+  }
+
+  function legacyCopy(textarea) {
+    textarea.removeAttribute('readonly');
+    textarea.select();
+    try {
+      var ok = document.execCommand('copy');
+      toast(ok ? '已复制到剪贴板' : '复制失败，请手动选中复制');
+    } catch (e) {
+      toast('复制失败，请手动选中复制');
+    }
+    textarea.setAttribute('readonly', 'readonly');
+    window.getSelection().removeAllRanges();
+  }
+
+  function downloadMarkdown() {
+    var content = document.getElementById('export-out').value || buildMarkdown();
+    var stamp = (state.date || todayLocal());
+    var blob = new Blob([content], { type: 'text/markdown;charset=utf-8' });
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement('a');
+    a.href = url;
+    a.download = 'inkmark-visual-verification-' + stamp + '.md';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    setTimeout(function () { URL.revokeObjectURL(url); }, 1000);
+    toast('已下载 .md');
+  }
+
+  function clearAll() {
+    if (!window.confirm('确定清空全部记录吗？平台 / 验证人 / 日期 / 所有勾选与备注都会丢失，且不可撤销。')) return;
+    try { localStorage.removeItem(STORAGE_KEY); } catch (e) { /* 忽略 */ }
+    state = { platform: '', verifier: '', date: todayLocal(), items: {} };
+    CHECKLIST.forEach(function (it) { state.items[String(it.n)] = defaultItem(); });
+    saveState();
+
+    // 复位界面
+    document.getElementById('platform').value = '';
+    document.getElementById('verifier').value = '';
+    document.getElementById('date').value = state.date;
+    Object.keys(itemEls).forEach(function (nKey) {
+      var els = itemEls[nKey];
+      els.checkbox.checked = false;
+      els.select.value = '未验';
+      els.select.dataset.state = 'todo';
+      els.note.value = '';
+      els.li.classList.remove('checked');
+    });
+    document.getElementById('export-out').value = '';
+    updateProgress();
+    toast('已清空');
+  }
+
+  var toastTimer = null;
+  function toast(msg) {
+    var el = document.getElementById('toast');
+    el.textContent = msg;
+    el.classList.add('show');
+    if (toastTimer) clearTimeout(toastTimer);
+    toastTimer = setTimeout(function () { el.classList.remove('show'); }, 2200);
+  }
+
+  /* ---- 启动 ---- */
+  render();
+  wire();
+  Object.keys(itemEls).forEach(function (n) {
+    var rec = state.items[n];
+    itemEls[n].li.classList.toggle('checked', rec.conclusion === '通过');
+  });
+  updateProgress();
+})();
+</script>
+</body>
+</html>
