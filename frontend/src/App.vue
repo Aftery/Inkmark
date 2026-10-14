@@ -40,7 +40,7 @@ const { toast, showToast } = useToast()
 const workspace = useWorkspace({ getEditor, notify: showToast })
 const outline = ref([])
 const outlineSync = useOutline({
-  getEditor, viewMode: workspace.viewMode, sidebarOpen: workspace.sidebarOpen, outline,
+  getEditor, sidebarOpen: workspace.sidebarOpen, outline,
 })
 // 【顶层解包】Vue 只解包顶层 ref；composables 实例是普通对象，字段读 .value 无响应性
 const { outlineActive } = outlineSync, { zoom } = prefs
@@ -51,7 +51,7 @@ const session = useEditorSession({
   typewriterOn: workspace.typewriterOn, onEditorReady: () => prefs.syncZoomToEditor(),
 })
 const { editorEl, slashRef, filePath, folderPath, title, caret, wordCount, previewHtml } = session
-const { focusOn, focusToast, viewMode, sidebarOpen, sidebarTab, showSidebarTab } = workspace
+const { focusOn, focusToast, sidebarOpen, sidebarTab, showSidebarTab } = workspace
 const assets = useFileAssets({ getFilePath: () => filePath.value, notify: showToast })
 const docState = useDocumentState({
   getEditor, filePath, title, previewHtml, theme: prefs.resolvedTheme,
@@ -75,8 +75,6 @@ const cmds = useCommands({
 })
 const { menuGroups, showSettings, closeSettings, showAbout, aboutVersion, closeAbout,
   showShortcuts, shortcutRows } = cmds
-const previewEl = ref(null) // 阅读态滚动容器：喂给大纲做阅读态高亮/跳转
-outlineSync.setReadingPane(() => previewEl.value)
 
 // 下面两个是**函数声明**（提升），声明刻意晚于注入点：setup 期可安全引用，
 // tdz-order.test.mjs 的「函数声明豁免」用例正是覆盖这种写法。
@@ -92,35 +90,31 @@ function onDocChange() {
 </script>
 
 <template>
-  <div class="app" :class="{ reading: viewMode === 'reading', focus: focusOn }">
-    <TitleBar v-show="!focusOn && viewMode !== 'reading'" :filename="title" :is-dirty="dirty"
+  <div class="app" :class="{ focus: focusOn }">
+    <TitleBar v-show="!focusOn" :filename="title" :is-dirty="dirty"
       :groups="menuGroups" @command="emitCommand" />
 
     <div class="main">
-      <!-- 侧栏：文件 / 大纲 双 tab。专注 / 阅读模式下整栏隐藏。 -->
-      <Sidebar v-show="sidebarOpen && !focusOn && viewMode !== 'reading'"
-        :inert="!sidebarOpen || focusOn || viewMode === 'reading'"
+      <!-- 侧栏：文件 / 大纲 双 tab。专注模式下整栏隐藏。 -->
+      <Sidebar v-show="sidebarOpen && !focusOn"
+        :inert="!sidebarOpen || focusOn"
         :folder-path="folderPath" :reload-signal="treeSignal" :outline="outline"
         :active-index="outlineActive" :tab="sidebarTab"
         @select="openTreeFile" @open-folder="openFolder"
         @jump="outlineSync.jumpToHeading" @tab="showSidebarTab" />
 
-      <!-- 编辑区：单栏居中流式布局 -->
-      <section class="pane editor-pane" :inert="viewMode === 'reading'">
+      <!-- 编辑区：单栏居中流式布局（渲染就在编辑器内，见 editor/tableRender.js） -->
+      <section class="pane editor-pane">
         <div ref="editorEl" class="editor-host"></div>
       </section>
 
-      <section v-show="viewMode === 'reading'" ref="previewEl" class="pane preview-pane reading-pane">
-        <div class="preview-body" v-html="previewHtml"></div>
-      </section>
-
       <!-- 打印 / 导出用的隐藏预览：始终在 DOM 里，但不占布局（样式见 app-shell.css） -->
-      <div v-show="viewMode !== 'reading'" class="export-preview" aria-hidden="true">
+      <div class="export-preview" aria-hidden="true">
         <div class="preview-body" v-html="previewHtml"></div>
       </div>
     </div>
 
-    <StatusBar v-show="!focusOn && viewMode !== 'reading'" :status="saveState"
+    <StatusBar v-show="!focusOn" :status="saveState"
       :line="caret.line" :col="caret.col" :words="wordCount" :zoom="zoom"
       @zoom="prefs.changeZoom(10)" />
 

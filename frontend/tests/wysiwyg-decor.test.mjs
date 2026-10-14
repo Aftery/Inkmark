@@ -119,12 +119,15 @@ describe('wysiwyg 装饰 · 表格 / 分割线 / 图片', () => {
     assert.match(wysiwygCode, /hrDeco/, 'HorizontalRule 分支未产出装饰')
   })
 
-  test('必须处理 TableDelimiter（否则表格管道符裸露）', () => {
-    assert.match(
-      wysiwygCode,
-      /name === 'TableDelimiter'/,
-      '未处理 TableDelimiter 节点 —— GFM 表格的管道符与分隔行会原样显示',
+  test('表格移交 tableRender 真渲染（wysiwyg 不得再碰 Table）', () => {
+    // 2026-10-14 产品决策：Bear 式管道隐藏退役，表格由 tableRender.js 的
+    // StateField block 装饰整体渲染成可编辑 <table>。wysiwyg 只有行内装饰、
+    // 不得再处理 Table 任何节点（包括 TableDelimiter），避免两套装饰打架。
+    assert.ok(
+      !wysiwygCode.includes('TableDelimiter'),
+      'wysiwyg.js 不应再出现 TableDelimiter（表格已移交 tableRender.js）',
     )
+    assert.match(wysiwygCode, /name === 'Table'\)\s*return false/, 'wysiwyg 必须跳过整个 Table 子树')
   })
 
   test('必须处理 Image（否则图片语法裸露）', () => {

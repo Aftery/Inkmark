@@ -256,11 +256,6 @@ export function useCommands(deps) {
       'format.clear': () => execCmd(clearFormatting),
       // 视图
       'view.focus': workspace.toggleFocus,
-      // 阅读态（渲染后的预览）：单栏重构后预览区一直只在阅读态可见，而
-      // toggleReading 只有 Esc 一个出口、没有任何入口 —— 预览实际是**不可达
-      // 代码**（真机验收 #19「预览效果没有」/ #20「表格未渲染，导出可以」的
-      // 根因：用户根本进不去阅读态，唯一的渲染产物只有导出文件）。
-      'view.reading': () => workspace.toggleReading(),
       'view.outline': toggleOutline,
       'view.zoomIn': () => prefs.changeZoom(10),
       'view.zoomOut': () => prefs.changeZoom(-10),
@@ -295,7 +290,7 @@ export function useCommands(deps) {
   })
 
   // ---------- 全局 Esc：逐层收起最上面那层 ----------
-  // 顺序即层级（输入框 > 设置 > 速查 > 关于 > 专注 > 阅读 > 历史）；
+  // 顺序即层级（输入框 > 设置 > 速查 > 关于 > 专注 > 历史）；
   // 输入框等原生控件自己的 Esc 交由其元素处理，故这里只处理「弹层类」。
   function onEscKeydown(e) {
     if (e.isComposing) return
@@ -306,7 +301,6 @@ export function useCommands(deps) {
     else if (help.showShortcuts.value) help.showShortcuts.value = false
     else if (showAbout.value) closeAbout()
     else if (workspace.focusOn.value) workspace.toggleFocus()
-    else if (workspace.viewMode.value === 'reading') workspace.toggleReading()
     else if (docState.showHistory.value) docState.showHistory.value = false
   }
 

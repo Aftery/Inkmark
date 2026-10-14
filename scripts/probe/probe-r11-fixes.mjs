@@ -8,9 +8,10 @@
  *   #7  斜杠面板「没反应」：keymap 增绑全角 '／' + 输入法 insertText 兜底
  *   #8  粘贴「只是文件名」：Finder file URL（text/uri-list）走 Go 读盘落库
  *   #13 打印「没反应」：⌘P 从 window.print()（WKWebView 空操作）改走导出 PDF
- *   #19 任务列表「预览效果没有」/ #20 表格「未渲染导出可以」：
- *       阅读态此前**没有任何入口**（toggleReading 只有 Esc 出口），
- *       预览是不可达代码；补 view.reading 命令后 ⌘E 进出。
+ *   #19 / #20（2026-10-14 终局）：阅读态已整体移除 —— 产品定位改为编辑器内
+ *       所见即所得（表格真渲染见 editor/tableRender.js，契约由
+ *       tests/table-render.test.mjs 与 probe-wysiwyg.mjs 覆盖），
+ *       本探针原 ⌘E 进出阅读态的 5 项断言随之退役。
  *
  * 为什么必须真浏览器：五条的旧形态全是静默失败（不抛异常、构建通过、
  * 旧测试全绿）。旧探针用 dispatchKeyEvent 送半角 '/' 模拟，绕开了输入法，
@@ -308,66 +309,9 @@ step('#13 ⌘P 触发 Go ExportPDF（不再调 window.print 空操作）',
   JSON.stringify(pdfCalls?.map((c) => c.len)))
 
 // ---------------------------------------------------------------------------
-// #19 / #20 阅读态入口：⌘E 进出；预览里任务勾选框与表格真实渲染
+// （2026-10-14）原 #19/#20 阅读态 5 项断言已随阅读态移除整体退役，
+// 渲染正确性由 tests/table-render.test.mjs + probe-wysiwyg.mjs 承接。
 // ---------------------------------------------------------------------------
-// 先造一份含任务列表 + 合法表格的文档（编辑态）
-await clearDoc()
-await ev(`(() => {
-  const view = window.__inkmark && window.__inkmark.editor
-  if (!view) return 'no-editor'
-  const doc = ['# 探针文档', '', '- [ ] 买牛奶', '- [x] 写周报', '', '| 名称 | 数量 |', '| --- | --- |', '| 苹果 | 3 |', ''].join('\\n')
-  view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: doc }, selection: { anchor: 1 } })
-  return 'ok'
-})()`)
-await sleep(600)
-
-// 编辑态：预览 pane 不可见（v-show），阅读态入口此前不存在
-const editPreviewVisible = await ev(`(() => {
-  const pane = document.querySelector('.preview-pane')
-  return pane ? getComputedStyle(pane).display : 'missing'
-})()`)
-step('#19/#20 前置：编辑态预览 pane 隐藏（display:none）', editPreviewVisible === 'none', `display=${editPreviewVisible}`)
-
-// ⌘E 进阅读态
-await keyWithMeta('e', 69)
-const readingState = await ev(`(() => {
-  const app = document.querySelector('.app')
-  const pane = document.querySelector('.preview-pane')
-  return {
-    cls: app ? app.className : 'missing',
-    display: pane ? getComputedStyle(pane).display : 'missing',
-  }
-})()`)
-step('#19/#20 ⌘E 进入阅读态（app.reading + 预览 pane 显示）',
-  readingState.cls.includes('reading') && readingState.display !== 'none',
-  JSON.stringify(readingState))
-
-// 阅读态里：任务列表勾选框 + 表格必须真实渲染（#19 / #20 的本体）
-const previewDom = await ev(`(() => {
-  const body = document.querySelector('.reading-pane .preview-body')
-  if (!body) return { fail: 'no reading preview body' }
-  return {
-    checkboxes: body.querySelectorAll("input[type='checkbox']").length,
-    checked: body.querySelectorAll("input[type='checkbox'][checked]").length,
-    tables: body.querySelectorAll('table').length,
-    th: body.querySelectorAll('th').length,
-    taskItems: body.querySelectorAll('li.task-list-item').length,
-  }
-})()`)
-step('#19 阅读态渲染 GFM 勾选框（未勾选 + 已勾选）',
-  previewDom.checkboxes === 2 && previewDom.checked === 1,
-  JSON.stringify(previewDom))
-step('#20 阅读态把合法表格渲染成真 <table>（不再是裸管道符）',
-  previewDom.tables === 1 && previewDom.th === 2,
-  JSON.stringify(previewDom))
-
-// ⌘E 再按一次 → 回编辑态（toggle 语义）
-await keyWithMeta('e', 69)
-const backToEdit = await ev(`(() => {
-  const app = document.querySelector('.app')
-  return app ? app.className : 'missing'
-})()`)
-step('#19/#20 ⌘E 再按退出阅读态（toggle）', !backToEdit.includes('reading'), `cls=${backToEdit}`)
 
 // ---------------------------------------------------------------------------
 // 控制组：console.error 与未捕获异常都必须为 0

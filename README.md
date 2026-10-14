@@ -3,7 +3,7 @@
 技术栈：**Go (Wails v2.16) + Vue 3 + Vite 6 + CodeMirror 6 + markdown-it + highlight.js**
 
 > 定位：所写即所见（WYSIWYG 默认）的轻量 Markdown 写作工具——**单栏居中流式**，
-> 编辑 / 阅读两态；**自绘标题栏**取代原生菜单，窗口形态按平台差异化
+> 渲染直接内嵌编辑器（无独立阅读态）；**自绘标题栏**取代原生菜单，窗口形态按平台差异化
 > （macOS 毛玻璃保留红绿灯 / Linux、Windows 无边框自绘）。
 > 架构与决策背景见 [`docs/HANDOFF.md`](docs/HANDOFF.md)（接手前先读它）。
 
@@ -15,9 +15,9 @@
 | **WYSIWYG 即时渲染（默认）** | `src/editor/wysiwyg.js`：光标所在行及上下相邻 1 行显示 Markdown 源码，其余行呈现渲染效果（列表圆点 / 任务勾选框 / 表格 / 分割线 / 图片以 widget 替换标记符）；仅产装饰、**零文档篡改**；中文输入（IME）时冻结重算；装饰只在可视区计算，大文档不卡 |
 | 实时预览 | markdown-it + highlight.js（`src/preview/`），GFM 任务列表（markdown-it-task-lists），highlight.js 按需注册 **79 种语言**（含别名，非整库导入）；正文限宽居中 |
 | **预览渲染防抖** | 输入期预览渲染防抖 ~120ms，大文档连续输入不卡；打开 / 恢复文件即时渲染，导出前强制 flush 保证内容最新（`useEditorSession`） |
-| **视图两态 + 专注模式** | 编辑 / 阅读两态（阅读态只渲染、隐藏编辑器）；`⌘⇧F` 专注模式收起界面干扰、强制进入编辑态（`useWorkspace`） |
+| **所见即所得渲染** | 编辑器内渐进渲染（Bear 式行内装饰 + 表格真渲染：`src/editor/wysiwyg.js` + `src/editor/tableRender.js`，单元格可编辑并同步回 Markdown 源码）；`⌘⇧F` 专注模式收起界面干扰（`useWorkspace`） |
 | **主题 4 档（含跟随系统）** | 浅 Indigo / 深 Indigo / 纸感赭石三套配色（`src/themes/tokens/design-tokens.css`）+ 跟随系统，共 4 档；`system` 偏好由 `theme.js` 解析为具体主题并写入（纸感不会被系统自动选中）；切换只改 `<html data-theme>`，**不重建编辑器** |
-| **大纲视图** | `⌘B` 开关（`src/components/Outline.vue` + `editor/outline.js` + `useOutline.js`），从文档提取标题层级、高亮当前节、点击跳转（阅读态亦可） |
+| **大纲视图** | `⌘B` 开关（`src/components/Outline.vue` + `editor/outline.js` + `useOutline.js`），从文档提取标题层级、高亮当前节、点击跳转 |
 | **历史快照** | `src/components/HistoryPanel.vue`：与自动保存**解耦**——编辑会话每 ≥3 分钟节流一次 + 显式保存 + 切换文件前 + 手动触发；轮转 / 去重由 Go 侧 `SnapshotWrite` 负责 |
 | 自动保存 | 改动后 800ms 防抖覆盖原文件，状态栏显示保存态（间隔可配，见「设置面板」） |
 | **未保存关闭拦截** | 脏状态下关闭窗口弹系统确认（取消 → 阻止关闭；不保存退出 → 放行）；`dirty` 由前端同步到 Go（`OnBeforeClose`）；自绘关闭按钮走 `App.CloseWindow()`（先问再退，**不用**会绕过确认的 `Quit`） |
@@ -30,7 +30,7 @@
 | **三语国际化** | `src/i18n/`：简体中文 / English / 日本語 三档字典 + `t()`；标题栏菜单、设置面板、弹层、提示全量覆盖，语言偏好实时切换 |
 | **排版偏好** | 正文字体（系统 / 衬线 / 等宽）、字号（12–20px 六档，编辑区与预览区**成对同步**）、行距（紧凑 / 标准 / 宽松）、行宽（窄 / 标准 / 宽）——真源 `src/themes/prefs.js`，偏好走**文档作用域**变量 `--font-body-user`，不污染标题栏 / 侧栏等界面外壳 |
 | **打印** | `⌘P`：Wails 的 WKWebView **没有实现 `window.print()`**（调用即静默空操作，这正是「⌘P 没反应」的根因），故桌面端把「打印」实现为**生成 PDF**（`exportPdf`，保存对话框 + 路径提示），随后可在系统 PDF 阅读器里打印；非 darwin 桌面 / 浏览器预览下自动回退到 `window.print()`。`@media print` 已隐藏标题栏 / 侧栏 / 状态栏 / 各类遮罩，只输出正文 |
-| **阅读态 / 预览** | `⌘E` 进出阅读态（`view.reading`）—— 预览 pane 的**唯一入口**（补于 2026-10-14：此前 `toggleReading()` 只有 Esc 出口、没有命令/键位/菜单项，整块预览是不可达代码）；阅读态下 `Esc` 退出 |
+| **预览渲染器（导出共用）** | markdown-it 渲染器（`src/preview/markdown.js`）只服务导出 HTML/PDF 与「复制为 HTML」；阅读态已于 2026-10-14 整体移除（渲染收敛进编辑器） |
 | **查找 / 替换** | `⌘F` 查找、`⌘⌥F` 查找并替换（CodeMirror `searchKeymap` + 面板） |
 | **跳转到行** | `⌘L` 打开输入框跳转到指定行号 |
 | **行操作** | `⌥↑` / `⌥↓` 移动当前行，`⇧⌥↓` 向下复制当前行，`⌘⇧K` 删除当前行（VS Code 惯例） |
@@ -116,7 +116,6 @@
 | 操作 | 快捷键 |
 |---|---|
 | 专注模式 | ⌘⇧F |
-| 阅读态 | ⌘E |
 | 显示/隐藏大纲 | ⌘B |
 | 放大 | ⌘= |
 | 缩小 | ⌘- |
@@ -245,7 +244,7 @@ cd .. && node scripts/probe/probe-slash.mjs         # 斜杠面板：输入 / �
 node scripts/probe/probe-wysiwyg.mjs               # 表格/分割线/图片装饰是否产出 DOM
 node scripts/probe/probe-theme.mjs                 # 暗色下各区域实际计算色
 node scripts/probe/probe-table-hint.mjs            # 缺分隔行时表格提示是否真的出现 / 改对后消失
-node scripts/probe/probe-r11-fixes.mjs             # 第十一轮五处修复：中文输入法全角 ／ / Finder file URL 粘贴 / ⌘P / ⌘E 阅读态（18/18）
+node scripts/probe/probe-r11-fixes.mjs             # 第十一轮修复：全角 ／ / Finder file URL 粘贴 / ⌘P（阅读态 5 项已随阅读态移除退役）
 ```
 
 > 改了 `prefs.js`、命令表或 `App.vue` 结构后，**先跑 `npm test` 再提交**——
@@ -260,7 +259,7 @@ node scripts/probe/probe-r11-fixes.mjs             # 第十一轮五处修复：
 1. **文件安全写入**：`WriteFile` 先写 `.tmp` 再 `rename`，避免写一半崩溃留下半个文件。
 2. **文件树懒加载**：`ListDir` 只返回一层，点击目录才展开——千级文件的仓库也不会卡启动。
 3. **主题 = CSS 变量**：编辑器（CodeMirror theme）、预览排版、代码高亮 token 全部引用同一组变量，切换零成本；预览高亮没用 hljs 官方主题 CSS，而是把 token 色值做成变量（`--hl-keyword` 等），保证明暗一致。`data-theme` 始终存「已解析」的具体主题（不存 `system`），切换只改属性、不重建编辑器。
-4. **单栏居中流式**：双栏 / 分屏 / 滚动联动已随产品减法整体下线，正文限宽（`--single-measure: 46rem`）居中，编辑 / 阅读两态；`useOutline` 只保留大纲高亮与跳转。
+4. **单栏居中流式**：双栏 / 分屏 / 滚动联动已随产品减法整体下线，正文限宽（`--single-measure: 46rem`）居中；阅读态已于 2026-10-14 移除，所见即所得渲染直接内嵌编辑器（表格真渲染见 `src/editor/tableRender.js`）；`useOutline` 只保留大纲高亮与跳转。
 5. **窗口拖拽用 `--wails-draggable`**：Wails 不读 `-webkit-app-region`（那是 Chromium 的，macOS WKWebView 不认）。标题栏根节点设 `--wails-draggable: drag`，交互子元素（菜单按钮 / 下拉项 / 窗口按钮）逐个设 `no-drag`——该自定义属性**会向下继承**，只能落在叶子可点元素上，落在布局容器上会把空白区也变成非拖动区。
 6. **原生菜单已下线，键位真源在前端**：原生菜单因「Role 不可本地化 / 非 darwin 不展开 / 无边框下无处安放」三条实测约束整体删除，键位收敛到 `useShortcuts.js` 的 `COMMANDS` 表（55 条命令 / 43 项键位），菜单结构、全局分发、速查表三方同源派生；门禁 `verify-shortcuts.mjs` 守着 README 与命令表不漂移。
 7. **渲染进程零 Node 能力**：前端只能通过生成的 `wailsjs` 绑定调 Go 方法，文件系统攻击面收在 `app.go`。
@@ -287,7 +286,7 @@ node scripts/probe/probe-r11-fixes.mjs             # 第十一轮五处修复：
 | 4 | **Linux（CachyOS）真机** | 无边框 + 自绘标题栏的 Linux 表现从未在真机跑过；窗口按钮对接的 `WindowMinimise / WindowToggleMaximise / CloseWindow` 在 Linux 后端的行为需目视 |
 | 5 | **「最近打开」功能整体下线** | 它的唯一消费方是原生菜单的子菜单；自绘标题栏未做该入口。若要恢复，需前端加列表 + 重新暴露 Go 的 `GetRecents`（`recents.json` 持久化逻辑仍在 `app.go`） |
 | 6 | **文件树外部变更监听已接线，待真机确认** | 2026-10-13 落地：前端 `useFileOps` 订阅 `fs:changed`（payload 为根目录路径，仅当与当前 `folderPath` 严格相等才自增 `treeSignal`，`FileTree` 收信号后重拉目录）；Go 侧 `watcher.go` 另修一个真实缺陷——切换/停止文件夹时，旧监听残留的去抖定时器会把已失效目录的 `fs:changed` 推给前端（代际校验修复）。沙箱内无法验证真实 fsnotify 事件，需 `wails dev` 真机确认三场景：① 监听目录内新建/删除文件后树即时刷新；② 切到另一文件夹后旧目录的迟到事件不再触发；③ 关闭文件夹（空串）后无事件推送。另有两项已知未修：去抖边界双发（同 root 多刷一次，无正确性影响）、`w.Errors` 静默吞掉（fsnotify 内部错误时监听静默死亡，建议至少记日志） |
-| 7 | **`useOutline` 阅读态分支未目视** | `setReadingPane` 的注入已接回（曾丢失导致阅读态不高亮），但阅读态的跳转仍未目视 |
+| 7 | **表格真渲染待真机验收** | 2026-10-14 落地：编辑器内 StateField block 装饰渲染真表格（`src/editor/tableRender.js`），单元格可直接编辑并同步回 Markdown 源码；单元测试（`tests/table-render.test.mjs`）已过，光标进出切换渲染/源码、Tab 换格、IME 输入等真机路径仍需目视。原「阅读态跳转未目视」项随阅读态移除而消失 |
 | 8 | **`release.yml` 从未跑过** | 需 push 一个 `v*` tag 才会触发三平台打包；三平台构建的坑（Linux 的 webkit2_41 tag、macOS 签名）都还没被它验过 |
 | 9 | **检查更新** | 仓库**无任何 Release**，所以现在只会返回「无法检查更新」（不谎报「已是最新」） |
 | 10 | **macOS 未签名分发** | Gatekeeper 会拦，需 Apple 开发者账号（$99/年）签名 + 公证 |

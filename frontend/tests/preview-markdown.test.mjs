@@ -9,8 +9,9 @@
  *      `<input class="task-list-item-checkbox"type="checkbox">`。浏览器按
  *      HTML5 规范能容错解析（Chrome 实测渲染正常），但这是「依赖容错」——
  *      换 stricter 的解析器 / 将来接净化器就会静默丢掉 type 属性。
- *   2) 阅读态入口缺失（另一处修复，见 useShortcuts 的 view.reading）导致
- *      预览整体不可达 —— 渲染器本身的对错只能在这里用真实渲染断言。
+ *   2) 阅读态已于 2026-10-14 整体移除（渲染收敛进编辑器内的表格真渲染），
+ *      预览渲染器只剩导出 HTML/PDF 与复制为 HTML 两个消费方 —— 对错在这里
+ *      用真实渲染断言。
  *
  * 全部走**真实渲染**（import 真实 createRenderer），不拿源码正则假装验证。
  */

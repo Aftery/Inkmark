@@ -92,12 +92,8 @@ export const COMMANDS = [
   { id: 'format.insertToc', group: 'format', labelKey: 'menu.insertToc', accel: null, descKey: null },
   { id: 'format.clear', group: 'format', labelKey: 'menu.clearFormat', accel: null, descKey: null },
 
-  // ---- 视图（单栏重构后只剩「专注 / 阅读 / 大纲 / 缩放 / 主题」五类）----
+  // ---- 视图（只剩「专注 / 大纲 / 缩放 / 主题」；阅读态已于 2026-10-14 移除）----
   { id: 'view.focus', group: 'view', labelKey: 'menu.focus', accel: '⌘⇧F', descKey: 'shortcuts.focus' },
-  // 阅读态（渲染预览）。2026-10-06 单栏重构把双栏砍成「编辑 / 阅读」两态后，
-  // 这个入口一直没建（toggleReading 只有 Esc 出口）→ 预览是不可达代码。
-  // 2026-10-14 真机验收 #19/#20 抓到此缺陷后补上（⌘E 进 / ⌘E 或 Esc 出）。
-  { id: 'view.reading', group: 'view', labelKey: 'menu.reading', accel: '⌘E', descKey: 'shortcuts.reading' },
   { id: 'view.outline', group: 'view', labelKey: 'menu.outline', accel: '⌘B', descKey: 'shortcuts.outline' },
   { id: 'view.zoomIn', group: 'view', labelKey: 'menu.zoomIn', accel: '⌘=', descKey: 'shortcuts.zoom' },
   { id: 'view.zoomOut', group: 'view', labelKey: 'menu.zoomOut', accel: '⌘-', descKey: null },

@@ -29,20 +29,6 @@
 }
 .editor-host { flex: 1; min-height: 0; }
 
-/* 预览（阅读态 / 打印 / 导出）同样限宽居中 */
-.preview-pane {
-  flex: 1;
-  overflow-y: auto;
-  background: var(--bg);
-}
-.reading-pane .preview-body {
-  max-width: var(--reading-measure);
-  margin: 0 auto;
-  padding: var(--space-16) var(--space-6);
-  font-size: calc(var(--reading-font-size) * var(--zoom-scale, 1));
-  line-height: var(--reading-leading);
-}
-
 /* 导出 / 打印用的第二份渲染：不占布局（position:absolute 移出流），
    但 DOM 始终存在 —— 导出 HTML / PDF 与 window.print() 直接复用它。 */
 .export-preview {

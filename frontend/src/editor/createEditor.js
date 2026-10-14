@@ -19,6 +19,7 @@ import { markdown, markdownLanguage } from '@codemirror/lang-markdown'
 import { tags as t } from '@lezer/highlight'
 import codeLanguages from './markdownHighlight'
 import { wysiwygField, wysiwygPlugin, wysiwygAtomicRanges } from './wysiwyg'
+import { tableRenderField, tableScanKick } from './tableRender'
 import { slashCommandExtension } from './slashCommand'
 import { imageDropHandlers } from './imageDrop'
 
@@ -299,6 +300,10 @@ export function createEditor(parent, { doc = '', onDocChange, onScroll, onUpdate
       wysiwygField,
       wysiwygPlugin,
       wysiwygAtomicRanges,
+      // 表格真渲染（StateField block 装饰 + 可编辑单元格，见 tableRender.js 头注）
+      tableRenderField,
+      // 语法树补齐后的初始重扫兜底（StateField.create 跑在树就绪之前）
+      tableScanKick(),
       // 缩放（状态栏 90/100/110/125%）：Compartment 运行时重配，不重建编辑器
       zoomCompartment.of(EditorView.theme({ '&': { fontSize: 'calc(var(--text-base) * 1)' } })),
     ],

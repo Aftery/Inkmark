@@ -227,13 +227,10 @@ function build(view) {
           return
         }
 
-        // 表格：管道符与分隔行全部隐藏（这才是「表格渲染」在编辑器里的
-        // 真实含义 ——  Bear 式渐进渲染只隐藏标记，不做真表格布局；
-        // 真表格需要 block 装饰，而本仓的架构约束明令禁止，见文件头 §1）。
-        if (name === 'TableDelimiter') {
-          hide(node.from, node.to)
-          return
-        }
+        // 表格：整体移交 tableRender.js（StateField block 装饰 + 可编辑单元格）。
+        // Bear 式管道隐藏已退役 —— 本插件只有行内装饰、做不了真表格（文件头 §1），
+        // 跳过整个子树避免与 block 装饰重复处理同一片内容。
+        if (name === 'Table') return false
 
         // 图片：非活跃行替换为图片预览。父 Image 的 from/to 覆盖整个
         // `![alt](url)`，一次整体替换（内部 LinkMark/URL/LinkTitle 的

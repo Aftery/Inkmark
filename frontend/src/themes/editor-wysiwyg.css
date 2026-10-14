@@ -86,3 +86,29 @@
   background-color: var(--surface-warm);
   border-radius: var(--radius-sm);
 }
+
+/* ---- 表格真渲染（StateField block widget，tableRender.js）----
+   视觉与 preview.css 的表格规则同源（发丝边框 / 表头底色），单一观感 */
+.cm-md-table { margin: var(--space-4) 0; }
+.cm-md-table table {
+  border-collapse: collapse;
+  width: 100%;
+  font-size: 0.9375em;
+}
+.cm-md-table th,
+.cm-md-table td {
+  border: 1px solid var(--border);
+  padding: var(--space-2) var(--space-3);
+  min-width: 4em;
+  text-align: left;
+  vertical-align: top;
+}
+.cm-md-table th {
+  font-weight: var(--weight-emphasize);
+  background: var(--surface-warm);
+}
+/* 编辑焦点：单元格内一圈内嵌 accent 描边（不外扩，避免行高跳动） */
+.cm-md-table [contenteditable]:focus {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
