@@ -4,7 +4,22 @@
 > `docs/spec/` 与项目记忆。它记录「做到了什么、怎么验证、哪些坑别再踩」，
 > 而不是流水账。
 >
-> 最后更新：2026-10-13（新增第九轮：文件树外部变更监听接线 + stripComments 收敛 + 导出字体裁决）
+> 最后更新：2026-10-14（新增第十、十一轮：目视清单可执行化 + 修掉首次真机验收的 5 项不通过）
+>
+> ✅ **2026-10-14 第十一轮：修掉首次真机验收的 5 项不通过**（详见 §2 第十一轮）。
+> 第十轮把 §6 的 22 项目视清单做成了可执行产物（`docs/qa/visual-checklist.html` +
+> append-only 的 `VERIFICATION-LOG.md` + 漂移守卫门禁）。**第一次真机验收立刻用它抓到
+> 5 个真缺陷**：斜杠面板（中文输入法全角 `／` 匹配不上）、图片粘贴（Finder ⌘C 给的是
+> file URL 而非图片数据）、打印（`window.print()` 在 WKWebView 是空操作）、
+> 任务列表 + 表格（**根因是阅读态此前根本没有入口**，整个预览 pane 是不可达代码）。
+> **测试 155 → 197**（全部真行为测试）；新增 `scripts/probe/probe-r11-fixes.mjs`
+> （无头 Chrome 端到端，**18/18 通过**）；变异自证 5 方向，**其中 2 个方向暴露出
+> 测试自身假绿并已修正**（见 §4 ⑱⑲）；顺带修好两条一直是红的门禁脚本（路径 bug）。
+>
+> ✅ **2026-10-13 第十轮：目视清单从「文档正文」变成「可执行产物」**（详见 §2 第十轮）。
+> §6 的 22 项原先验完就忘、没有痕迹。现有三件产物：单文件清单 `visual-checklist.html`
+> （勾选 / 存档 / 导出）、append-only 的 `docs/qa/VERIFICATION-LOG.md`、
+> 以及守「清单副本 ↔ §6 真源」编号+标题漂移的门禁（已接进 CI 的 `docs-contract` job）。
 >
 > ✅ **2026-10-13 第九轮：清掉三笔债**（详见 §2 第九轮）：
 > ① **文件树外部变更监听接线** —— 文档原记「`WatchDir` 未在 app.go 暴露所以
@@ -76,10 +91,14 @@
 cd /Users/aftery/Desktop/myapp/inkmark
 
 # 门禁全跑一遍（约 2 分钟，与 CI 口径一致）
-cd frontend && npm test; cd ..          # 期望 155/155（31 个 suite）
+cd frontend && npm test; cd ..          # 期望 197/197（39 个 suite）
 node scripts/verify/verify-shortcuts.mjs    # 快捷键契约，期望退出码 0
 node scripts/verify/scan-i18n-residue.mjs   # i18n 文案残留，期望退出码 0
+node scripts/verify/verify-visual-checklist.mjs  # 目视清单副本 ↔ §6 真源，期望退出码 0
 ./scripts/p0-check-emoji.sh frontend/src main.go app.go   # P0 零 emoji，期望退出码 0
+# ↓ 这两个不在 CI（2026-10-14 发现它们因路径 bug 一直红着 —— 手动跑才有价值）
+node scripts/verify/scripts-verify-icons.mjs        # 图标 ↔ phaseC 规格逐字比对，期望 24/24、退出码 0
+node scripts/verify/scripts-verify-theme.mjs        # theme.js 优先级自检，期望 8/8、退出码 0
 /usr/local/opt/go/bin/go vet ./...           # 注意：go 不在 PATH。⚠ 本机必绿（dist 有产物），别把它当「仓库编得出来」的证据
 node scripts/smoke/render-check.mjs         # 真渲染冒烟（需先 npm run build），期望 PASS
 
@@ -91,6 +110,7 @@ cd .. && node scripts/probe/probe-slash.mjs         # 斜杠面板：输入 / �
 node scripts/probe/probe-wysiwyg.mjs               # 表格/分割线/图片装饰是否产出 DOM
 node scripts/probe/probe-theme.mjs                 # 暗色下各区域实际计算色
 node scripts/probe/probe-table-hint.mjs            # 表格提示：缺分隔行时出现、改对后消失
+node scripts/probe/probe-r11-fixes.mjs             # 第十一轮五处修复：全角／/ file URL 粘贴 / ⌘P / ⌘E 阅读态（18/18）
 
 # 构建 + 启动
 # ⚠️ 在 WorkBuddy 沙箱内跑会被 safe-delete shim 拦（vite 的 emptyDir 触发熔断）→ 需提权
@@ -193,9 +213,11 @@ frontend/src/
                    GFM 任务列表 markdown-it-task-lists、标题 id 由 anchors.js 生成）
                    ⚠ 标题 id 的引号必须是 ASCII 直引号（2026-10-11 修过一次弯引号污染）
   themes/          editor-wysiwyg.css 是 `.cm-md-*` 的唯一定义处（勿写进 CM theme，会顶破棘轮）
-  tests/           155 条测试（node:test，零依赖；31 个 suite）
+  tests/           197 条测试（node:test，零依赖；39 个 suite）
                    ⚠ 第八轮起含**真行为测试**（真 EditorState + ensureSyntaxTree），
                      此前全是源码正则断言 —— 详见 §2 第八轮
+                   ⚠ 第十一轮起 keymap 接线 pin 也用**真扩展 + 真 keyName + 真 run**
+                     驱动（源码正则连「注释掉的绑定」都抓不到，见 §4 ⑲）
                    契约 6 = embed 占位文件跟踪态 + 标题锚点引号形态（2026-10-11 新增）
 scripts/
   emoji-pattern.mjs        P0 emoji 正则唯一真源
@@ -213,7 +235,7 @@ docs/spec/                   契约文档（见下）
 
 ---
 
-## 2. 各轮做了什么（第一~九轮；第七轮为 2026-10-11 按 git show 回补）
+## 2. 各轮做了什么（第一~十一轮；第七轮为 2026-10-11 按 git show 回补）
 
 ### 第一轮：设置面板 + 打印菜单规范化
 - 新增 `components/SettingsPanel.vue`（外观 / 编辑器两分类，7 项）
@@ -473,6 +495,106 @@ read-then-act 非原子），均已按实测改正（见上文与 §4 ⑯）。
 
 ---
 
+### 第十轮：真机目视清单做成可执行产物，并把「清单漂移」接入 CI（`f535f93`，2026-10-13）
+
+**起因**：§6 那 22 项「只能在真机肉眼确认」的清单原先只是文档正文 —— 验完就忘、
+没有痕迹，下次接手不知道哪几项验过、在哪个平台、结论如何。这与「恒绿的假用例」
+是同一类病：**没有痕迹的验证 = 无法与「没验过」区分**。
+
+| 产物 | 作用 |
+|---|---|
+| `docs/qa/visual-checklist.html`（971 行） | 单文件零依赖、双击即开。22 项逐项勾选 + 结论（未验/通过/不通过/不适用）+ 备注；平台/验证人/日期；进度汇总；localStorage 自动存档；导出 Markdown 回填仓库。颜色全走 Token（文件内镜像 design-tokens 亮/暗两套并注明同步义务），零字面色值、零 emoji |
+| `docs/qa/VERIFICATION-LOG.md`（66 行） | **append-only** 记录「验过什么、结论如何」（§6 是「要验什么」）。含空模板，**不预填任何验证结果** |
+| `scripts/verify/verify-visual-checklist.mjs`（204 行） | 清单副本 ↔ §6 的（编号, 标题）集合同步守卫。退出码 0=一致 / 1=漂移 / 2=解析器失效（**不可采信，绝不当作通过**） |
+
+CI：`ci.yml` 的 `docs-contract` job 追加该守卫为第二步；顺带校正顶部那份
+「写着三条、实际五条」的门禁清单。
+**验证**：实现者两次变异自证（两侧各改一处 → 报红 → 逐字还原）；独立验证者（QA）
+另补 4 个方向（HTML 侧改标题 / HTML 多一项 / JSON 非法 / JSON 空数组 → 退出码
+**1 / 1 / 2 / 2** 全部符合预期），并查明标题比较是逐字 `!==`（仅 trim 首尾）。
+
+**第一次真机验收随即用上它**：2026-10-13 macOS / aftery，**18/22 已验、13 通过、
+5 不通过**（首次记录见 `docs/qa/VERIFICATION-LOG.md`）。这 5 项就是第十一轮的全部内容 ——
+**这份清单第一次跑就抓出了 5 个真缺陷**，其中两项（#19/#20）是**清单自己暴露了不可达代码**，
+见下。
+
+---
+
+### 第十一轮：修掉 2026-10-13 真机验收的 5 处不通过（2026-10-14）
+
+**起因**：`docs/qa/VERIFICATION-LOG.md` 首次记录 5 项不通过。五条的旧形态**全是静默失败**
+——不抛异常、构建通过、原有 155 条测试全绿。用户可见症状与根因如下。
+
+| # | 用户原话 | 根因（钉死后的形态） | 修法 |
+|---|---|---|---|
+| 7 | 斜杆没反应 | keymap 只绑半角 `'/'`。中文输入法**中文标点模式**下 `/` 键产出全角 U+FF0F（`'／'`），`w3c-keyname` 对非 ASCII 可打印字符原样返回 → 永远匹配不上 | keymap 增绑 `key: '／'`；另加 `maybeOpenFromInserted` 兜底：输入法若走 composition/insertText 不产生可匹配 keydown，就从「刚插入的单个斜杠字符」反推开面板 |
+| 8 | 复制图片后，过来黏贴只是文件名 | Finder 里 ⌘C 一个图片文件，剪贴板是 **file URL**（`text/uri-list`，部分应用只给 `text/plain`），**`dt.files` 是空的**。只认 `image/*` File 的实现把它放给浏览器默认行为 → 文件名被当文本插入 | `imagePathFromDataTransfer` 认 file URL → `App.SaveImageFromPath` 让 Go 读盘落库（webview 里 `fetch(file://)` 被跨源策略拦死，前端根本读不到）；两条通道归一成一个 `onImageFile` 回调，按 `typeof` 分流 |
+| 13 | 快捷键没反应，菜单里面点击打印也没反应 | `window.print()` 在 Wails 的 WKWebView 里是**空操作**（无报错、无窗口） | `file.print` 改走 `docState.exportPdf()`（⌘P 与菜单同一命令处理器，两侧一起修好） |
+| 19 / 20 | 预览效果没有 / 表格未渲染（导出可以） | **阅读态此前没有任何入口**：`toggleReading()` 只有 Esc 出口，没有命令、没有键位、没有菜单项 → `v-show="viewMode === 'reading'"` 的整个预览 pane 是**不可达代码**。导出能出，是因为导出读的是同一份 `previewHtml`，经隐藏在视口外的 `.export-preview` 渲染 —— 与阅读态 pane 无关 | 新增 `view.reading` 命令（分组 view）+ ⌘E；三语补 `menu.reading` / `shortcuts.reading`，删孤儿 `shortcuts.viewModes`（命令 55→56） |
+
+**#20 的附带修复（畸形 HTML）**：`markdown-it-task-lists` 在 `enabled: true` 下
+`disabledAttr` 是空串，输出的 `<input>` **缺一个空格** ——
+`<input class="task-list-item-checkbox"type="checkbox">`。Chrome/WebKit 按 HTML5
+规范容错解析（`--dump-dom` 实测勾选框正常渲染），但这是**依赖容错的畸形 HTML**：
+换 stricter 的解析器或将来接净化器就会静默丢掉 `type`。`html: false` 下 `html_inline`
+token 只可能来自该插件，故在 `preview/markdown.js` 定点补空格，**不动 node_modules**。
+
+**新增测试（155 → 197 条，全部真行为，无源码正则）**
+
+| 文件 | 条数 | 驱动方式 |
+|---|---|---|
+| `tests/image-paste.test.mjs` | 21 | `imagePathFromDataTransfer` 纯函数边界 + `imageDropHandlers` 双通道（stub view/event）+ `useFileAssets` 落盘（`goForm` 显式入参：`full`/`no-api`/`partial`，遵 §4 ⑰） |
+| `tests/preview-markdown.test.mjs` | 8 | **真渲染器**输出比对：勾选框两种状态的 HTML 合法、label 包装、普通列表不受影响、表格/标题 id/slug 去重回归 |
+| `tests/slash-fullwidth.test.mjs` | 11 | `maybeOpenFromInserted` 由**真 ChangeSet**（`state.update`）驱动 + 假 host；keymap 由**真扩展 + 真 `keyName` + 真 `run`** 驱动（见 §4 ⑲） |
+
+**端到端探针**：`scripts/probe/probe-r11-fixes.mjs`（**18/18 通过**）在无头 Chrome 里对
+五条路径逐条复现：全角 `／` 真实按键 + `Input.insertText` 兜底路径 + 半角回归 /
+未落盘文档粘贴的「先保存」提示（断言**不调 Go、文档不被插入**）/ ⌘O 打开文档后
+file URL 粘贴 → `SaveImageFromPath` 收到解码后的 `/Users/me/Pictures/截图.png` /
+普通文本粘贴不被拦截 / ⌘P → Go `ExportPDF` / ⌘E 进阅读态后**真 DOM 断言**（2 个
+`input[type=checkbox]`、1 个已勾选、真 `<table>` 含 2 个 `<th>`）+ ⌘E 再按退出。
+**两个探针自身装配的坑（踩过就知道）**：① `getAppApi()` 的判据是
+`window.runtime && window.go`，stub 只装 `window.go` 会让 ⌘P 静默退回 `window.print()`
+分支 → 探针假红；② 图片落盘有「先保存」守卫，不先经 ⌘O 打开文档，`SaveImageFromPath`
+根本不会被调用（**这是正确行为**，已改成独立的正向断言）。
+
+**变异自证（5 个方向，逐条注入 → 报红 → 逐字还原；每步核对 `node` 退出码）**
+
+| 变异 | 期望变红 | 实测 |
+|---|---|---|
+| 删 `text/uri-list` 分支 | 通道 ② 用例 | ✅ exit 1（4 条 subtest fail） |
+| 删 `saveImageFile` 的字符串分流 | 「两条落盘通道」suite | ✅ exit 1 |
+| 双通道守卫只查一个绑定（`partial` 形态） | 「旧绑定形态」用例 | ❌ **假绿** → 见下 |
+| 删「先保存」守卫 | 「文档未落盘」用例 | ✅ exit 1 |
+| 删 `html_inline` 补空格规则 | 勾选框 HTML 合法性用例 | ✅ exit 1 |
+| 删全角 `'／'` 绑定 | keymap 接线 pin | ❌ **假绿** → 见下 |
+
+**本轮最大的收获：变异自证抓出两个「假绿灯」**（两个方向注入后测试仍全绿，即
+测试根本守不住它声称守的东西）：
+- 「旧绑定形态」用例**只断言了 toast 条数**（`length === 1`）。少校验一个绑定时，
+  调用不存在的方法抛 TypeError 被 `catch` 成 `imageFailed`，**条数同样是 1** —— 用户
+  看到的其实是「插入图片失败：…」而不是「当前环境不支持」。补
+  `assert.match(toasts[0].msg, /不支持/)` 后立刻红。
+- keymap 接线 pin 是**源码正则** `assert.match(code, /key: '／'/)`。把绑定行**注释掉**后，
+  正则照样匹配注释文本 → 假绿。改成**真实扩展驱动**：从 `EditorState` 的 `keymap` facet
+  取回 CM 真正会用的绑定表（摊平方式与 `@codemirror/view` 内部 `getKeymap` 逐字一致），
+  用 `w3c-keyname` 的**真** `keyName` 解析按键、调**真** `run`。删绑定即红。
+  （两条教训已登记为 §4 ⑱ / ⑲。）
+
+**顺带修好两条一直是红的门禁**：`scripts-verify-icons.mjs` 与 `scripts-verify-theme.mjs`
+（原在 `scripts/`，搬进 `scripts/verify/` 后 `./docs/…`、`./frontend/…` 相对路径没跟着改）
+→ `ENOENT` / `MODULE_NOT_FOUND`，**一直红着**，谁都没发现。改用与其他门禁一致的
+`ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..')` 约定后：
+图标 **24/24 逐字一致**、主题 **8/8 断言通过**（内容侧本来就是对的，纯粹是路径 bug）。
+
+**验证汇总（全部真实退出码）**：`npm test` 155 → **197/197**（39 suites）；
+7 个 `verify/*.mjs` + `p0-check-emoji.sh` **exit 全 0**；`go vet ./...` exit 0；
+`wails build` 成功（1m25s，产物 `build/bin/inkmark.app`，构建后已复位
+`frontend/dist/.gitkeep`）；`wails generate module` 重新生成绑定（新增
+`SaveImageFromPath`，runtime 侧仅权限位差异已 chmod 复位）。
+
+---
+
 ## 3. 怎么验证（不要只看「构建通过」）
 
 本项目吃过两次教训：**「进程存活」不等于「界面渲染出来了」**（白屏时进程照样活着），
@@ -628,13 +750,35 @@ GFM 的版本。实测同一段合法表格：默认 `markdown()` → `Document,
 不能只写 `assert.doesNotThrow` —— 后者对「压根没执行到那行」毫无区分力。
 同族问题：本仓 §5 的「因为错误的原因而通过」（第 9~11 次）。
 
+### ⑱ 「断言了条数就等于断言了行为」—— **错（第十一轮变异自证实证）**
+`image-paste.test.mjs` 的「旧绑定形态（只有 SaveImage）」用例原本只断言
+`toasts.length === 1`。把双通道守卫改成**只查一个绑定**后，路径通道调用不存在的
+`SaveImageFromPath` 抛 TypeError，被 `catch` 成 `imageFailed` toast —— **条数同样是 1**，
+用例照样绿。可观测差异其实在**文案**上：用户该看到「当前环境不支持」，实际会是
+「插入图片失败：…」。
+**判据**：断言必须打在该路径**特有**的可观测差异上（这里是 toast 文案），
+而不是一个「任何失败都会得到」的计数/布尔。计数类断言几乎总能在错误路径上碰巧成立。
+同族：`assert.doesNotThrow`（§4 ⑰）、`assert(result != null)`。
+
+### ⑲ 「源码正则能守住『某条绑定/接线不许丢』」—— **错（第十一轮变异自证实证）**
+`slash-fullwidth.test.mjs` 的 keymap 接线 pin 原本是
+`assert.match(code, /\{\s*key:\s*'／',\s*run:\s*onSlash\s*\}/)`。把绑定行**注释掉**
+（甚至改成别的写法）后，正则照样在注释文本里匹配到 → 假绿。**正则匹配的是文件里
+的字符，不是「CM 会不会执行它」。**
+**正确形态**：驱动**真实对象**。这里是从 `EditorState` 的 `keymap` facet 取回
+CM 真正会用的绑定表（摊平方式与 `@codemirror/view` 内部 `getKeymap` 逐字一致），
+用 `w3c-keyname` 的**真** `keyName` 解析按键、调**真** `run` 并断言副作用。
+**判据**：凡「不许弄丢」的接线，都要有办法从**运行期数据结构**里读回它；
+做不到时，明确标注该接线由**探针**端到端负责（如本轮 `updateListener` → 兜底路径）。
+正则只配守**文案/格式**类不变量，不配守行为。
+
 ---
 
 ## 5. 门禁体系（5 个 job / 6 项检查，全在 CI）
 
 | 门禁 | 卡什么 | 命令 |
 |---|---|---|
-| `frontend` | 155 条测试 + vite 构建 | `npm test && npm run build` |
+| `frontend` | 197 条测试 + vite 构建 | `npm test && npm run build` |
 | `go` | vet + build（vet 不做链接，cgo 导出代码要 build 才暴露） | `go vet ./... && go build -o /dev/null .` |
 | `p0-emoji` | 界面不得用 emoji 当图标（含注释） | `./scripts/p0-check-emoji.sh frontend/src main.go app.go` |
 | `docs-contract` ① | 键位在 README / 应用内速查表 / **`useShortcuts.js` 的 `COMMANDS`** 三处脱节 | `node scripts/verify/verify-shortcuts.mjs` |
@@ -644,8 +788,13 @@ GFM 的版本。实测同一段合法表格：默认 `markdown()` → `Document,
 > `docs-contract` 的真源在 2026-10-06 已从 `main.go` 的 `buildMenu` 迁到前端命令表
 > （`ci.yml` 头部注释已同步说明）；`scripts/verify/parse-main-menu.mjs` 如今解析的是
 > `useShortcuts.js`，文件名是历史遗留，别被它误导。
-> 另有**两个手动脚本不在 CI**：`scripts-verify-icons.mjs`（图标与 phaseC 规格逐字比对）、
-> `scripts-verify-theme.mjs`（theme.js 优先级自检）。
+> 另有**两个手动脚本不在 CI**：`scripts-verify-icons.mjs`（图标与 phaseC 规格逐字比对，
+> 实测 24/24 一致）、`scripts-verify-theme.mjs`（theme.js 优先级自检，8/8 断言）。
+> ⚠ 这两个脚本曾在 2026-10-14 被查出**一直是红的**：它们原在 `scripts/`，搬进
+> `scripts/verify/` 后 `./docs/…`、`./frontend/…` 相对路径没跟着改 → `ENOENT` /
+> `MODULE_NOT_FOUND`。**没进 CI 的脚本没人跑 = 与不存在等价**，这是它们烂掉的原因。
+> 已改用 `ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..')` 约定修正；
+> 内容侧本来就对，纯粹是路径 bug。**建议：要么接进 CI，要么每次交付前手动跑一遍并记退出码。**
 > ⚠ `scripts-verify-icons.mjs` 内含 U+2717「✗」字形，落在 P0 emoji 正则的码点区间内。
 > 当前 emoji 门禁只扫 `frontend/src` + `main.go` + `app.go`，故它从未被扫到；**若哪天
 > 把扫描面扩到 `scripts/`，这条会立刻变红**。这是已知的（有意保留的）边界，不是待修缺陷。
@@ -659,9 +808,17 @@ GFM 的版本。实测同一段合法表格：默认 `markdown()` → `Document,
   防「检查消失却无人报错」的覆盖空窗。
 
 ### 本项目最危险的失败模式：**假绿灯**
-门禁存在但不阻断，等于没有门禁，还提供虚假保证。本项目已发生 **2 次**：
+门禁存在但不阻断，等于没有门禁，还提供虚假保证。本项目已发生 **4 次**：
 1. `p0-check-emoji.sh` 因 grep 报错被吞 → 永远「通过」（2026-10-04 修）
 2. `scan-i18n-residue.mjs` 退出码恒 0 → 放进 CI 也是永远绿（2026-10-06 修）
+3. 「旧绑定形态」用例只断言 toast **条数**，错误路径文案走错也照样绿
+   （2026-10-14 变异自证发现，**交付前**拦住，见 §4 ⑱）
+4. keymap 接线 pin 用**源码正则**，绑定被注释掉仍匹配注释文本
+   （2026-10-14 变异自证发现，**交付前**拦住，见 §4 ⑲）
+
+后两次的教训是：**「测试全绿」本身就是需要被验证的对象**。所以每个方向的修复都要做
+**变异自证**（注入缺陷 → 必须报红），而不是只看修复后测试是不是绿的 ——
+绿的可能是测试根本管不到。三次实战已证明变异自证是本仓最高性价比的检查手段。
 
 **新增/修改任何门禁时，必须做元测试**：造违规输入 → 确认能报红 → 确认退出码非 0。
 
@@ -708,14 +865,27 @@ GFM 的版本。实测同一段合法表格：默认 `markdown()` → `Document,
    鼠标悬停红点的 title 应显示「未保存的更改」（不是 key 原文）
 7. **斜杠命令面板**：**新行行首**输入 `/` → 面板在光标下方弹出；`↑↓` 切换、
    `Enter` 插入（**斜杠不残留**）、`Esc` 关闭；行中输入 `/` 应正常打出斜杠
+   - 🔧 **第十一轮已修，待复验**：原来只绑半角 `/`，而中文输入法的**中文标点模式**
+     下 `/` 键产出的是全角 `／`（U+FF0F）→ 面板永不弹出（首次验收就栽在这）。
+     现两种形态都绑，另加「刚插入单个斜杠字符」的兜底。**复验必须切到中文输入法**
+     再按斜杠 —— 当初漏的就是这个条件（旧探针用半角模拟，所以探针绿而真机红）。
 8. **图片粘贴**：复制一张图片 → `⌘V`，应在光标处插入 `![](assets/...)`，
    且**同级目录出现 assets/**；文档未落盘时应提示「先保存」而不是静默失败
+   - 🔧 **第十一轮已修，待复验**：原来只认剪贴板里的图片**数据**（`image/*` File）；
+     在 **Finder 里 ⌘C 一个图片文件**时剪贴板是 **file URL**（`dt.files` 为空），
+     旧实现把它放给浏览器默认行为 → **文件名被当文本插进来**（首次验收的现象）。
+     现两条通道都走 Go 落盘（`SaveImageFromPath`）。复验请**两种复制方式都试**：
+     ① 截图工具/浏览器里复制图片；② 在 Finder 里选中图片文件按 ⌘C。
 9. **快捷键速查**：`⌘/` 打开后**表格有内容**（第五轮修掉的空表回归项）
 10. **阅读态大纲**：`view.outline` 切到阅读态后点大纲条目应能跳转
     （第五轮修回的 `setReadingPane` 注入）
 11. **缩放**：⌘= / ⌘- / ⌘0，状态栏与正文字号同步变化
 12. **三语切换**：设置 → 外观 → 语言，界面与标题栏菜单同步变、刷新后保持
 13. **打印**：⌘P 只输出正文，无标题栏/侧栏/状态栏/弹层遮罩
+    - 🔧 **第十一轮已修，待复验**：原来 `⌘P` 调 `window.print()`，在 Wails 的
+      WKWebView 里是**空操作**（不报错、不弹窗）→ 用户看到的正是「快捷键没反应，
+      菜单里点打印也没反应」。现改走导出 PDF（与菜单同一命令处理器），
+      两个入口应都能弹出保存对话框。
 14. **主题**：⇧⌘L 循环（浅 → 深 → 纸感），三套都正常
 
 **第七轮新增的回归项（2026-10-07 改的正是这些，必须目视）**
@@ -732,6 +902,12 @@ GFM 的版本。实测同一段合法表格：默认 `markdown()` → `Document,
     真机点按仍需目视一次。
 19. **GFM 任务列表**：`- [ ]` / `- [x]` 在阅读态应渲染成勾选框（`1b645ee` 新接的
     `markdown-it-task-lists`），编辑区的 WYSIWYG 装饰已有，两边别只验一边。
+    - 🔧 **第十一轮已修（根因不在渲染器），待复验**：这条与第 20 项当初判「不通过」，
+      真正的根因是**阅读态此前没有任何入口** —— `toggleReading()` 只有 Esc 出口，
+      没有命令/键位/菜单项，`v-show="viewMode === 'reading'"` 的整个预览 pane 是
+      **不可达代码**。导出之所以「可以」，是因为导出读的是同一份 `previewHtml` 渲染到
+      视口外的隐藏节点，与阅读态无关。现新增 `⌘E`（视图 ▸ 阅读态）。
+      **复验前置：先按 ⌘E 进入阅读态**，否则看到的仍是编辑态（预览 pane 隐藏）。
 
 **第八轮新增（2026-10-12）**
 
@@ -740,6 +916,11 @@ GFM 的版本。实测同一段合法表格：默认 `markdown()` → `Document,
     在**第 2 行**补上 `| --- | --- |` → 提示立刻消失。
     ⚠ 眼睛要看的是**提示的可读性与位置**（会不会被右侧行/列信息挤掉、
     长文案会不会溢出），这些探针验不了。
+    - 🔧 **第十一轮：同 19 的根因（阅读态不可达），待复验**。另附带修了一处畸形
+      HTML：`markdown-it-task-lists` 在 `enabled:true` 下输出的 `<input>` 缺一个空格
+      （`<input class="task-list-item-checkbox"type="checkbox">`），浏览器按 HTML5
+      容错能解析，但换 stricter 解析器/接净化器就会静默丢 `type`，已在渲染器定点补齐。
+      **复验前置同样是先 ⌘E 进阅读态**。
 21. **提示的误报体感**：连续写管道表格期间提示常驻是否显得吵？判定规则是
     「顶层段落 + 连续 ≥2 行管道行」，若发现写作时莫名被提示，把这条报回来。
 
@@ -764,7 +945,8 @@ GFM 的版本。实测同一段合法表格：默认 `markdown()` → `Document,
 | **macOS 透明窗口的代价** | `WebviewIsTransparent` + `WindowIsTranslucent` 在旧款 Intel Mac 上可能掉帧（透明窗口不能被合成器缓存）；本机是 macOS 12，只验到「能编译」，性能未实测 |
 | **Linux（CachyOS）真机** | 无边框 + 自绘标题栏的 Linux 表现**从未在真机跑过**；窗口按钮对接的 `WindowMinimise/WindowToggleMaximise/CloseWindow` 在 Linux 后端的行为需目视 |
 | **「最近打开」功能整体下线** | 它的唯一消费方是原生菜单的子菜单；自绘标题栏未做该入口。若要恢复，需前端加列表 + 重新暴露 Go 的 `GetRecents`（`recents.json` 持久化逻辑仍在 `app.go` 的 `recentsPath` 等函数里，但 `AddRecent` 调用点已删） |
-| **`useOutline` 的阅读态分支未验证** | `setReadingPane` 的注入已在第五轮接回（此前丢失导致阅读态不高亮），但**阅读态的跳转仍未目视** |
+| **`useOutline` 的阅读态分支未验证** | `setReadingPane` 的注入已在第五轮接回（此前丢失导致阅读态不高亮），但**阅读态的跳转仍未目视**。2026-10-14 补：阅读态此前**没有任何入口**（见 §2 第十一轮），现已加 `⌘E`；本节这条因此第一次**可被验证**，待复验 |
+| **真正的「系统打印面板」未实现** | Wails 的 WKWebView 不实现 `window.print()`，故 `⌘P` 落地为「生成 PDF」（见 §2 第十一轮）。真正的系统打印需原生 `NSPrintOperation`（macOS）/ `GTK` 打印（Linux），未做。**已知的重复**：`⌘P`（`file.print`）与 `⇧⌘P`（`file.exportPdf`）目前**同效**——保留两条是因为 `⇧⌘P` 在快捷键表/README 里是既有契约，删除会破坏用户肌肉记忆与门禁口径。若将来做原生打印，`⌘P` 应切回真打印、`⇧⌘P` 保持导出 |
 | **CI 的 runner 表现** | 已实测（2026-10-11）：`5ad7434`/`21771c7`/`a105c51` success，`6bdf3d6`/`f1343eb` failure（仅 `go` job），**`18c2f28` success**（run `38143580960`，五 job 全绿）。「本地绿、runner 绿」这一关现在是通过的；那两行 failure 是仓库自身回归（占位文件被删），已修 |
 | **`release.yml` 真 runner** | 需 push 一个 `v*` tag 才会触发三平台打包。`ci.yml` 在 `18c2f28` 上已复绿（见上表），但 `release.yml` **一次都没跑过** —— 打第一个 tag 时它是首次执行，三平台构建的坑（Linux 的 webkit2_41 tag、macOS 签名）都还没被它验过 |
 | **检查更新** | 仓库**无任何 Release**，所以现在只会返回「无法检查更新」（不谎报「已是最新」）。要等第一个 Release |

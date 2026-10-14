@@ -264,10 +264,8 @@ func shortRandHex(n int) string {
 
 // SaveImage 把粘贴/拖拽的图片写入「文档同级 assets/ 目录」，返回可写进 Markdown 的
 // 相对路径（assets/<文件名>）。docPath 为空（文档尚未落盘）时返回错误。
+// 输入是 base64 图片数据（DataTransfer.files 通道，见前端 imageDrop.js）。
 func (a *App) SaveImage(docPath, dataBase64, ext string) (string, error) {
-	if strings.TrimSpace(docPath) == "" {
-		return "", fmt.Errorf("文档尚未保存，无法确定图片存放位置")
-	}
 	ext = strings.ToLower(strings.TrimPrefix(ext, "."))
 	if !allowedImageExt[ext] {
 		return "", fmt.Errorf("不支持的图片类型: %s", ext)
@@ -275,6 +273,32 @@ func (a *App) SaveImage(docPath, dataBase64, ext string) (string, error) {
 	raw, err := base64.StdEncoding.DecodeString(dataBase64)
 	if err != nil {
 		return "", fmt.Errorf("图片数据解码失败: %w", err)
+	}
+	return writeImageAsset(docPath, raw, ext)
+}
+
+// SaveImageFromPath 把「Finder 里 ⌘C 复制的本地图片文件」读盘后写入 assets/。
+// 为什么需要它：macOS 复制文件时剪贴板里只有 file URL（text/uri-list），
+// 图片数据并不在剪贴板里；而 webview 受跨源策略限制无法 fetch(file://)，
+// 读盘只能由 Go 侧完成（前端 imageDrop.js 的 onImagePath 通道）。
+// 扩展名从路径取，白名单/大小校验与 SaveImage 完全同一套（writeImageAsset）。
+func (a *App) SaveImageFromPath(docPath, srcPath string) (string, error) {
+	ext := strings.ToLower(strings.TrimPrefix(filepath.Ext(srcPath), "."))
+	if !allowedImageExt[ext] {
+		return "", fmt.Errorf("不支持的图片类型: %s", ext)
+	}
+	raw, err := os.ReadFile(srcPath)
+	if err != nil {
+		return "", fmt.Errorf("读取图片失败: %w", err)
+	}
+	return writeImageAsset(docPath, raw, ext)
+}
+
+// writeImageAsset 是两条图片通道共用的落盘实现：校验 → 建 assets/ → 命名 → 写盘。
+// 校验集中在这里，两个入口（SaveImage / SaveImageFromPath）不可能各漏一套。
+func writeImageAsset(docPath string, raw []byte, ext string) (string, error) {
+	if strings.TrimSpace(docPath) == "" {
+		return "", fmt.Errorf("文档尚未保存，无法确定图片存放位置")
 	}
 	if len(raw) == 0 {
 		return "", fmt.Errorf("图片数据为空")

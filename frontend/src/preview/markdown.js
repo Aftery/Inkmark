@@ -11,7 +11,7 @@
 import MarkdownIt from 'markdown-it'
 import hljs from 'highlight.js/lib/core'
 import taskLists from 'markdown-it-task-lists'
-import { createSlugCounter } from '../editor/anchors'
+import { createSlugCounter } from '../editor/anchors.js'
 
 import javascript from 'highlight.js/lib/languages/javascript'
 import typescript from 'highlight.js/lib/languages/typescript'
@@ -126,6 +126,15 @@ export function createRenderer() {
   })
   // GFM 任务列表
   md.use(taskLists, { enabled: true, label: true, labelAfter: false })
+  // markdown-it-task-lists 的已知缺陷：enabled:true 时 disabledAttr 是空串，
+  // 输出的 <input> 缺一个空格 —— `<input class="…"type="checkbox">`。
+  // 浏览器按 HTML5 规范会把它解析成两个属性（实测 Chrome 正常渲染勾选框），
+  // 但这是**依赖容错的畸形 HTML**：换 stricter 的解析器（或将来接净化器）就会
+  // 静默丢掉 type。html:false 下 html_inline token 只可能来自本插件，故在此
+  // 定点修补，不动插件本体（node_modules 不改）。
+  // 默认规则即 `tokens[idx].content`（markdown-it renderer.mjs 的 default_rules）。
+  md.renderer.rules.html_inline = (tokens, idx) =>
+    tokens[idx].content.replace(/(class="task-list-item-checkbox"(?: checked="")?)type=/g, '$1 type=')
   // 标题写 id（「插入 → 目录」链接的跳转目标）：slug 生成规则在 editor/anchors.js，
   // 与目录插入共用同一套顺序去重计数，两边的 id 严格对应。
   md._slugs = createSlugCounter()

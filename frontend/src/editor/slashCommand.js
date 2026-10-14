@@ -90,6 +90,42 @@ export function insertSlashItem(view, item, anchor) {
 }
 
 /**
+ * 输入法兜底路径：部分中文输入法**不产生可匹配的 keydown** —— 斜杠键被
+ * 输入法接管（keydown 里只有 'Process'），全角字符经 composition →
+ * insertText 直接落进文档。此时 keymap 永远等不到 '／'，面板「没反应」。
+ * 真机验收 #7 的失败备注「斜杆没反应」正是这条路径。
+ *
+ * 反推规则与 onSlash 的行首守卫**逐字相同**（行首空白之后、单字符），
+ * 锚点取插入位置：面板开启后 syncFromDoc 从 anchor+1 起算过滤词，
+ * confirm 时 insertSlashItem 把 [anchor, head) 整段换掉，全角斜杠不残留。
+ *
+ * 不会与按键路径双开：onSlash 在同一次按键里已同步开面板，host isOpen()
+ * 为真时直接返回。
+ *
+ * 【为什么是模块级导出】host 由调用方注入（而非闭包捕获），单元测试才能用
+ * 假 host + 真 ChangeSet 驱动这条路径 —— 与 tableHint.js 的 __test__ 同一
+ * 思路：可测性不靠私有约定。keymap 里 '／' 那条绑定由 CDP 探针验真实按键。
+ *
+ * @param {object} update CM ViewUpdate（只用 state / view / changes）
+ * @param {{isOpen: () => boolean, openMenu: (view: object, anchor: number) => void}} h 面板宿主
+ */
+export function maybeOpenFromInserted(update, h) {
+  if (!h || h.isOpen()) return
+  const { state } = update
+  let anchor = -1
+  update.changes.iterChanges((fromA, toA, fromB, toB, inserted) => {
+    if (anchor >= 0) return // 只认第一处命中
+    if (toB - fromB !== 1) return // 多字符插入（粘贴 / 片段 / 组合提交）一律放过
+    const ch = inserted.toString()
+    if (ch !== '/' && ch !== '／') return
+    const line = state.doc.lineAt(fromB)
+    if (!/^\s*$/.test(state.doc.sliceString(line.from, fromB))) return
+    anchor = fromB
+  })
+  if (anchor >= 0) h.openMenu(update.view, anchor)
+}
+
+/**
  * 生成扩展。
  *
  * @param {() => (object|null)} getHost 延迟求值的 host 获取函数。
@@ -142,6 +178,10 @@ export function slashCommandExtension(getHost) {
   return [
     Prec.high(keymap.of([
       { key: '/', run: onSlash },
+      // 中文输入法在中文标点模式下，/ 键产出的是全角斜线 U+FF0F（'／'）。
+      // w3c-keyname 对非 ASCII 可打印字符原样返回 event.key，故此绑定可直接
+      // 命中；只绑半角时中文输入法用户「按了没反应」（真机验收 #7）。
+      { key: '／', run: onSlash },
       { key: 'ArrowDown', run: () => route('down') },
       { key: 'ArrowUp', run: () => route('up') },
       { key: 'Enter', run: () => route('enter') },
@@ -149,11 +189,16 @@ export function slashCommandExtension(getHost) {
     ])),
     // 面板开启期间：继续输入 → 回调 syncFromDoc 更新过滤词（越界即自闭）；
     // 光标跳走或编辑区失焦 → 直接关闭。
+    // 面板关闭期间：docChanged 走 maybeOpenFromInserted 兜底（输入法路径，见上）。
     EditorView.updateListener.of((update) => {
       const h = host()
-      if (!h || !h.isOpen()) return
-      if (update.docChanged) h.syncFromDoc(update.view)
-      else if (update.selectionSet || update.focusChanged) h.close()
+      if (!h) return
+      if (h.isOpen()) {
+        if (update.docChanged) h.syncFromDoc(update.view)
+        else if (update.selectionSet || update.focusChanged) h.close()
+        return
+      }
+      if (update.docChanged) maybeOpenFromInserted(update, h)
     }),
   ]
 }

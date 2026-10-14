@@ -211,7 +211,12 @@ export function useCommands(deps) {
       'file.save': () => docState.saveFile(),
       'file.saveAs': () => docState.saveFileAs(),
       'file.rename': fileOps.renameFile,
-      'file.print': () => { session.flushPreview(); window.print() },
+      // 打印：Wails v2.16 的 WKWebView **没有实现 window.print()**（调用是静默
+      // 空操作，不抛异常也不出任何界面 —— 真机验收 #13「快捷键没反应、菜单里
+      // 点击打印也没反应」的根因）。桌面端唯一可用的「打印」= 导出 PDF：
+      // Go 侧离屏 WKWebView 分页渲染 + 系统保存对话框，与 ⌘⇧P 同一条链路。
+      // 非 darwin / 浏览器预览的降级链在 docState.exportPdf 内部（window.print）。
+      'file.print': () => { session.flushPreview(); docState.exportPdf() },
       'file.exportHtml': () => { session.flushPreview(); docState.exportHtml() },
       'file.exportPdf': () => { session.flushPreview(); docState.exportPdf() },
       'file.settings': () => { showSettings.value = true },
@@ -251,6 +256,11 @@ export function useCommands(deps) {
       'format.clear': () => execCmd(clearFormatting),
       // 视图
       'view.focus': workspace.toggleFocus,
+      // 阅读态（渲染后的预览）：单栏重构后预览区一直只在阅读态可见，而
+      // toggleReading 只有 Esc 一个出口、没有任何入口 —— 预览实际是**不可达
+      // 代码**（真机验收 #19「预览效果没有」/ #20「表格未渲染，导出可以」的
+      // 根因：用户根本进不去阅读态，唯一的渲染产物只有导出文件）。
+      'view.reading': () => workspace.toggleReading(),
       'view.outline': toggleOutline,
       'view.zoomIn': () => prefs.changeZoom(10),
       'view.zoomOut': () => prefs.changeZoom(-10),

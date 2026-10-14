@@ -29,7 +29,8 @@
 | **设置面板** | `⌘,` 打开（`src/components/SettingsPanel.vue`）：外观 6 项（主题 / 正文字体 / 字号 / 行距 / 行宽 / 语言）+ 编辑器 2 项（自动保存间隔 / 快照间隔），全部**实时生效**（改完立刻落 CSS 变量，无需重启）、**刷新保持**（`localStorage` 持久化），另有「恢复默认」（二次确认，防误触） |
 | **三语国际化** | `src/i18n/`：简体中文 / English / 日本語 三档字典 + `t()`；标题栏菜单、设置面板、弹层、提示全量覆盖，语言偏好实时切换 |
 | **排版偏好** | 正文字体（系统 / 衬线 / 等宽）、字号（12–20px 六档，编辑区与预览区**成对同步**）、行距（紧凑 / 标准 / 宽松）、行宽（窄 / 标准 / 宽）——真源 `src/themes/prefs.js`，偏好走**文档作用域**变量 `--font-body-user`，不污染标题栏 / 侧栏等界面外壳 |
-| **打印** | `⌘P` 走系统打印对话框（前端 `window.print()`）；`@media print` 已隐藏标题栏 / 侧栏 / 状态栏 / 各类遮罩，只输出正文 |
+| **打印** | `⌘P`：Wails 的 WKWebView **没有实现 `window.print()`**（调用即静默空操作，这正是「⌘P 没反应」的根因），故桌面端把「打印」实现为**生成 PDF**（`exportPdf`，保存对话框 + 路径提示），随后可在系统 PDF 阅读器里打印；非 darwin 桌面 / 浏览器预览下自动回退到 `window.print()`。`@media print` 已隐藏标题栏 / 侧栏 / 状态栏 / 各类遮罩，只输出正文 |
+| **阅读态 / 预览** | `⌘E` 进出阅读态（`view.reading`）—— 预览 pane 的**唯一入口**（补于 2026-10-14：此前 `toggleReading()` 只有 Esc 出口、没有命令/键位/菜单项，整块预览是不可达代码）；阅读态下 `Esc` 退出 |
 | **查找 / 替换** | `⌘F` 查找、`⌘⌥F` 查找并替换（CodeMirror `searchKeymap` + 面板） |
 | **跳转到行** | `⌘L` 打开输入框跳转到指定行号 |
 | **行操作** | `⌥↑` / `⌥↓` 移动当前行，`⇧⌥↓` 向下复制当前行，`⌘⇧K` 删除当前行（VS Code 惯例） |
@@ -64,7 +65,7 @@
 | 另存为… | ⌘⇧S |
 | 重命名… | 无快捷键（走应用内输入对话框） |
 | 设置… | ⌘, |
-| 打印… | ⌘P |
+| 打印（导出 PDF）… | ⌘P |
 | 导出 HTML… | ⌘⇧H |
 | 导出 PDF… | ⌘⇧P |
 
@@ -115,6 +116,7 @@
 | 操作 | 快捷键 |
 |---|---|
 | 专注模式 | ⌘⇧F |
+| 阅读态 | ⌘E |
 | 显示/隐藏大纲 | ⌘B |
 | 放大 | ⌘= |
 | 缩小 | ⌘- |
@@ -179,7 +181,7 @@ inkmark/
     │   └── themes/          # tokens/design-tokens.css（Token 唯一真源）+ index.css（唯一样式入口）
     │                        #   + app-shell.css / platform-darwin.css / editor-wysiwyg.css
     │                        #   + theme.js（主题解析）/ prefs.js（偏好唯一真源）
-    ├── tests/           # node:test 测试网（155 条测试 / 31 个 suite，零第三方依赖），需 Node ≥22
+    ├── tests/           # node:test 测试网（197 条测试 / 39 个 suite，零第三方依赖），需 Node ≥22
     └── wailsjs/         # Wails 自动生成的 IPC 绑定（勿手改）
 ```
 
@@ -213,7 +215,7 @@ npm install
 
 npm run dev      # 本地开发服务器
 npm run build    # 生产构建 → frontend/dist
-npm test         # 测试网（155 条测试，零第三方依赖），【需 Node ≥22】
+npm test         # 测试网（197 条测试，零第三方依赖），【需 Node ≥22】
 ```
 
 > - `npm test` 用的是 Node **内置** `node:test`（无第三方测试依赖），因此**必须 Node ≥22**；低版本会报 `node --test` 不可用。
@@ -224,13 +226,15 @@ npm test         # 测试网（155 条测试，零第三方依赖），【需 No
 ### 门禁脚本（与 CI 同口径）
 
 ```bash
-cd frontend && npm test                                    # 测试网，期望 155/155
+cd frontend && npm test                                    # 测试网，期望 197/197
 node scripts/verify/verify-shortcuts.mjs                   # 快捷键三方对齐（README ↔ 速查表 ↔ COMMANDS）
 node scripts/verify/scan-i18n-residue.mjs                  # i18n 文案残留
 ./scripts/p0-check-emoji.sh frontend/src main.go app.go    # P0 零 emoji
 /usr/local/opt/go/bin/go vet ./...                          # Go 静态检查（注意：go 不在 PATH）
 node scripts/smoke/render-check.mjs                        # 真渲染冒烟（需先 npm run build）
 node scripts/verify/verify-visual-checklist.mjs             # 目视清单副本 ↔ HANDOFF §6 同步（退出码 1=漂移 / 2=解析失效）
+node scripts/verify/scripts-verify-icons.mjs                # 图标 ↔ phaseC 规格逐字比对（手动，不在 CI；期望 24/24）
+node scripts/verify/scripts-verify-theme.mjs                # theme.js 优先级自检（手动，不在 CI；期望 8/8）
 ```
 
 ### 交互探针（验「静默失败」类缺陷，render-check 覆盖不到）
@@ -241,6 +245,7 @@ cd .. && node scripts/probe/probe-slash.mjs         # 斜杠面板：输入 / �
 node scripts/probe/probe-wysiwyg.mjs               # 表格/分割线/图片装饰是否产出 DOM
 node scripts/probe/probe-theme.mjs                 # 暗色下各区域实际计算色
 node scripts/probe/probe-table-hint.mjs            # 缺分隔行时表格提示是否真的出现 / 改对后消失
+node scripts/probe/probe-r11-fixes.mjs             # 第十一轮五处修复：中文输入法全角 ／ / Finder file URL 粘贴 / ⌘P / ⌘E 阅读态（18/18）
 ```
 
 > 改了 `prefs.js`、命令表或 `App.vue` 结构后，**先跑 `npm test` 再提交**——

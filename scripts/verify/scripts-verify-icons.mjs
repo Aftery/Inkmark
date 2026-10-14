@@ -2,15 +2,13 @@
 // 与 frontend/src/components/icons/paths.js 的 ICONS 登记值逐字比对（归一空白），
 // 并统计每个图标的元素数。零输出差异 = 逐字一致。
 import { readFileSync } from 'node:fs'
+import { fileURLToPath } from 'node:url'
+import { dirname, join } from 'node:path'
 
-const spec = readFileSync(
-  new URL('./docs/design/phaseC-visual-spec.md', import.meta.url),
-  'utf8'
-)
-const pathsSrc = readFileSync(
-  new URL('./frontend/src/components/icons/paths.js', import.meta.url),
-  'utf8'
-)
+// 脚本位于 scripts/verify/，仓库根要上跳两级（与 verify-shortcuts.mjs 同约定）
+const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..')
+const spec = readFileSync(join(ROOT, 'docs/design/phaseC-visual-spec.md'), 'utf8')
+const pathsSrc = readFileSync(join(ROOT, 'frontend/src/components/icons/paths.js'), 'utf8')
 
 // 从附录 A 代码块提取 "name: '...'" 条目
 const appendixBlock = spec.split('## 附录 A')[1].split('```js')[1].split('```')[0]

@@ -2,6 +2,11 @@
 // 覆盖：缺省 system、跟随系统实时变化、手动覆盖停止跟随、恢复跟随、
 //       非法偏好忽略、data-theme 永不存 system、监听订阅/退订。
 import assert from 'node:assert'
+import { fileURLToPath } from 'node:url'
+import { dirname, join } from 'node:path'
+
+// 脚本位于 scripts/verify/，仓库根要上跳两级（与 verify-shortcuts.mjs 同约定）
+const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..')
 
 // ---- 环境桩 ----
 const store = new Map()
@@ -23,7 +28,7 @@ globalThis.window = {
 const htmlEl = { dataset: {} }
 globalThis.document = { documentElement: htmlEl }
 
-const theme = await import('./frontend/src/themes/theme.js')
+const theme = await import(join(ROOT, 'frontend/src/themes/theme.js'))
 
 // 模拟 main.js 挂载前的初始化
 theme.initTheme()

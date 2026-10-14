@@ -50,6 +50,10 @@ export function SaveImage(arg1, arg2, arg3) {
   return window['go']['main']['App']['SaveImage'](arg1, arg2, arg3);
 }
 
+export function SaveImageFromPath(arg1, arg2) {
+  return window['go']['main']['App']['SaveImageFromPath'](arg1, arg2);
+}
+
 export function SetDirty(arg1) {
   return window['go']['main']['App']['SetDirty'](arg1);
 }
