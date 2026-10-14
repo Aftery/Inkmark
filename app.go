@@ -37,6 +37,8 @@ type App struct {
 	// 语义定义、生命周期与扩展路径见 docs/architecture/ADR-005-dirty-semantics.md；
 	// 若扩展为多文档，本字段应升级为 docKey→dirty 映射，不得在此布尔量上叠加第二种含义。
 	dirty bool
+	// closing 防止关闭流程中重复弹确认框（Linux Frameless + 自定义 CloseWindow 场景）。
+	closing bool
 }
 
 // NewApp 新建 App。
@@ -60,12 +62,29 @@ func (a *App) startup(ctx context.Context) {
 // 故这里自己实现「正常关闭」：先按 OnBeforeClose 同一套逻辑询问用户，
 // 确认后才 Quit；dirty 为假时直接 Quit。
 // 判据用同一份 dirty 镜像（SetDirty 写入），不重复推断语义（ADR-005）。
+//
+// 【Linux 特殊处理】
+// Linux/GTK 下，自绘关闭按钮点击不会自动触发 Wails 的 OnBeforeClose 钩子
+//（无边框窗口 + 自定义关闭逻辑），因此必须在这里显式调用同一套判定。
+// macOS 下原生红绿灯由 Wails runtime 接管，会自动调用 OnBeforeClose，
+// 但 CloseWindow 只在前端自绘按钮场景下被调用（TitleBar.vue 用 isDarwin 隔离），
+// 所以两条路径互不重叠。
 func (a *App) CloseWindow() {
-	if a.ctx == nil {
+	if a.ctx == nil || a.closing {
 		return
 	}
-	if !a.OnBeforeClose(a.ctx) {
+	fmt.Printf("[DEBUG CloseWindow] a.dirty = %v, a.closing set to true\n", a.dirty)
+	a.closing = true
+	// 复用 OnBeforeClose 的判定逻辑（含 dirty 检查与确认框）
+	shouldBlock := a.OnBeforeClose(a.ctx)
+	fmt.Printf("[DEBUG CloseWindow] OnBeforeClose returned %v\n", shouldBlock)
+	if !shouldBlock {
+		fmt.Println("[DEBUG CloseWindow] Calling Quit")
 		runtime.Quit(a.ctx)
+	} else {
+		// 用户取消关闭，重置标志位允许下次尝试
+		fmt.Println("[DEBUG CloseWindow] User cancelled, resetting closing flag")
+		a.closing = false
 	}
 }
 
@@ -211,6 +230,7 @@ func (a *App) ListDir(path string) ([]DirEntry, error) {
 // 只接收、不推断：Go 侧不读盘比对内容；语义与生命周期以 ADR-005 为准。
 // 不加锁：读写都发生在 Wails 主事件循环序列内，最坏是一次多余的确认框，不影响数据安全。
 func (a *App) SetDirty(d bool) {
+	fmt.Printf("[DEBUG SetDirty] called with %v (was %v)\n", d, a.dirty)
 	a.dirty = d
 }
 
@@ -219,7 +239,9 @@ func (a *App) SetDirty(d bool) {
 // 说明：不提供「保存并退出」——项目已有 800ms 自动保存，dirty 通常只在输入后的
 // 短暂窗口或「未落盘的新文档」为真，此时给一个明确的二选一即可。
 func (a *App) OnBeforeClose(ctx context.Context) bool {
+	fmt.Printf("[DEBUG OnBeforeClose] a.dirty = %v\n", a.dirty)
 	if !a.dirty {
+		fmt.Println("[DEBUG OnBeforeClose] dirty is false, returning false (allow close)")
 		return false
 	}
 	choice, err := runtime.MessageDialog(ctx, runtime.MessageDialogOptions{
@@ -230,17 +252,23 @@ func (a *App) OnBeforeClose(ctx context.Context) bool {
 		DefaultButton: "取消",
 		CancelButton:  "取消",
 	})
+	fmt.Printf("[DEBUG OnBeforeClose] MessageDialog returned: %q (err=%v)\n", choice, err)
 	if err != nil {
+		fmt.Println("[DEBUG OnBeforeClose] Error from dialog, returning true (block close)")
 		return true // 对话框异常时保守阻止关闭，避免误丢内容
 	}
-	// Linux/GTK 下可能返回按钮文本、按钮索引（"0"/"1"）或空串。
-	// 只有明确匹配"不保存退出"时才放行，其余一律视为"取消"。
-	switch strings.TrimSpace(choice) {
-	case "不保存退出", "1":
-		return false
-	default:
-		return true
+	// Linux/GTK 下 MessageDialog 返回值因后端而异：
+	//   - 点"取消"按钮 → "取消" / "0" / "No"
+	//   - 点"不保存退出"按钮 → "不保存退出" / "1" / "Yes"
+	//   - 点对话框 X / ESC → "" (空串) 或 "cancel"
+	// 策略：只要不是明确的退出选择，一律视为取消（保守保护）。
+	trimmed := strings.TrimSpace(choice)
+	if trimmed == "不保存退出" || trimmed == "1" || trimmed == "Yes" {
+		fmt.Printf("[DEBUG OnBeforeClose] Matched exit choice %q, returning false (allow close)\n", trimmed)
+		return false // 用户明确选择不保存退出
 	}
+	fmt.Printf("[DEBUG OnBeforeClose] Did not match exit choice %q, returning true (block close)\n", trimmed)
+	return true // 其他情况一律阻止关闭
 }
 
 // ---------- 图片粘贴 / 拖拽插入 ----------

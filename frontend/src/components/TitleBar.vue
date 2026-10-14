@@ -22,7 +22,7 @@ import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
 import { t } from '../i18n/index.js'
 import { isDarwin } from '../composables/usePlatform.js'
 import { WindowMinimise, WindowToggleMaximise } from '../../wailsjs/runtime/runtime'
-import { CloseWindow } from '../../wailsjs/go/main/App'
+import { CloseWindow, SetDirty } from '../../wailsjs/go/main/App'
 
 const props = defineProps({
   filename: { type: String, default: '' },
@@ -90,9 +90,31 @@ const toggleMaximise = () => runWin(WindowToggleMaximise)
 
 // 关闭走 App.CloseWindow 而不是 Wails 的 Quit：Quit 是强制退出、不经过
 // OnBeforeClose，会绕过「未保存更改」确认框；CloseWindow 走正常关闭流程。
-// 浏览器预览下 CloseWindow 不存在，兜底静默跳过。
-const close = () => {
-  try { CloseWindow() } catch { /* 浏览器预览 */ }
+// 浏览器预览下 CloseWindow / SetDirty 不存在，兜底静默跳过。
+//
+// 【关键修复】SetDirty 是异步调用（Wails IPC），用户快速输入后立即点 X
+// 时，Go 侧的 dirty 镜像可能还是旧值，导致 OnBeforeClose 误判为干净文档、
+// 直接放行而不弹确认框。故这里先强制同步一次 dirty 状态，确保 Go 侧拿到最新值。
+const close = async () => {
+  try {
+    // 调试：打印当前 dirty 状态
+    console.log('[TitleBar.close] props.isDirty =', props.isDirty)
+    
+    // 强制同步当前 dirty 状态到 Go（覆盖 watch 的异步延迟）
+    const isDirty = props.isDirty
+    await SetDirty(isDirty)
+    console.log('[TitleBar.close] SetDirty called with', isDirty)
+    
+    // 等待一小段时间让 Go 侧处理完成（IPC 往返）
+    await new Promise(resolve => setTimeout(resolve, 50))
+    console.log('[TitleBar.close] Calling CloseWindow')
+    
+    // 现在可以安全调用 CloseWindow，Go 侧的 dirty 一定是最新的
+    CloseWindow()
+  } catch (e) {
+    console.error('[TitleBar.close] Error:', e)
+    /* 浏览器预览或绑定未就绪 */
+  }
 }
 </script>
 
