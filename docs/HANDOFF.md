@@ -4,7 +4,18 @@
 > `docs/spec/` 与项目记忆。它记录「做到了什么、怎么验证、哪些坑别再踩」，
 > 而不是流水账。
 >
-> 最后更新：2026-10-14（新增第十、十一轮：目视清单可执行化 + 修掉首次真机验收的 5 项不通过）
+> 最后更新：2026-10-15（新增第十二轮：通道③ —— #8 的根因上一轮判断错了）
+>
+> 🔴 **2026-10-15 第十二轮：#8 图片粘贴的根因上一轮判断错了，已重做**
+> 2026-10-15 用户复验：**「复制的图片只有名称」依旧**。
+> 第十一轮认定「macOS 剪贴板给的是 file URL」并据此加的**通道② 是个从未执行过的分支** ——
+> 真机上WKWebView 根本不把剪贴板图片暴露给 `clipboardData`，只有 `text/plain` 里的文件名，
+> 于是 WebKit 默认行为把它**当文本插入**（现场 `osascript 'clipboard info'` 证实剪贴板里
+> 只有图片数据、零file URL）。探针 18/18 全绿是因为**跑在无头 Chrome 上**，
+> 它注入的输入形态真机上压根不存在。
+> 新增**通道③：Go 侧直接读系统剪贴板**（macOS 用 cgo + AppKit，已在真剪贴板上端到端跑通）。
+> 本轮同时给仓库**补上了第一份 Go 测试**并接进 CI（此前零Go 测试，判据逻辑完全裸奔）。
+> 详见 §2第十二轮。
 >
 > ✅ **2026-10-14 第十一轮：修掉首次真机验收的 5 项不通过**（详见 §2 第十一轮）。
 > 第十轮把 §6 的 22 项目视清单做成了可执行产物（`docs/qa/visual-checklist.html` +
@@ -91,15 +102,18 @@
 cd /Users/aftery/Desktop/myapp/inkmark
 
 # 门禁全跑一遍（约 2 分钟，与 CI 口径一致）
-cd frontend && npm test; cd ..          # 期望 197/197（39 个 suite）
+cd frontend && npm test; cd ..          # 期望 221/221
 node scripts/verify/verify-shortcuts.mjs    # 快捷键契约，期望退出码 0
 node scripts/verify/scan-i18n-residue.mjs   # i18n 文案残留，期望退出码 0
 node scripts/verify/verify-visual-checklist.mjs  # 目视清单副本 ↔ §6 真源，期望退出码 0
 ./scripts/p0-check-emoji.sh frontend/src main.go app.go   # P0 零 emoji，期望退出码 0
 # ↓ 这两个不在 CI（2026-10-14 发现它们因路径 bug 一直红着 —— 手动跑才有价值）
-node scripts/verify/scripts-verify-icons.mjs        # 图标 ↔ phaseC 规格逐字比对，期望 24/24、退出码 0
+node scripts/verify/scripts-verify-icons.mjs        # 图标↔ phaseC 规格逐字比对，期望 24/24、退出码 0
 node scripts/verify/scripts-verify-theme.mjs        # theme.js 优先级自检，期望 8/8、退出码 0
 /usr/local/opt/go/bin/go vet ./...           # 注意：go 不在 PATH。⚠ 本机必绿（dist 有产物），别把它当「仓库编得出来」的证据
+CGO_ENABLED=1 /usr/local/opt/go/bin/go test ./...   # Go 测试（2026-10-15 起CI 才跑；e2e 用例剪贴板为空时 skip）
+CGO_ENABLED=0 GOOS=linux   /usr/local/opt/go/bin/go build -o /dev/null .   # 通道③ Linux 适配层不腐烂
+CGO_ENABLED=0 GOOS=windows /usr/local/opt/go/bin/go build -o /dev/null .   # 通道③ Windows 适配层不腐烂
 node scripts/smoke/render-check.mjs         # 真渲染冒烟（需先 npm run build），期望 PASS
 
 # 交互探针（验「静默失败」类缺陷，render-check 覆盖不到）
@@ -175,6 +189,13 @@ main.go            应用入口（**按平台差异化窗口形态**：darwin �
 app.go             暴露给前端的 Go 方法（文件读写/剪贴板/图像/版本/检查更新/关闭）
                    OnBeforeClose：关闭守卫对 Linux/GTK 已容错（返回文本 / "0"/"1" / 空串三种形态，
                    **只有明确命中「不保存退出」或 "1" 才放行**，其余一律视为取消）
+                   图片三通道入口：SaveImage（数据）/ SaveImageFromPath（file URL）/
+                   **SaveImageFromClipboard（系统剪贴板，通道③）**
+clipboard_image.go ** 通道③ 的平台无关判据：魔数嗅探「什么字节才算图片」+ SVG 文本判定
+clipboard_darwin.{go,m,h}  通道③ macOS 适配层（NSPasteboard → PNG，**cgo**）
+clipboard_linux.go       通道③ Linux 适配层（xclip / wl-paste，带硬超时）⚠ 未真机验证
+clipboard_windows.go     通道③ Windows 适配层（CF_DIBV5/CF_DIB/CF_HDROP）⚠ 未真机验证
+clipboard_other.go       通道③ 其余平台兜底（恒返回空 → 优雅降级，保证任何 GOOS 都能编）
 （locales.go 已删：唯一消费方是 buildMenu 的 t(locale,key)，菜单下线后无人使用）
 version.go         版本单一真源（构建时 -ldflags -X main.version= 注入）
 frontend/src/
@@ -193,7 +214,8 @@ frontend/src/
     useEditorSession.js  编辑器实例 + 派生状态（行列/字数/预览防抖）+ 文档替换
     useDocumentState.js  ** 文档状态机：dirty（唯一语义 + SetDirty 镜像）/ 800ms
                           自动保存 / 快照 / switchFile 边界 / 导出 / 历史面板**
-    useFileAssets.js     图片粘贴拖拽落盘（Base64 → Go SaveImage → assets/ 相对路径）
+    useFileAssets.js     图片粘贴拖拽落盘（**三通道**：File 数据 / file URL / 系统剪贴板③，
+                          都归一到 Go SaveImage* → assets/ 相对路径）
     useCommands.js       ** 命令处理器注册面（registerCommands + 菜单结构 + Esc 路由）**
     useWorkspace.js      视图两态 / 专注 / 侧栏 / 打字机 / 窗口置顶
     usePlatform.js       平台识别（Environment 权威 + navigator 同步初判）
@@ -213,12 +235,15 @@ frontend/src/
                    GFM 任务列表 markdown-it-task-lists、标题 id 由 anchors.js 生成）
                    ⚠ 标题 id 的引号必须是 ASCII 直引号（2026-10-11 修过一次弯引号污染）
   themes/          editor-wysiwyg.css 是 `.cm-md-*` 的唯一定义处（勿写进 CM theme，会顶破棘轮）
-  tests/           197 条测试（node:test，零依赖；39 个 suite）
+  tests/           221 条测试（node:test，零依赖）
                    ⚠ 第八轮起含**真行为测试**（真 EditorState + ensureSyntaxTree），
                      此前全是源码正则断言 —— 详见 §2 第八轮
                    ⚠ 第十一轮起 keymap 接线 pin 也用**真扩展 + 真 keyName + 真 run**
                      驱动（源码正则连「注释掉的绑定」都抓不到，见 §4 ⑲）
+                   ⚠ 第十二轮新增 image-clipboard（通道③）；⚠ 探针跑在无头 Chrome 上，
+                     **剪贴板语义 ≠ WKWebView**，别拿探针全绿当真机可用（见 §4 ⑳ ㉑）
                    契约 6 = embed 占位文件跟踪态 + 标题锚点引号形态（2026-10-11 新增）
+  （Go 侧测试在仓库根：clipboard_image_test.go 判据 / clipboard_e2e_test.go 真剪贴板）
 scripts/
   emoji-pattern.mjs        P0 emoji 正则唯一真源
   p0-check-emoji.sh        薄封装（Node 实现）
@@ -235,7 +260,7 @@ docs/spec/                   契约文档（见下）
 
 ---
 
-## 2. 各轮做了什么（第一~十一轮；第七轮为 2026-10-11 按 git show 回补）
+## 2. 各轮做了什么（第一~十二轮；第七轮为 2026-10-11 按 git show 回补）
 
 ### 第一轮：设置面板 + 打印菜单规范化
 - 新增 `components/SettingsPanel.vue`（外观 / 编辑器两分类，7 项）
@@ -596,7 +621,126 @@ file URL 粘贴 → `SaveImageFromPath` 收到解码后的 `/Users/me/Pictures/�
 
 ---
 
-## 3. 怎么验证（不要只看「构建通过」）
+### 第十二轮：通道③ —— 上一轮的 #8 修法根因是错的，真机复验再次失败（2026-10-15）
+
+用户 2026-10-15 复验结论：**「复制的图片只有名称」依旧**，其余复验项通过。
+这一轮把 #8 从根上重做——**上一轮（第十一轮）对 #8 的根因判断是错的**。
+
+#### 上一轮错在哪
+
+第十一轮认定「macOS 复制文件时剪贴板里只有 file URL（`text/uri-list`）」，
+据此新增了 Go 的 `SaveImageFromPath` + 前端 `imagePathFromDataTransfer`（通道②）。
+**这个根因在真机上从未成立过**，于是通道② 是个从未被执行过的分支。
+错因有二，都值得记住：
+
+1. **推断出来的，没测过**。当时没有人在真机上 dump 过一次剪贴板内容。
+2. **探针跑在无头 Chrome 上**（`scripts/probe/` 用 CDP 连 Chrome）。
+   Chrome 的剪贴板实现与 WKWebView **不同**：Chrome 会给 `files` / `file://`，
+   WebKit 不会。探针注入的 `DataTransfer` 里手工塞了 `text/uri-list`，
+   于是「18/18 全绿」——**它验证的是一个真机上不存在的输入形态**。
+   这是「假绿灯」的第 5 次，但**成因全新**：不是断言写错，而是**验证环境与真机内核不同构**。
+
+#### 真机证据（这次先取证再动手）
+
+```
+$ osascript -e 'clipboard info'
+«class PNGf», 51779, «class 8BPS», 239892, GIF picture, 13827,
+«class jp2 », 46868, JPEG picture, 39040, TIFF picture, 2215488, ...
+$ pbpaste            # 空 —— 没有任何 file:// URL
+```
+
+剪贴板里是**纯图片数据**，**根本没有 file URL**。而用户看到的症状是
+**文件名文本** `1643208705644.jpg` 被插进文档。因果链因此闭合：
+
+> WKWebView（Safari 内核）**不把剪贴板图片暴露给 `clipboardData`** ——
+> 无 `files`、无 `items`、也不在 `text/uri-list` 里给 `file://`，只有 `text/plain`
+> 里的文件名。于是通道①② 全部落空→ 事件交回 WebKit 默认处理 →
+> **默认行为就是把文件名当纯文本插入**。全程无异常、无日志。
+
+#### 修法：新增通道③（Go 侧读系统剪贴板）
+
+剪贴板的二进制内容在 webview 里**没有任何合法途径**读到
+（`fetch(file://)` 被跨源策略拦死；`navigator.clipboard.read()` 无权限且异步，
+paste 事件里等不到），只有进程内的原生剪贴板 API 能拿。故新增：
+
+| 文件 | 职责 | 平台 |
+|---|---|---|
+| `clipboard_image.go` | **纯逻辑**：魔数嗅探（什么字节才算图片）+ SVG 文本判定 | 全平台 |
+| `clipboard_darwin.go` + `.m` + `.h` | NSPasteboard → PNG 字节（cgo） | macOS |
+| `clipboard_linux.go` | `xclip` / `wl-paste`（带**硬超时**） | Linux ⚠️未验|
+| `clipboard_windows.go` | CF_DIBV5 / CF_DIB（补 BITMAPFILEHEADER）/ CF_HDROP | Windows ⚠️未验 |
+| `clipboard_other.go` | 恒返回空 → 通道③ 优雅降级，不影响构建 | 其余 |
+| `app.go` `SaveImageFromClipboard` | 对外入口：取字节 → 嗅探 → `writeImageAsset` | 全平台 |
+| `imageDrop.js` | 门槛判定 + 误判兜底（见下） | 前端 |
+
+**为什么判据用「嗅探字节」而不是信任平台给的格式名**：三个平台报上来的格式标识
+完全不同（macOS 是 UTI `public.png`、Windows 的 CF_DIB **根本没有扩展名**、
+Linux 是命令行输出）。信它们就等于把正确性押在最薄的一环上；**字节才是唯一真源**。
+RIFF 家族（`RIFF` 前 4 字节）必须二次确认偏移8 处的类型标记，否则 **WAV 会被
+误判成 webp**（这条有专门用例）。
+
+#### 前端的两个坑（paste 是同步的，Go 调用是异步的）
+
+1. **必须同步 `preventDefault`**：若等异步结果回来再拦，默认行为已经跑完、
+   文件名文本已经插进文档，就只剩「多插一张 + 留垃圾」。代价是**必须在拦之前
+   就判断这是不是图片粘贴**——门槛因此是**弱启发式**：只有当「通道①② 都没拿到」
+   **且** `text/plain` 看起来像图片文件名（单行、无空白、无路径分隔符、带图片扩展名）
+   时才拦。第一版漏了「无空白」这条，被自测当场抓到：粘贴 `foo.png bar.png`
+   这种正常句子会被吞掉（比插不进图更严重的回归）。
+2. **误判必须能还回去**：门槛是启发式，就一定会有误判。拦下默认行为后，
+   若Go 侧返回空（剪贴板里其实没图片），**必须手工把文本原样 dispatch 回去**，
+   否则用户的内容被静默吞掉（变异自证专门验了这条）。
+
+另外：`Promise.resolve(fn())` 会**先同步执行** `fn()`，回调抛错会直接逃出
+`paste()` 变成未捕获异常。必须写成 `Promise.resolve().then(fn)`。
+
+#### 本轮的门禁升级
+
+- **本仓此前从没有 Go 测试，CI 也不跑 `go test`** —— 判据纯逻辑完全裸奔。
+  现新增 `clipboard_image_test.go`，并把 `go test` 接进 CI（Go job 第三步）。
+- 新增**跨平台交叉编译**步骤：Linux / Windows 两份适配层此前**不在任何门禁里**，
+  改坏了没人知道（同「脚本一直红着没人发现」那类坑）。注意**能编 ≠ 真能用**，
+  真机验证仍未做，见 §7。
+- 前端测试 202 → **221**（新增 `image-clipboard.test.mjs` 19 条）。
+
+#### 变异自证（4 个方向，抓到 3 处问题，其中 2 处是测试自身假绿）
+
+| 方向 | 结果 |
+|---|---|
+| 删 RIFF 二次确认（WAV 误判成 webp） | ✅ 精确报红 |
+| 删「含空白则拒绝」 | ✅ 精确报红（**第一版实现的真 bug**） |
+| 误判时不还回文本 | ✅ 精确报红 |
+| 调换 SVG 与魔数分支顺序 | ❌ **假绿** → 查出是**等价变异体**：`looksLikeSVG` 只看头4 字节，两分支天然互斥 → 删除该恒真断言 |
+| 删门槛里「通道①② 已拿到图片」的短路检查 | ❌ **第一次假绿** → 查出原因：paste() 里通道①② 成功时**早已 return true**，走不到门槛的短路检查，**两道防线互相掩护** → 新增 `shouldTryClipboardFallback` 直测，重跑后精确报红 |
+
+**「假绿灯」累计 5 次**（本轮新增的第 4、5 次）。这一轮的两条新成因值得单列：
+
+- **等价变异体不是缺陷，是断言没打中差异**（SVG 顺序那条）。
+- **两道互相掩护的防线，绕道上层调用点的测试区分不出是哪一道在起作用**
+  （短路检查那条）。解法是**把被掩盖的防线单独导出、直测**。
+
+#### 端到端验证（真剪贴板，不是构造字节）
+
+单元测试用**构造字节**只证明「给定这些字节会落盘」，**证明不了
+「macOS 剪贴板真能读到字节」**——而这次的真机失败恰恰出在「以为能读到」。
+故新增 `clipboard_e2e_test.go`（剪贴板为空时skip，CI 里属正常），
+并用真实 NSPasteboard 跑通了两个场景：
+
+```
+场景A 剪贴板 = 复制的文件（furl）
+  → 读到 filePath=/tmp/ink-e2e-test.png → 落盘 4816 字节 ✅
+场景 B 剪贴板 = 纯图片数据（**用户遇到的形态**，与现场 dump 的类型列表一致）
+  → filePath=""，读到 7718 字节 → 嗅探为 png → 落盘 ✅
+```
+
+#### 验证汇总
+
+`npm test` **221/221**；`go test`（含 e2e）ok；`go vet` exit 0；
+`go build`（darwin / linux / windows 三平台）exit 0；`npm run build` 成功；
+7 个门禁 exit 全 0；`wails generate module` 已重生成绑定（新增
+`SaveImageFromClipboard`）。`App.vue` 146 行（≤150 硬上限）。
+
+---
 
 本项目吃过两次教训：**「进程存活」不等于「界面渲染出来了」**（白屏时进程照样活着），
 **「我以为失败了」不等于「我确认失败了」**。所以：
@@ -773,14 +917,48 @@ CM 真正会用的绑定表（摊平方式与 `@codemirror/view` 内部 `getKeym
 做不到时，明确标注该接线由**探针**端到端负责（如本轮 `updateListener` → 兜底路径）。
 正则只配守**文案/格式**类不变量，不配守行为。
 
+### ⑳ 「macOS 复制文件时剪贴板给的是 file URL（`text/uri-list`）」—— **错（第十二轮真机证实）**
+第十一轮据这句话加了 `SaveImageFromPath`（通道②），2026-10-15 真机复验**依旧失败**。
+现场 `osascript -e 'clipboard info'` 显示剪贴板里**只有图片数据、零 file URL**。
+真相：**WKWebView 不把剪贴板图片暴露给 `clipboardData`**——没有 `files`、没有 `items`、
+也不在 `text/uri-list` 里给 `file://`，只有 `text/plain` 里的**文件名**；
+WebKit 的默认粘贴行为就是**把它当纯文本插入**（这就是「粘贴只是文件名」，
+无异常无日志）。故通道② 在真机上**从未执行过**。
+**教训**：① 关于平台行为的结论**要取证**（`clipboard info` 一条命令的事），
+不要靠「常识推断」写进注释与HANDOFF；② **Chrome ≠ WebKit** ——
+`scripts/probe/` 全部跑在无头 Chrome 上，剪贴板语义与真机不同构，
+**探针全绿不能证明真机可用**（本条与 §4 ⑲ 并列，同属「验证环境与被验证对象不同构」）。
+
+### ㉑ 「探针全绿 ⇒ 真机没问题」—— **错，且成因全新（第十二轮）**
+前几次假绿是「断言写错 / 正则匹配到注释」。这一次**断言完全正确、探针 18/18 全绿**，
+但**它验证的输入形态真机上不存在**：探针用 CDP 构造 `DataTransfer` 并手工塞入
+`text/uri-list`，而 WKWebView 压根不给这个字段。
+**判据**：涉及**平台/内核能力**（剪贴板、文件系统、打印、原生菜单）时，
+必须回答「**这个输入形态，真机上真的会产生吗？**」；
+能用系统命令取证的（`osascript 'clipboard info'`、`pbpaste`）就先取证再写代码。
+
+### ㉒ 「变异自证没报红 = 我的测试守得住」—— **错，两种伪装（第十二轮）**
+两个方向注入了缺陷却全绿，但**原因完全不同**：
+- **等价变异体**：实现里两个分支天然互斥（如 `looksLikeSVG` 只看头 4 字节，
+  而没有图片格式以 `<svg` 开头）→ 调换顺序不改变任何输出。
+  此时那条断言**本来就不可能抓到东西**，该删掉而不是留着自我安慰。
+- **两道互相掩护的防线**：删掉深层短路检查后上层早已 `return`，
+  绕道上层调用点的测试**区分不出是哪一道在起作用**。
+  解法：把被掩盖的防线**单独导出并直测**（本轮 `shouldTryClipboardFallback`）。
+**判据**：变异自证**报红**只说明「有判别力」；**不报红**必须区分
+「等价变异 / 测试打错位置 / 真没守住」三者，不能一律当成通过。
+
 ---
 
-## 5. 门禁体系（5 个 job / 6 项检查，全在 CI）
+## 5. 门禁体系（5 个 job / 8 项检查，全在 CI）
 
 | 门禁 | 卡什么 | 命令 |
 |---|---|---|
-| `frontend` | 197 条测试 + vite 构建 | `npm test && npm run build` |
-| `go` | vet + build（vet 不做链接，cgo 导出代码要 build 才暴露） | `go vet ./... && go build -o /dev/null .` |
+| `frontend` | 221 条测试 + vite 构建 | `npm test && npm run build` |
+| `go` ① | vet（printf 动词错 / 不可达代码 / 锁复制） | `go vet ./...` |
+| `go` ② | build（**vet 不做链接，cgo 导出代码要 build 才暴露**） | `go build -o /dev/null .` |
+| `go` ③ | **测试**（2026-10-15 新增。此前本仓零Go 测试，「什么字节才算图片」的判据完全裸奔） | `CGO_ENABLED=1 go test ./...` |
+| `go` ④ | **Linux / Windows 交叉编译**（2026-10-15 新增。通道③ 的另两个平台适配层此前不在任何门禁里，改坏了没人知道） | `CGO_ENABLED=0 GOOS=linux go build` + `GOOS=windows` |
 | `p0-emoji` | 界面不得用 emoji 当图标（含注释） | `./scripts/p0-check-emoji.sh frontend/src main.go app.go` |
 | `docs-contract` ① | 键位在 README / 应用内速查表 / **`useShortcuts.js` 的 `COMMANDS`** 三处脱节 | `node scripts/verify/verify-shortcuts.mjs` |
 | `docs-contract` ② | 目视清单副本（`docs/qa/visual-checklist.html`）与 **HANDOFF §6 真源**的编号/标题漂移 | `node scripts/verify/verify-visual-checklist.mjs` |
@@ -809,17 +987,24 @@ CM 真正会用的绑定表（摊平方式与 `@codemirror/view` 内部 `getKeym
   防「检查消失却无人报错」的覆盖空窗。
 
 ### 本项目最危险的失败模式：**假绿灯**
-门禁存在但不阻断，等于没有门禁，还提供虚假保证。本项目已发生 **4 次**：
+门禁存在但不阻断，等于没有门禁，还提供虚假保证。本项目已发生 **6 次**：
 1. `p0-check-emoji.sh` 因 grep 报错被吞 → 永远「通过」（2026-10-04 修）
 2. `scan-i18n-residue.mjs` 退出码恒 0 → 放进 CI 也是永远绿（2026-10-06 修）
 3. 「旧绑定形态」用例只断言 toast **条数**，错误路径文案走错也照样绿
    （2026-10-14 变异自证发现，**交付前**拦住，见 §4 ⑱）
 4. keymap 接线 pin 用**源码正则**，绑定被注释掉仍匹配注释文本
    （2026-10-14 变异自证发现，**交付前**拦住，见 §4 ⑲）
+5. **探针验证的输入形态真机上不存在**：`probe-r11-fixes.mjs` 跑在无头 Chrome 上，
+   手工往 `DataTransfer` 里塞 `text/uri-list`；而 WKWebView 压根不给这个字段 →
+   探针 18/18 全绿，真机粘贴依旧坏。**断言完全正确、环境不同构**
+   （2026-10-15 真机复验暴露，见 §4 ⑳ ㉑）
+6. **变异自证没报红 ≠ 测试守得住**：要区分「等价变异体」「测试打错位置」
+   「真没守住」三者（2026-10-15，见 §4 ㉒）
 
-后两次的教训是：**「测试全绿」本身就是需要被验证的对象**。所以每个方向的修复都要做
+后四次的教训是：**「测试全绿」本身就是需要被验证的对象**。所以每个方向的修复都要做
 **变异自证**（注入缺陷 → 必须报红），而不是只看修复后测试是不是绿的 ——
-绿的可能是测试根本管不到。三次实战已证明变异自证是本仓最高性价比的检查手段。
+绿的可能是测试根本管不到。五次实战已证明变异自证是本仓最高性价比的检查手段。
+**第六次补上一条**：涉及平台/内核能力时，还要问「**这个输入形态真机上真会产生吗**」。
 
 **新增/修改任何门禁时，必须做元测试**：造违规输入 → 确认能报红 → 确认退出码非 0。
 
@@ -872,11 +1057,17 @@ CM 真正会用的绑定表（摊平方式与 `@codemirror/view` 内部 `getKeym
      再按斜杠 —— 当初漏的就是这个条件（旧探针用半角模拟，所以探针绿而真机红）。
 8. **图片粘贴**：复制一张图片 → `⌘V`，应在光标处插入 `![](assets/...)`，
    且**同级目录出现 assets/**；文档未落盘时应提示「先保存」而不是静默失败
-   - 🔧 **第十一轮已修，待复验**：原来只认剪贴板里的图片**数据**（`image/*` File）；
-     在 **Finder 里 ⌘C 一个图片文件**时剪贴板是 **file URL**（`dt.files` 为空），
-     旧实现把它放给浏览器默认行为 → **文件名被当文本插进来**（首次验收的现象）。
-     现两条通道都走 Go 落盘（`SaveImageFromPath`）。复验请**两种复制方式都试**：
-     ① 截图工具/浏览器里复制图片；② 在 Finder 里选中图片文件按 ⌘C。
+   - 🔧 **第十二轮已修，待复验**：第十一轮的修法（通道②读 file URL）**根因判断错了**，
+     真机上从未生效过。现场 `osascript 'clipboard info'` 证实剪贴板里**只有图片数据、
+     零 file URL**；**WKWebView 压根不把剪贴板图片暴露给 `clipboardData`**，只有
+     `text/plain` 里的文件名，于是 WebKit 默认行为把它当文本插入（就是用户看到的现象）。
+     现新增**通道③：Go 侧直接读系统剪贴板**（macOS 走 cgo + AppKit，已在真实剪贴板上
+     端到端跑通两种形态）。
+     **复验请三种方式都试**：
+     ① 截图工具 / 浏览器里复制图片 → 应插入 `![](assets/…)`，**不是文件名**；
+     ② Finder 里选中图片文件 ⌘C → 同上；
+     ③ ⚠️ **回归重点：粘贴一段普通中文 / 代码不得被吞掉**（门槛是弱启发式，
+     「像图片文件名」就拦，误判时必须把文本原样还回去）。
 9. **快捷键速查**：`⌘/` 打开后**表格有内容**（第五轮修掉的空表回归项）
 10. **大纲跳转**：`⌘B` 打开大纲，点条目应跳到对应标题、当前节高亮随滚动更新
     （原「阅读态大纲」项随阅读态 2026-10-14 移除改写为编辑态大纲跳转）
@@ -944,6 +1135,8 @@ CM 真正会用的绑定表（摊平方式与 `@codemirror/view` 内部 `getKeym
 | **Linux（CachyOS）真机** | 无边框 + 自绘标题栏的 Linux 表现**从未在真机跑过**；窗口按钮对接的 `WindowMinimise/WindowToggleMaximise/CloseWindow` 在 Linux 后端的行为需目视 |
 | **「最近打开」功能整体下线** | 它的唯一消费方是原生菜单的子菜单；自绘标题栏未做该入口。若要恢复，需前端加列表 + 重新暴露 Go 的 `GetRecents`（`recents.json` 持久化逻辑仍在 `app.go` 的 `recentsPath` 等函数里，但 `AddRecent` 调用点已删） |
 | **表格真渲染待真机验收** | 2026-10-14 落地：编辑器内 StateField block 装饰渲染真表格（`src/editor/tableRender.js`），单元格可直接编辑并同步回 Markdown 源码；单元测试已过，光标进出切换渲染/源码、Tab 换格、IME 输入等真机路径待目视（见 §6 第 20 项）。原「`useOutline` 阅读态分支未验证」随阅读态 2026-10-14 整体移除而消失 |
+| **通道③ 的 Linux / Windows 适配层未在真机验证** | 2026-10-15 落地：图片粘贴新增第三条通道（Go 侧读系统剪贴板）。**macOS 已用真实 NSPasteboard 端到端跑通两个场景**（复制的文件 / 纯图片数据），但 `clipboard_linux.go`（xclip / wl-paste）与 `clipboard_windows.go`（CF_DIBV5 / CF_DIB / CF_HDROP）**只做到「能交叉编译过」，剪贴板 IO 从未在真机跑过**。⚠️ 这正是本仓最熟悉的形态：**能编 ≠ 能用**。首次在Linux / Windows 真机上验过时，请更新本行。两处已知风险：① Linux 的剪贴板工具未装时静默返回空（图片插不进去，但不报错）；② Windows 的 CF_DIB 需补 `BITMAPFILEHEADER` 才被认成 BMP，若 alpha 处理不当可能得到黑底 |
+| **通道③ 的真机复验（#8）** | 2026-10-15 代码已完成并端到端验证，但**尚未在真机编辑器里复验**。复验要点：① 复制图片（截图工具 / 浏览器图片）后⌘V 应插入 `![](assets/…)` 而非文件名；② 从 Finder ⌘C 一个图片文件后 ⌘V 同上；③ **粘贴一段普通中文 / 代码不得被吞**（门槛是弱启发式，这是最需要盯的回归）；④ 文档未保存时粘贴应提示先保存 |
 | **真正的「系统打印面板」未实现** | Wails 的 WKWebView 不实现 `window.print()`，故 `⌘P` 落地为「生成 PDF」（见 §2 第十一轮）。真正的系统打印需原生 `NSPrintOperation`（macOS）/ `GTK` 打印（Linux），未做。**已知的重复**：`⌘P`（`file.print`）与 `⇧⌘P`（`file.exportPdf`）目前**同效**——保留两条是因为 `⇧⌘P` 在快捷键表/README 里是既有契约，删除会破坏用户肌肉记忆与门禁口径。若将来做原生打印，`⌘P` 应切回真打印、`⇧⌘P` 保持导出 |
 | **CI 的 runner 表现** | 已实测（2026-10-11）：`5ad7434`/`21771c7`/`a105c51` success，`6bdf3d6`/`f1343eb` failure（仅 `go` job），**`18c2f28` success**（run `38143580960`，五 job 全绿）。「本地绿、runner 绿」这一关现在是通过的；那两行 failure 是仓库自身回归（占位文件被删），已修 |
 | **`release.yml` 真 runner** | 需 push 一个 `v*` tag 才会触发三平台打包。`ci.yml` 在 `18c2f28` 上已复绿（见上表），但 `release.yml` **一次都没跑过** —— 打第一个 tag 时它是首次执行，三平台构建的坑（Linux 的 webkit2_41 tag、macOS 签名）都还没被它验过 |

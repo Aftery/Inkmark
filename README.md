@@ -20,8 +20,8 @@
 | **大纲视图** | `⌘B` 开关（`src/components/Outline.vue` + `editor/outline.js` + `useOutline.js`），从文档提取标题层级、高亮当前节、点击跳转 |
 | **历史快照** | `src/components/HistoryPanel.vue`：与自动保存**解耦**——编辑会话每 ≥3 分钟节流一次 + 显式保存 + 切换文件前 + 手动触发；轮转 / 去重由 Go 侧 `SnapshotWrite` 负责 |
 | 自动保存 | 改动后 800ms 防抖覆盖原文件，状态栏显示保存态（间隔可配，见「设置面板」） |
-| **未保存关闭拦截** | 脏状态下关闭窗口弹系统确认（取消 → 阻止关闭；不保存退出 → 放行）；`dirty` 由前端同步到 Go（`OnBeforeClose`）；自绘关闭按钮走 `App.CloseWindow()`（先问再退，**不用**会绕过确认的 `Quit`） |
-| **图片粘贴 / 拖拽插入** | 编辑器内粘贴或拖入图片 → 写入文档同级 `assets/`（`img-<时间戳>-<随机>.<ext>`），并插入 `![](assets/xxx)`（`useFileAssets` → Go 侧 `SaveImage`）；文档未落盘时提示先保存 |
+| **未保存关闭拦截** | 脏状态下关闭窗口弹系统确认（取消 → 阻止关闭；不保存退出 → 放行）；`dirty` 由前端同步到 Go（`OnBeforeClose`）；自绘关闭按钮走 `App.CloseWindow(dirty)`——dirty 随关闭请求同一条 IPC 携带（先问再退，**不用**会绕过确认的 `Quit`） |
+| **图片粘贴 / 拖拽插入** | 编辑器内粘贴或拖入图片 → 写入文档同级 `assets/`（`img-<时间戳>-<随机>.<ext>`），并插入 `![](assets/xxx)`；三条输入通道归一（`useFileAssets`）：① `clipboardData` 图片数据 → `SaveImage`；② `file://` URI → `SaveImageFromPath`；③ **系统剪贴板兜底**（WKWebView 不把剪贴板图片暴露给 `clipboardData`，由 Go 侧 `SaveImageFromClipboard` 读原生剪贴板、按魔数嗅探格式）；文档未落盘时提示先保存 |
 | **自绘标题栏（跨平台）** | `src/components/TitleBar.vue`：拖拽区 + 下拉菜单（结构由命令表派生，点击外部自动关闭）+ 居中文件名 / 脏圆点 + 窗口按钮；darwin 隐藏自绘按钮、菜单左移约 70px 给红绿灯留白；其余平台无边框 + 自绘三按钮 |
 | **斜杠命令面板** | `src/components/SlashCommand.vue` + `editor/slashCommand.js`：新行行首输入 `/` 在光标下方面板弹出，`↑↓` 切换、`Enter` 插入（自动删除 `/`）、`Esc` 关闭；支持代码块 / 表格 / 待办 / 引用 |
 | **表格未渲染提示** | 写成管道行却缺 GFM 分隔行时，状态栏**常驻**提示「第 N 行像表格但未渲染：缺分隔行，请在表头下加一行 `\| --- \|`」，改对即消失（`editor/tableHint.js` + `composables/useTableHint.js`） |
@@ -145,9 +145,11 @@
 inkmark/
 ├── main.go              # 入口：按平台差异化窗口形态（darwin 毛玻璃+保留红绿灯 / 其余无边框）、
 │                        #   OnBeforeClose 钩子、绑定 App 服务；原生菜单已整体下线
-├── app.go               # 核心服务：对话框、文件读写、目录遍历、图片保存、dirty 镜像、CloseWindow、版本
+├── app.go               # 核心服务：对话框、文件读写、目录遍历、图片保存三通道入口、dirty 镜像、CloseWindow、版本
+├── clipboard_*.go       # 图片粘贴通道③：读系统剪贴板（darwin=cgo+AppKit / linux=xclip、wl-paste / windows=CF_DIB* /
+│                        #   其余平台恒空兜底）；clipboard_image.go 为全平台共用的魔数嗅探判据
 ├── snapshot.go          # 历史快照存储（写入 / 轮转 / 读取，docKey 派生）
-├── watcher.go           # 文件树外部变更监听（fsnotify，一层 + 去抖；WatchDir 尚未暴露，见「已知问题」）
+├── watcher.go           # 文件树外部变更监听（fsnotify，一层 + 去抖；前端已订阅 fs:changed，待真机确认，见「已知问题」）
 ├── version.go           # 版本单一真源（构建时 -ldflags -X main.version= 注入）
 ├── export_pdf_darwin.go # PDF 一键直出（WKWebView/PDFKit）
 ├── export_pdf_other.go  # 非 darwin 平台的降级实现
@@ -180,7 +182,7 @@ inkmark/
     │   └── themes/          # tokens/design-tokens.css（Token 唯一真源）+ index.css（唯一样式入口）
     │                        #   + app-shell.css / platform-darwin.css / editor-wysiwyg.css
     │                        #   + theme.js（主题解析）/ prefs.js（偏好唯一真源）
-    ├── tests/           # node:test 测试网（197 条测试 / 39 个 suite，零第三方依赖），需 Node ≥22
+    ├── tests/           # node:test 测试网（221 条测试 / 44 个 suite，零第三方依赖），需 Node ≥22
     └── wailsjs/         # Wails 自动生成的 IPC 绑定（勿手改）
 ```
 
@@ -214,7 +216,7 @@ npm install
 
 npm run dev      # 本地开发服务器
 npm run build    # 生产构建 → frontend/dist
-npm test         # 测试网（197 条测试，零第三方依赖），【需 Node ≥22】
+npm test         # 测试网（221 条测试，零第三方依赖），【需 Node ≥22】
 ```
 
 > - `npm test` 用的是 Node **内置** `node:test`（无第三方测试依赖），因此**必须 Node ≥22**；低版本会报 `node --test` 不可用。
@@ -225,12 +227,15 @@ npm test         # 测试网（197 条测试，零第三方依赖），【需 No
 ### 门禁脚本（与 CI 同口径）
 
 ```bash
-cd frontend && npm test                                    # 测试网，期望 197/197
+cd frontend && npm test                                    # 测试网，期望 221/221
 node scripts/verify/verify-shortcuts.mjs                   # 快捷键三方对齐（README ↔ 速查表 ↔ COMMANDS）
 node scripts/verify/scan-i18n-residue.mjs                  # i18n 文案残留
 ./scripts/p0-check-emoji.sh frontend/src main.go app.go    # P0 零 emoji
 /usr/local/opt/go/bin/go vet ./...                          # Go 静态检查（注意：go 不在 PATH）
-node scripts/smoke/render-check.mjs                        # 真渲染冒烟（需先 npm run build）
+CGO_ENABLED=1 /usr/local/opt/go/bin/go test ./...           # Go 测试（含快照与剪贴板判据；e2e 剪贴板为空时 skip）
+CGO_ENABLED=0 GOOS=linux   /usr/local/opt/go/bin/go build -o /dev/null .   # Linux 适配层不腐烂
+CGO_ENABLED=0 GOOS=windows /usr/local/opt/go/bin/go build -o /dev/null .   # Windows 适配层不腐烂
+node scripts/smoke/render-check.mjs                        # 真渲染冒烟（CI frontend job 第三步；需先 npm run build）
 node scripts/verify/verify-visual-checklist.mjs             # 目视清单副本 ↔ HANDOFF §6 同步（退出码 1=漂移 / 2=解析失效）
 node scripts/verify/scripts-verify-icons.mjs                # 图标 ↔ phaseC 规格逐字比对（手动，不在 CI；期望 24/24）
 node scripts/verify/scripts-verify-theme.mjs                # theme.js 优先级自检（手动，不在 CI；期望 8/8）
@@ -284,8 +289,8 @@ node scripts/probe/probe-r11-fixes.mjs             # 第十一轮修复：全角
 | 2 | **真机目视清单未过** | 自动化只验到「根节点渲染 + 标题栏/编辑区已挂载 + 无异常」。标题栏拖拽、红绿灯留白、毛玻璃、斜杠面板、GFM 任务列表、代码块高亮、「插入目录」跳转等交互**全部需目视**，完整 22 项见 [`docs/HANDOFF.md`](docs/HANDOFF.md) §6。**现在有可执行副本了**：打开 [`docs/qa/visual-checklist.html`](docs/qa/visual-checklist.html)（单文件、双击即开、零依赖）逐项勾选并导出 Markdown，追加进 [`docs/qa/VERIFICATION-LOG.md`](docs/qa/VERIFICATION-LOG.md) 留痕——清单副本与 §6 真源的编号/标题由门禁 4 第二步机检守着 |
 | 3 | **macOS 透明窗口的代价** | `WebviewIsTransparent` + `WindowIsTranslucent` 在旧款 Intel Mac 上可能掉帧（透明窗口不能被合成器缓存）；本机是 macOS 12，只验到「能编译」，性能未实测 |
 | 4 | **Linux（CachyOS）真机** | 无边框 + 自绘标题栏的 Linux 表现从未在真机跑过；窗口按钮对接的 `WindowMinimise / WindowToggleMaximise / CloseWindow` 在 Linux 后端的行为需目视 |
-| 5 | **「最近打开」功能整体下线** | 它的唯一消费方是原生菜单的子菜单；自绘标题栏未做该入口。若要恢复，需前端加列表 + 重新暴露 Go 的 `GetRecents`（`recents.json` 持久化逻辑仍在 `app.go`） |
-| 6 | **文件树外部变更监听已接线，待真机确认** | 2026-10-13 落地：前端 `useFileOps` 订阅 `fs:changed`（payload 为根目录路径，仅当与当前 `folderPath` 严格相等才自增 `treeSignal`，`FileTree` 收信号后重拉目录）；Go 侧 `watcher.go` 另修一个真实缺陷——切换/停止文件夹时，旧监听残留的去抖定时器会把已失效目录的 `fs:changed` 推给前端（代际校验修复）。沙箱内无法验证真实 fsnotify 事件，需 `wails dev` 真机确认三场景：① 监听目录内新建/删除文件后树即时刷新；② 切到另一文件夹后旧目录的迟到事件不再触发；③ 关闭文件夹（空串）后无事件推送。另有两项已知未修：去抖边界双发（同 root 多刷一次，无正确性影响）、`w.Errors` 静默吞掉（fsnotify 内部错误时监听静默死亡，建议至少记日志） |
+| 5 | **「最近打开」功能整体下线** | 它的唯一消费方是原生菜单的子菜单；自绘标题栏未做该入口。若要恢复需**重做**：前端加列表 + Go 侧重写持久化（原 `GetRecents` / `recents.json` 逻辑已随原生菜单整体删除，`app.go` 只剩历史注释提及） |
+| 6 | **文件树外部变更监听已接线，待真机确认** | 2026-10-13 落地：前端 `useFileOps` 订阅 `fs:changed`（payload 为根目录路径，仅当与当前 `folderPath` 严格相等才自增 `treeSignal`，`FileTree` 收信号后重拉目录）；Go 侧 `watcher.go` 另修一个真实缺陷——切换/停止文件夹时，旧监听残留的去抖定时器会把已失效目录的 `fs:changed` 推给前端（代际校验修复）。沙箱内无法验证真实 fsnotify 事件，需 `wails dev` 真机确认三场景：① 监听目录内新建/删除文件后树即时刷新；② 切到另一文件夹后旧目录的迟到事件不再触发；③ 关闭文件夹（空串）后无事件推送。另有两项已知未修：去抖边界双发（同 root 多刷一次，无正确性影响）；`w.Errors` 现已记日志（2026-10-15 落地，仍不打扰用户——fsnotify 内部错误时监听可能失效，日志是唯一排查线索） |
 | 7 | **表格真渲染待真机验收** | 2026-10-14 落地：编辑器内 StateField block 装饰渲染真表格（`src/editor/tableRender.js`），单元格可直接编辑并同步回 Markdown 源码；单元测试（`tests/table-render.test.mjs`）已过，光标进出切换渲染/源码、Tab 换格、IME 输入等真机路径仍需目视。原「阅读态跳转未目视」项随阅读态移除而消失 |
 | 8 | **`release.yml` 从未跑过** | 需 push 一个 `v*` tag 才会触发三平台打包；三平台构建的坑（Linux 的 webkit2_41 tag、macOS 签名）都还没被它验过 |
 | 9 | **检查更新** | 仓库**无任何 Release**，所以现在只会返回「无法检查更新」（不谎报「已是最新」） |
@@ -295,7 +300,7 @@ node scripts/probe/probe-r11-fixes.mjs             # 第十一轮修复：全角
 | 13 | **零多标签页 / 多文档** | 当前一次只开一个文档。ADR-005 已预留 `dirty` 语义的升级路径，多文档需重新定义「关闭哪个文档」的判定 |
 | 14 | **无拼写检查（刻意不做）** | CodeMirror 的 lint 对 CJK 基本无效，中文写作场景是**伪需求**，故不引入。英文拼写需自行接第三方 lint 扩展 |
 | 15 | **导出模板文案未国际化** | `export/exporters.js` 的 HTML 模板未接 `t()`（Spec 明确留待后续） |
-| 16 | **`App.vue` 行数零余量** | 装配层硬上限 150 行、当前正好 150 行。新增行为一律先下沉到 composables/，往 App.vue 加 1 行门禁就报红 |
+| 16 | **`App.vue` 行数余量极小** | 装配层硬上限 150 行、当前 146 行（HANDOFF 第十二轮实测）。新增行为一律先下沉到 composables/，门禁口径是剥注释后的有效行 |
 
 ## 关于插件系统（现在不做）
 

@@ -61,6 +61,7 @@ Phase C 引入关闭拦截：前端持 `dirty`（`frontend/src/composables/useDo
 ### 五、跨进程传输约定
 
 - 前端 → Go：`SetDirty(bool)`，由前端 `watch(dirty)` 边沿触发（仅在**变化**时调用）。
+- 自绘关闭按钮路径（`CloseWindow(dirty)`，2026-10-15 起）：dirty 随关闭请求**同一条 IPC** 携带、不读镜像 —— `watch → SetDirty` 是异步镜像，快速输入后立即点 × 时可能滞后（此前靠「先 `await SetDirty` + 50ms sleep」补救，依赖的是无法证实的 IPC 时序假设）。守卫判定本体 `confirmClose`（`app.go`）两条路径共用：`OnBeforeClose`（红绿灯钩子）传镜像值，`CloseWindow` 传请求携带值；`SetDirty` 仍是镜像的唯一写者。
 - Go 侧不自行推断、**不读盘比对文件内容**，只镜像。
 - 读写不加锁：均发生在 Wails 主事件循环序列内，最坏是一次多余的确认框，不影响数据安全。
 - 前端启动时 `dirty = false`，与 Go 零值一致，无需首次同步。
