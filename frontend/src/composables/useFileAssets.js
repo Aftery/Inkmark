@@ -8,17 +8,21 @@
 // 云端图床时代只需替换本模块的内部实现（换 API 调用），输入层与命令表
 // 一行不动 —— 这就是把它单独立模块的收益。
 //
-// 【两条输入通道，一个回调】（2026-10-14 真机验收 #8 补第二条）
+// 【三条输入通道，一个回调】（2026-10-14 真机验收 #8 补第二条；10-15 补第三条）
 //   ① 图片数据：复制截图 / 浏览器拷贝图 → DataTransfer.files 里的 File
 //      → Go SaveImage(docPath, base64, ext)。
-//   ② 本地文件：Finder 里 ⌘C 一个图片文件 → 剪贴板只有 file URL
-//      （text/uri-list），webview 里 fetch(file://) 被跨源策略拦死，
-//      读盘只能走 Go → SaveImageFromPath(docPath, srcPath)。
-//   两条通道在 imageDrop.js 里分辨（files vs file URL），到本模块按
-//   **入参类型**分流（File vs string）—— 共用一个 onImageFile 回调是为了
-//   不占 App.vue 的行数预算（装配层 ≤150 硬上限，见 contracts 契约 5）。
-//   两条通道共用同一套「未落盘拦截 → 类型/大小校验 → assets/ 落盘 → 相对路径」
-//   契约（校验在 Go 侧，前端不重复实现）。
+//   ② 本地文件：DataTransfer 里能拿到 file:// 时的本地路径
+//      （webview 里 fetch(file://) 被跨源策略拦死，读盘只能走 Go）
+//      → Go SaveImageFromPath(docPath, srcPath)。
+//   ③ 系统剪贴板：**WKWebView 上 ①② 全部落空时的唯一出路** ——
+//      WKWebView 不把剪贴板图片暴露给 clipboardData（无 files / 无 items /
+//      text/uri-list 也无 file://），WebKit 默认行为是把文件名当文本插入。
+//      剪贴板的二进制内容只有进程内原生 API 读得到 → Go SaveImageFromClipboard。
+//      详见 app.go 该方法与 clipboard_image.go 的根因分析。
+//   三条通道在 imageDrop.js 里分流，到本模块按**入参类型 / 方法名**分流——
+//   共用一个 onImageFile 回调是为了不占 App.vue 的行数预算（装配层 ≤150 硬上限，
+//   见 contracts 契约 5）。三条通道共用同一套「未落盘拦截 → 类型/大小校验 →
+//   assets/ 落盘 → 相对路径」契约（校验在 Go 侧，前端不重复实现）。
 //
 // 【契约】
 //   - 未落盘文档（filePath 为空）拦截并提示先保存：没有目录就没有 assets/，
@@ -30,7 +34,7 @@
 
 import { t } from '../i18n/index.js'
 
-/** 通道 ①② 共用的守卫：先有 Go 绑定、先有落盘文档，否则给 toast 并返回 null */
+/** 通道 ①②③ 共用的守卫：先有 Go 绑定、先有落盘文档，否则给 toast 并返回 null */
 function requireImageSink(getFilePath, notify) {
   const api = window.go?.main?.App
   if (!api?.SaveImage || !api?.SaveImageFromPath) {
@@ -93,5 +97,37 @@ export function useFileAssets({ getFilePath, notify }) {
     }
   }
 
-  return { saveImageFile, saveImagePath }
+  /**
+   * 通道 ③：**系统剪贴板**里有图片时落盘（2026-10-15 真机复验新增）。
+   *
+   * 【为什么需要它】WKWebView 不把剪贴板图片暴露给 clipboardData ——
+   * 无 files / 无 items / text/uri-list 里也没有 file://。于是通道①② 在真机
+   * 上对「复制图片」全部落空，粘贴被交回 WebKit 默认行为，而默认行为是
+   * **把文件名当纯文本插入**（用户看到的「粘贴只是文件名」，全程无报错）。
+   * 剪贴板的二进制内容只有进程内原生 API 读得到 → 只能由 Go 代取。
+   *
+   * 【返回 null 的两种语义，都不是错误】
+   *   - 剪贴板里没有图片 → 返回 null，调用方**不要**弹 toast，
+   *     直接退回默认粘贴（用户顶多看到文件名文本，与修复前一致，不会更糟）；
+   *   - Go 绑定不存在（旧构建 / 非桌面端）→ 同样静默返回 null。
+   * 只有**真出错**（落盘失败、类型不支持）才抛，交给调用方给toast。
+   *
+   * @returns {Promise<string|null>} 可插入的相对路径；剪贴板无图片时 null
+   */
+  async function saveImageFromClipboard() {
+    const sink = requireImageSink(getFilePath, notify)
+    if (!sink) return null
+    // 旧构建没有这个绑定：静默降级，不打扰用户
+    if (typeof sink.api.SaveImageFromClipboard !== 'function') return null
+    try {
+      // 空串是 Go 侧「剪贴板里没有图片」约定的正常返回，不是异常
+      const rel = await sink.api.SaveImageFromClipboard(sink.docPath)
+      return rel || null
+    } catch (err) {
+      notify?.(t('toast.imageFailed', { error: err?.message || err }), true)
+      return null
+    }
+  }
+
+  return { saveImageFile, saveImagePath, saveImageFromClipboard }
 }

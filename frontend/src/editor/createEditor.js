@@ -192,11 +192,13 @@ export function replaceDocument(view, content) {
 
 // ---------- 图片粘贴 / 拖拽插入 ----------
 // 实现已抽到 editor/imageDrop.js（自成职责的输入通道，且长期占着本文件的行数预算）。
-// 两条通道共用 onImageFile 一个回调：图片数据（dt.files 里的 File）与 Finder
-// 复制的 file URL（text/uri-list，传本地路径字符串）—— useFileAssets 按入参类型分流。
+// 三条通道共用 onImageFile 一个回调：图片数据（dt.files 里的 File）与 file URL
+// （传本地路径字符串）—— useFileAssets 按入参类型分流；
+// 通道③（onClipboardImage，WKWebView 上的唯一出路）走独立的可选回调，
+// 因为它问的是**系统剪贴板**而非 DataTransfer。
 // 普通文本 / 其它文件一律放行（返回 false 交默认处理）。
 
-export function createEditor(parent, { doc = '', onDocChange, onScroll, onUpdate, onImageFile, slashHost }) {
+export function createEditor(parent, { doc = '', onDocChange, onScroll, onUpdate, onImageFile, onClipboardImage, slashHost }) {
   // 只监听文档变化。滚动不要在这里监听 —— CM6 的 ViewUpdate 根本没有 scrollChanged
   // 这个属性（真实属性只有 docChanged/selectionSet/focusChanged/viewportChanged/
   // heightChanged/geometryChanged 等），写了永远是 undefined，滚动联动会静默失效。
@@ -239,8 +241,9 @@ export function createEditor(parent, { doc = '', onDocChange, onScroll, onUpdate
         ...searchKeymap,
         indentWithTab,
       ]),
-      // 图片粘贴 / 拖拽：仅在拿到图片（数据或 file URL）且注册了 onImageFile 时拦截，其余放行
-      EditorView.domEventHandlers(imageDropHandlers(onImageFile)),
+      // 图片粘贴 / 拖拽：仅在拿到图片（数据 / file URL）且注册了对应回调时拦截，其余放行。
+      // 通道③ 可选：未注册时行为与加通道③之前完全一致。
+      EditorView.domEventHandlers(imageDropHandlers(onImageFile, onClipboardImage)),
       markdown({ base: markdownLanguage, codeLanguages }),
       // 只注册 mdHighlight：fallback 样式在存在主样式时会被整体跳过
       //（getHighlighters: main.length ? main : fallback），曾与 defaultHighlightStyle

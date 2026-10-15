@@ -30,6 +30,7 @@ export function useEditorSession({
   editorRef,
   onDocChange,
   onImageFile,
+  onClipboardImage,
   typewriterOn,
   onOutlineRefresh,
   onEditorReady,
@@ -136,6 +137,7 @@ export function useEditorSession({
       onDocChange: (doc) => { queuePreview(doc); onDocChange?.() },
       onUpdate: onEditorUpdate,
       onImageFile,
+      onClipboardImage,
       slashHost: () => slashRef.value,
     })
     editorRef.value = view

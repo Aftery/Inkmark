@@ -322,6 +322,54 @@ func (a *App) SaveImageFromPath(docPath, srcPath string) (string, error) {
 	return writeImageAsset(docPath, raw, ext)
 }
 
+// SaveImageFromClipboard 实现通道③：从**系统剪贴板**取图片并落盘，返回相对路径。
+//
+// 【为什么需要它 —— 2026-10-15 真机复验的根因】
+// 前两条通道（SaveImage / SaveImageFromPath）在真机上对「复制的图片」全部落空：
+// WKWebView（Safari 内核）**不把剪贴板图片暴露给 clipboardData.files / .items**，
+// 也不在 text/uri-list 里给 file://。实测剪贴板里只有 public.png 等图片数据
+// （osascript 'clipboard info' 证据），而 WebKit 的默认粘贴行为是
+// **把文件名当纯文本插入** —— 即用户看到的「粘贴只是文件名」，全程无任何报错。
+//
+// 【为什么必须由 Go 读】webview 里没有合法途径同步读到系统剪贴板的二进制图片：
+// fetch(file://) 被跨源策略拦死，navigator.clipboard.read() 无权限且异步
+// （paste 事件里等不到）。只有进程内原生剪贴板 API 能拿到字节。
+//
+// 【返回空串的语义】「剪贴板里没有图片」—— 不是错误，不弹 toast。
+// 前端只在「本来就没有图片通道可用」时才调它，取不到就退回默认粘贴行为，
+// 用户至多看到「文件名被当文本插入」（即修复前的状态），不会更糟。
+func (a *App) SaveImageFromClipboard(docPath string) (string, error) {
+	pngBytes, filePath := readClipboardImageRaw()
+
+	// ① 剪贴板里是「复制的文件」→ 与通道② 汇流（保留原始格式，不经重编码）
+	if filePath != "" {
+		ext := strings.ToLower(strings.TrimPrefix(filepath.Ext(filePath), "."))
+		if allowedImageExt[ext] {
+			raw, err := os.ReadFile(filePath)
+			if err == nil {
+				return writeImageAsset(docPath, raw, ext)
+			}
+			// 读盘失败不直接返回错误：继续尝试图片数据分支（剪贴板可能两者都有）
+		}
+	}
+
+	// ② 剪贴板里有图片数据 → 按魔数嗅探格式后落盘
+	// 嗅探而非信任平台给的格式名：各平台口径不同（UTI / 无扩展名），
+	// 字节才是唯一真源（详见 clipboard_image.go）。
+	if magic := sniffImageMagic(pngBytes); magic != nil {
+		return writeImageAsset(docPath, magic.Data, magic.Ext)
+	}
+
+	// 兜底：文件路径拿到了但读不出来 → 如实报错（区别于「压根没有图片」）
+	if filePath != "" {
+		if _, err := os.Stat(filePath); err != nil {
+			return "", fmt.Errorf("读取图片失败: %w", err)
+		}
+		return "", fmt.Errorf("不支持的图片类型: %s", filepath.Ext(filePath))
+	}
+	return "", nil
+}
+
 // writeImageAsset 是两条图片通道共用的落盘实现：校验 → 建 assets/ → 命名 → 写盘。
 // 校验集中在这里，两个入口（SaveImage / SaveImageFromPath）不可能各漏一套。
 func writeImageAsset(docPath string, raw []byte, ext string) (string, error) {

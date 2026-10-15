@@ -48,6 +48,8 @@ const session = useEditorSession({
   editorRef, onDocChange, onOutlineRefresh: refreshOutline,
   // 惰性：粘贴 / 拖拽真实发生在 mount 之后，届时 assets 已初始化
   onImageFile: (file) => assets.saveImageFile(file),
+  // 通道③：WKWebView 不暴露剪贴板图片，只能问系统剪贴板（见 imageDrop.js）
+  onClipboardImage: () => assets.saveImageFromClipboard(),
   typewriterOn: workspace.typewriterOn, onEditorReady: () => prefs.syncZoomToEditor(),
 })
 const { editorEl, slashRef, filePath, folderPath, title, caret, wordCount, previewHtml } = session
