@@ -14,8 +14,8 @@ export function ClipboardSet(arg1) {
   return window['go']['main']['App']['ClipboardSet'](arg1);
 }
 
-export function CloseWindow() {
-  return window['go']['main']['App']['CloseWindow']();
+export function CloseWindow(arg1) {
+  return window['go']['main']['App']['CloseWindow'](arg1);
 }
 
 export function ExportPDF(arg1, arg2) {

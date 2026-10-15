@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"log"
 	"os"
 	"sync"
 	"time"
@@ -108,11 +109,13 @@ func (a *App) watchLoop(ctx context.Context, w *fsnotify.Watcher, root string, g
 				timer.Stop()
 			}
 			timer = time.AfterFunc(watchDebounce, fire)
-		case _, ok := <-w.Errors:
+		case err, ok := <-w.Errors:
 			if !ok {
 				return
 			}
-			// 监听错误不打扰用户：下一次变更仍可正常触发
+			// 监听错误不打扰用户（下一次变更仍可正常触发），但必须留痕：
+			// 静默吞掉会让「监听已死」无从排查（README 已知问题 #6 的建议落地）
+			log.Printf("[watcher] fsnotify 错误（监听继续）: %v", err)
 		}
 	}
 }

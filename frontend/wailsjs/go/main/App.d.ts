@@ -8,7 +8,7 @@ export function ClipboardGet():Promise<string>;
 
 export function ClipboardSet(arg1:string):Promise<void>;
 
-export function CloseWindow():Promise<void>;
+export function CloseWindow(arg1:boolean):Promise<void>;
 
 export function ExportPDF(arg1:string,arg2:string):Promise<string>;
 
