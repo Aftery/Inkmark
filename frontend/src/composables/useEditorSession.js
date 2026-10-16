@@ -17,12 +17,14 @@
 // 本模块在 onMounted 填入；装配层与各模块之间只通过 getEditor 闭包互传。
 // 这样也顺带保住了「第三类 TDZ」的守卫样本：槽位声明必须早于任何 composable 调用。
 
-import { ref, computed, nextTick, onMounted, onBeforeUnmount } from 'vue'
+import { ref, computed, watch, nextTick, onMounted, onBeforeUnmount } from 'vue'
 import { createEditor, centerCursor } from '../editor/createEditor'
 import { createRenderer, render } from '../preview/markdown'
 import { DEFAULT_DOC } from '../editor/sampleDocs'
 import { t } from '../i18n/index.js'
 import { checkTableHint, clearTableHint } from './useTableHint.js'
+import { setDocPath } from '../editor/assetUrl.js'
+import { SetDocDir } from '../../wailsjs/go/main/App'
 
 const PREVIEW_DEBOUNCE_MS = 120
 
@@ -44,7 +46,24 @@ export function useEditorSession({
   const caret = ref({ line: 1, col: 1 })
 
   const renderer = createRenderer()
-  const previewHtml = computed(() => render(renderer, markdown.value))
+  // 预览面开 src 改写（/doc-assets/，见 assetUrl.js）；导出面保持磁盘相对路径
+  // ——落盘 HTML 与文档同级，浏览器按相对路径加载 assets/ 才是对的
+  const previewHtml = computed(() => render(renderer, markdown.value, { resolveAssets: true }))
+  const exportHtml = computed(() => render(renderer, markdown.value))
+
+  // 文档路径 → 两处消费：前端改写开关（assetUrl）+ Go 侧镜像（/doc-assets/ 读盘根，
+  // docassets.go）。flush:'sync' 在赋值同一行生效，不与随后的 setState / 装饰构建
+  // 竞速。try/catch 只兜「不在 Wails 环境」（浏览器预览无绑定），与 TitleBar 同款。
+  watch(
+    filePath,
+    (p) => {
+      setDocPath(p)
+      try {
+        SetDocDir(p)
+      } catch { /* 浏览器预览无绑定 */ }
+    },
+    { flush: 'sync' }
+  )
 
   // 字数：CJK 按字计，西文按词计
   const wordCount = computed(() => {
@@ -164,7 +183,7 @@ export function useEditorSession({
   })
 
   return {
-    editorEl, slashRef, markdown, filePath, folderPath, title, caret, wordCount, previewHtml,
+    editorEl, slashRef, markdown, filePath, folderPath, title, caret, wordCount, previewHtml, exportHtml,
     queuePreview, flushPreview, cancelPendingPreview, syncAfterDocReplace, renderMarkdown,
   }
 }

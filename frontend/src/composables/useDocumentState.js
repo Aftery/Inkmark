@@ -49,13 +49,14 @@ function errText(err) {
  * @param {Function} deps.getEditor   () => EditorView|null（onMounted 后才有值）
  * @param {import('vue').Ref<string>} deps.filePath  文档绝对路径（空 = 未落盘）
  * @param {import('vue').Ref<string>} deps.title     文件名（保存对话框默认名）
- * @param {import('vue').Ref<string>} deps.previewHtml 渲染好的预览 HTML（导出用）
+ * @param {import('vue').Ref<string>} deps.renderedHtml 渲染好的 HTML（导出用；
+ *                   与预览同一渲染器但不改写图片 src，见 useEditorSession）
  * @param {import('vue').Ref<string>} deps.theme     当前已解析主题（theme.js 真源）
  * @param {Function} deps.notify      (msg, isErr?) => void 轻提示（UI 归 App.vue）
  * @param {Function} deps.onDocReplaced (content) => void 整份替换文档后的外部状态同步
  *                   （replaceDocument 走 setState，不触发 updateListener）
  */
-export function useDocumentState({ getEditor, filePath, title, previewHtml, theme, notify, onDocReplaced }) {
+export function useDocumentState({ getEditor, filePath, title, renderedHtml, theme, notify, onDocReplaced }) {
   // 状态机：unsaved（有改动未落盘）→ saving（写入中）→ saved；写入失败 → error。
   // 四态在状态栏用「图标形状 + 文案 + 颜色」三重表达（AC-20）。
   const saveState = ref('unsaved')
@@ -198,7 +199,7 @@ export function useDocumentState({ getEditor, filePath, title, previewHtml, them
   async function exportHtml() {
     const path = await SaveFileDialog(`${title.value.replace(/\.md$/, '')}.html`)
     if (!path) return
-    const html = buildHtmlDocument(title.value, previewHtml.value, theme.value)
+    const html = buildHtmlDocument(title.value, renderedHtml.value, theme.value)
     await WriteFile(path.endsWith('.html') ? path : path + '.html', html)
   }
 
@@ -241,7 +242,7 @@ export function useDocumentState({ getEditor, filePath, title, previewHtml, them
     // AC-19c 主题映射：dark → 强制 light（PDF 是纸面产物，不出深底浅字）；light/paper 原样
     const pdfTheme = theme.value === 'dark' ? 'light' : theme.value
     // 版式宽 467px（架构坑 19 / 视觉规格 §8.8）：1 CSS px = 1 pt 分页假设的前提
-    let html = buildHtmlDocument(title.value, previewHtml.value, pdfTheme, '467px')
+    let html = buildHtmlDocument(title.value, renderedHtml.value, pdfTheme, '467px')
     // 兜底：若未来模板回退为固定 46rem，这里保证 PDF 版心仍为 467px
     if (/max-width:\s*46rem/.test(html)) html = html.replace(/max-width:\s*46rem/g, 'max-width:467px')
     try {

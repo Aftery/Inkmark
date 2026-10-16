@@ -14,6 +14,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/wailsapp/wails/v2/pkg/runtime"
@@ -39,6 +40,11 @@ type App struct {
 	dirty bool
 	// closing 防止关闭流程中重复弹确认框（Linux Frameless + 自定义 CloseWindow 场景）。
 	closing bool
+	// docDir 是当前文档所在目录的镜像（真源在前端 filePath，由 SetDocDir 写入），
+	// /doc-assets/ 资源服务（docassets.go）据此把 URL 解析到磁盘文件。
+	// 与 dirty 同族：「前端真源 → Go 镜像」；空串（含从未同步）= 没有已落盘文档。
+	// 并发说明：资源服务跑在 asset server 的 goroutine，镜像用 atomic.Value。
+	docDir atomic.Value
 }
 
 // NewApp 新建 App。

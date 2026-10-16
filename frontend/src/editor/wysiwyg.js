@@ -24,6 +24,9 @@ import { syntaxTree } from '@codemirror/language'
 // aria-label，屏幕阅读器会读出来，属于货真价实的用户可见文案。
 // （此文件此前未被 i18n 覆盖，是 Spec §5 组件清单的一处遗漏，已补上。）
 import { t } from '../i18n/index.js'
+// 图片 src 的文档相对路径 → /doc-assets/ 改写（唯一口径在 assetUrl.js）；
+// 不改写的话 src 会落到构建产物目录，图片永远是碎图占位
+import { resolveAssetSrc } from './assetUrl.js'
 
 // ---------- 开关：StateField + StateEffect（与 createEditor.js 的 setFocusMode 同构） ----------
 // 默认开启：即时模式是 D-2 的默认编辑形态。
@@ -97,7 +100,7 @@ class ImageWidget extends WidgetType {
     const wrap = document.createElement('span')
     wrap.className = 'cm-md-img'
     const img = document.createElement('img')
-    img.src = this.src
+    img.src = resolveAssetSrc(this.src)
     img.alt = this.alt
     img.loading = 'lazy'
     img.addEventListener('error', () => {

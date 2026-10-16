@@ -12,6 +12,7 @@ import MarkdownIt from 'markdown-it'
 import hljs from 'highlight.js/lib/core'
 import taskLists from 'markdown-it-task-lists'
 import { createSlugCounter } from '../editor/anchors.js'
+import { resolveAssetSrc } from '../editor/assetUrl.js'
 
 import javascript from 'highlight.js/lib/languages/javascript'
 import typescript from 'highlight.js/lib/languages/typescript'
@@ -143,10 +144,23 @@ export function createRenderer() {
     const text = inline && inline.type === 'inline' ? inline.content : ''
     return `<${tokens[idx].tag} id="${md._slugs.slug(text)}">`
   }
+  // 图片 src 改写（仅预览面，见 render 的 resolveAssets 开关与 assetUrl.js 文件头）：
+  // webview 里文档相对路径解析不到磁盘文件，必须经 /doc-assets/ 由 Go 读盘。
+  // 导出 HTML/PDF 走默认分支不改写 —— 落盘 HTML 与文档同级，相对路径在浏览器
+  // 里本来就能加载，写死 wails 内部 URL 反而把导出产物弄坏。
+  md.renderer.rules.image = (tokens, idx, options, env, self) => {
+    const token = tokens[idx]
+    if (md._resolveAssets) {
+      const src = token.attrGet('src')
+      if (src) token.attrSet('src', resolveAssetSrc(src))
+    }
+    return self.renderToken(tokens, idx, options)
+  }
   return md
 }
 
-export function render(renderer, markdown) {
+export function render(renderer, markdown, { resolveAssets = false } = {}) {
   renderer._slugs = createSlugCounter() // 每次渲染重置去重计数，重复标题稳定为 -1/-2…
+  renderer._resolveAssets = resolveAssets
   return renderer.render(markdown)
 }

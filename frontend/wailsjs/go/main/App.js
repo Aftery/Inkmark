@@ -18,6 +18,10 @@ export function CloseWindow(arg1) {
   return window['go']['main']['App']['CloseWindow'](arg1);
 }
 
+export function DocAssetHandler() {
+  return window['go']['main']['App']['DocAssetHandler']();
+}
+
 export function ExportPDF(arg1, arg2) {
   return window['go']['main']['App']['ExportPDF'](arg1, arg2);
 }
@@ -60,6 +64,10 @@ export function SaveImageFromPath(arg1, arg2) {
 
 export function SetDirty(arg1) {
   return window['go']['main']['App']['SetDirty'](arg1);
+}
+
+export function SetDocDir(arg1) {
+  return window['go']['main']['App']['SetDocDir'](arg1);
 }
 
 export function SnapshotDocKey(arg1) {

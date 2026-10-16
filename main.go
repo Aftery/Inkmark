@@ -67,6 +67,10 @@ func main() {
 		MinHeight: 560,
 		AssetServer: &assetserver.Options{
 			Assets: assets,
+			// 内嵌资源 miss 的 GET 落到这里：/doc-assets/ 前缀按当前文档目录
+			// 读盘返回（Markdown 里相对路径的图片因此能显示），其余照旧 404。
+			// 见 docassets.go；前端改写口径在 editor/assetUrl.js。
+			Handler: app.DocAssetHandler(),
 		},
 		OnStartup:     app.startup,
 		OnBeforeClose: app.OnBeforeClose,

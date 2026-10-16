@@ -52,11 +52,11 @@ const session = useEditorSession({
   onClipboardImage: () => assets.saveImageFromClipboard(),
   typewriterOn: workspace.typewriterOn, onEditorReady: () => prefs.syncZoomToEditor(),
 })
-const { editorEl, slashRef, filePath, folderPath, title, caret, wordCount, previewHtml } = session
+const { editorEl, slashRef, filePath, folderPath, title, caret, wordCount, previewHtml, exportHtml } = session
 const { focusOn, focusToast, sidebarOpen, sidebarTab, showSidebarTab } = workspace
 const assets = useFileAssets({ getFilePath: () => filePath.value, notify: showToast })
 const docState = useDocumentState({
-  getEditor, filePath, title, previewHtml, theme: prefs.resolvedTheme,
+  getEditor, filePath, title, renderedHtml: exportHtml, theme: prefs.resolvedTheme,
   notify: showToast, onDocReplaced: session.syncAfterDocReplace,
 })
 const { saveState, dirty, showHistory, snapshots, historyLoading } = docState

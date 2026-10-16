@@ -21,7 +21,7 @@
 | **历史快照** | `src/components/HistoryPanel.vue`：与自动保存**解耦**——编辑会话每 ≥3 分钟节流一次 + 显式保存 + 切换文件前 + 手动触发；轮转 / 去重由 Go 侧 `SnapshotWrite` 负责 |
 | 自动保存 | 改动后 800ms 防抖覆盖原文件，状态栏显示保存态（间隔可配，见「设置面板」） |
 | **未保存关闭拦截** | 脏状态下关闭窗口弹系统确认（取消 → 阻止关闭；不保存退出 → 放行）；`dirty` 由前端同步到 Go（`OnBeforeClose`）；自绘关闭按钮走 `App.CloseWindow(dirty)`——dirty 随关闭请求同一条 IPC 携带（先问再退，**不用**会绕过确认的 `Quit`） |
-| **图片粘贴 / 拖拽插入** | 编辑器内粘贴或拖入图片 → 写入文档同级 `assets/`（`img-<时间戳>-<随机>.<ext>`），并插入 `![](assets/xxx)`；三条输入通道归一（`useFileAssets`）：① `clipboardData` 图片数据 → `SaveImage`；② `file://` URI → `SaveImageFromPath`；③ **系统剪贴板兜底**（WKWebView 不把剪贴板图片暴露给 `clipboardData`，由 Go 侧 `SaveImageFromClipboard` 读原生剪贴板、按魔数嗅探格式）；文档未落盘时提示先保存 |
+| **图片粘贴 / 拖拽插入** | 编辑器内粘贴或拖入图片 → 写入文档同级 `assets/`（`img-<时间戳>-<随机>.<ext>`），并插入 `![](assets/xxx)`；三条输入通道归一（`useFileAssets`）：① `clipboardData` 图片数据 → `SaveImage`；② `file://` URI → `SaveImageFromPath`；③ **系统剪贴板兜底**（WKWebView 不把剪贴板图片暴露给 `clipboardData`，由 Go 侧 `SaveImageFromClipboard` 读原生剪贴板、按魔数嗅探格式）；文档未落盘时提示先保存；图片**显示**走 `/doc-assets/` 资源服务（Go `docassets.go` 按当前文档目录读盘，前端 `editor/assetUrl.js` 唯一改写口；预览改写、导出保真） |
 | **自绘标题栏（跨平台）** | `src/components/TitleBar.vue`：拖拽区 + 下拉菜单（结构由命令表派生，点击外部自动关闭）+ 居中文件名 / 脏圆点 + 窗口按钮；darwin 隐藏自绘按钮、菜单左移约 70px 给红绿灯留白；其余平台无边框 + 自绘三按钮 |
 | **斜杠命令面板** | `src/components/SlashCommand.vue` + `editor/slashCommand.js`：新行行首输入 `/` 在光标下方面板弹出，`↑↓` 切换、`Enter` 插入（自动删除 `/`）、`Esc` 关闭；支持代码块 / 表格 / 待办 / 引用 |
 | **表格未渲染提示** | 写成管道行却缺 GFM 分隔行时，状态栏**常驻**提示「第 N 行像表格但未渲染：缺分隔行，请在表头下加一行 `\| --- \|`」，改对即消失（`editor/tableHint.js` + `composables/useTableHint.js`） |

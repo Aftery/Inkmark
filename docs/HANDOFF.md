@@ -4,7 +4,14 @@
 > `docs/spec/` 与项目记忆。它记录「做到了什么、怎么验证、哪些坑别再踩」，
 > 而不是流水账。
 >
-> 最后更新：2026-10-15（新增第十二轮：通道③ —— #8 的根因上一轮判断错了）
+> 最后更新：2026-10-15 晚（新增第十三轮：图片显示的最后一公里 /doc-assets/ 资源服务）
+>
+> 🟡 **2026-10-15 晚 第十三轮：拖拽的图片不显示（根因：文档相对路径没有解析到磁盘的一步）**
+> 第十二轮修完通道③ 后继续复验：拖拽插入的图片**落盘与 Markdown 都成功**，但编辑器
+> 与预览都不显示（碎图占位）——webview 的 origin 是构建产物目录，`assets/x.png`
+> 解析不到磁盘文件。现新增 `/doc-assets/` 资源服务（Go `docassets.go`）+ 前端唯一
+> 改写口（`editor/assetUrl.js`），预览改写、导出保真。详见 §2 第十三轮。
+> **真机复验未做**：§6 #8 的三种粘贴方式 + 拖拽显示两处（编辑器/预览）。
 >
 > 🔴 **2026-10-15 第十二轮：#8 图片粘贴的根因上一轮判断错了，已重做**
 > 2026-10-15 用户复验：**「复制的图片只有名称」依旧**。
@@ -102,7 +109,7 @@
 cd /Users/aftery/Desktop/myapp/inkmark
 
 # 门禁全跑一遍（约 2 分钟，与 CI 口径一致）
-cd frontend && npm test; cd ..          # 期望 221/221
+cd frontend && npm test; cd ..          # 期望 230/230
 node scripts/verify/verify-shortcuts.mjs    # 快捷键契约，期望退出码 0
 node scripts/verify/scan-i18n-residue.mjs   # i18n 文案残留，期望退出码 0
 node scripts/verify/verify-visual-checklist.mjs  # 目视清单副本 ↔ §6 真源，期望退出码 0
@@ -235,7 +242,7 @@ frontend/src/
                    GFM 任务列表 markdown-it-task-lists、标题 id 由 anchors.js 生成）
                    ⚠ 标题 id 的引号必须是 ASCII 直引号（2026-10-11 修过一次弯引号污染）
   themes/          editor-wysiwyg.css 是 `.cm-md-*` 的唯一定义处（勿写进 CM theme，会顶破棘轮）
-  tests/           221 条测试（node:test，零依赖）
+  tests/           230 条测试（node:test，零依赖）
                    ⚠ 第八轮起含**真行为测试**（真 EditorState + ensureSyntaxTree），
                      此前全是源码正则断言 —— 详见 §2 第八轮
                    ⚠ 第十一轮起 keymap 接线 pin 也用**真扩展 + 真 keyName + 真 run**
@@ -740,6 +747,48 @@ RIFF 家族（`RIFF` 前 4 字节）必须二次确认偏移8 处的类型标记
 7 个门禁 exit 全 0；`wails generate module` 已重生成绑定（新增
 `SaveImageFromClipboard`）。`App.vue` 146 行（≤150 硬上限）。
 
+### 第十三轮：图片「显示」的最后一公里 —— /doc-assets/ 资源服务（2026-10-15 晚）
+
+第十二轮修完通道③ 后用户继续复验，又暴露两个现象：
+1. **拖拽插入的图片不显示**（编辑器里是虚线占位框，tip 显示路径）——但落盘和
+   Markdown 插入都是**成功的**（文件名时间戳可证）；
+2. 粘贴仍是文件名的那条，是**10-14 的旧残留**（文件名时间戳早于通道③ 的提交点），
+   重新构建后按 §6 #8 的三种方式复验即可。
+
+#### 根因（两条渲染面共缺同一步）
+
+webview 的页面 origin 是**应用自身的资源服务**，Markdown 里的文档相对路径
+`assets/x.png` 被解析到**前端构建产物**的同名目录（404）。文档旁边的真实文件
+webview 看不见，`fetch(file://)` 又被跨源策略拦死——**「文档相对路径 → 磁盘文件」
+这一步从来没人做**，WYSIWYG 的 `ImageWidget`（onError 降级成占位框）与预览的
+`<img>` 双双中招，全程无报错。
+
+#### 修法（口径只有一个，两头各守一份）
+
+| 层 | 文件 | 职责 |
+|---|---|---|
+| Go | `docassets.go`（新） | `assetserver.Options.Handler`：内嵌资源 miss 的 GET 落进来，`/doc-assets/<rel>` 按当前文档目录读盘返回；**只放行 allowedImageExt 白名单**；穿越的**唯一承载性判据**是 `filepath.Rel` 包含校验（`..` 段、`%2e%2e`、反斜杠形态全部由它统一裁定，不在前面散布第二个口径）；其余请求复刻无 Handler 时的默认 404/405 |
+| Go | `app.go` `SetDocDir` | 当前文档目录的**前端真源 → Go 镜像**（与 `dirty` 同族），资源服务据此解析 |
+| 前端 | `editor/assetUrl.js`（新） | **唯一改写口** `resolveAssetSrc`：data:/blob:/http(s):/绝对路径原样；未落盘不改写（渲染为占位，与改写前一致）；前缀常量与 Go 逐字对齐 |
+| 前端 | `preview/markdown.js` | image 规则覆写，但只在 `render(…, { resolveAssets: true })` 分支生效 —— **导出 HTML/PDF 不改写**（落盘 HTML 与文档同级，磁盘相对路径本来就是对的，写死 wails 内部 URL 反而毁掉导出产物）。预览用 `previewHtml`、导出用新拆的 `exportHtml`（`useDocumentState` 的依赖更名 `renderedHtml`，与本地导出动作函数 `exportHtml` 撞名故另起名） |
+| 前端 | `wysiwyg.js` | `ImageWidget.toDOM` 经 `resolveAssetSrc` 改写 |
+| 前端 | `useEditorSession.js` | `watch(filePath, …, { flush: 'sync' })`：赋值同一行同步 `setDocPath` + `SetDocDir`，不与随后的 setState / 装饰构建竞速 |
+
+#### 验证
+
+- Go：`docassets_test.go` 7 条（正常读取+Content-Type / 5 种穿越形态 404 /
+  白名单外 404 / 未同步目录 404 / 前缀外保持默认 404 / 非 GET 405 / svg 类型）。
+- 前端：`tests/asset-url.test.mjs` 12 条（改写口径 / 预览改写·导出保真·开关不残留 /
+  两处消费方唯一性 / 前缀两头一字不差）。测试数 221 → **230**。
+- **变异自证有个教训**：先打掉「`..` 段扫描」没红——穿越被三层防御中的另外两层接住
+  （Clean 前缀 / Rel 包含）。**多口径会让变异自证失真**，于是把防御收敛成
+  「Clean 归一化 + Rel 承载判据」一层，再变异 Rel → 精确报红 → 还原复绿。
+  前端两个变异（前缀改字符 / ImageWidget 退回裸 src）均精确报红。
+- `npm test` 230/230；`go vet`/`go test` exit 0；`npm run build` 成功且 bundle 里
+  可 grep 到 `/doc-assets/`；`render-check` PASS。
+- **真机复验未做**（wails dev 正在跑，热重载后即可验）：§6 #8 的三种粘贴方式 +
+  拖拽图片**要显示出来**（编辑器非活跃行 + 预览区两处）。
+
 ---
 
 本项目吃过两次教训：**「进程存活」不等于「界面渲染出来了」**（白屏时进程照样活着），
@@ -954,7 +1003,7 @@ WebKit 的默认粘贴行为就是**把它当纯文本插入**（这就是「粘
 
 | 门禁 | 卡什么 | 命令 |
 |---|---|---|
-| `frontend` | 221 条测试 + vite 构建 | `npm test && npm run build` |
+| `frontend` | 230 条测试 + vite 构建 | `npm test && npm run build` |
 | `go` ① | vet（printf 动词错 / 不可达代码 / 锁复制） | `go vet ./...` |
 | `go` ② | build（**vet 不做链接，cgo 导出代码要 build 才暴露**） | `go build -o /dev/null .` |
 | `go` ③ | **测试**（2026-10-15 新增。此前本仓零Go 测试，「什么字节才算图片」的判据完全裸奔） | `CGO_ENABLED=1 go test ./...` |
@@ -1068,6 +1117,13 @@ WebKit 的默认粘贴行为就是**把它当纯文本插入**（这就是「粘
      ② Finder 里选中图片文件 ⌘C → 同上；
      ③ ⚠️ **回归重点：粘贴一段普通中文 / 代码不得被吞掉**（门槛是弱启发式，
      「像图片文件名」就拦，误判时必须把文本原样还回去）。
+   - 🔧 **第十三轮已修，待复验（显示面）**：拖拽插入的图片此前**落盘与 Markdown 都
+     成功但不显示**——webview 的 origin 是构建产物目录，`assets/x.png` 解析不到
+     磁盘文件（全程无报错）。现新增 `/doc-assets/` 资源服务（Go `docassets.go`，
+     `app.go SetDocDir` 镜像文档目录），前端唯一改写口 `editor/assetUrl.js`
+     （预览改写、**导出不改写**，导出的 HTML 靠磁盘相对路径加载）。
+     **复验加三条**：① 拖入图片后，编辑器非活跃行显示**图片本体**（不是虚线占位框）；
+     ② 预览区同样显示；③ 导出的 HTML 与文档放一起用浏览器打开也能看到图。
 9. **快捷键速查**：`⌘/` 打开后**表格有内容**（第五轮修掉的空表回归项）
 10. **大纲跳转**：`⌘B` 打开大纲，点条目应跳到对应标题、当前节高亮随滚动更新
     （原「阅读态大纲」项随阅读态 2026-10-14 移除改写为编辑态大纲跳转）
