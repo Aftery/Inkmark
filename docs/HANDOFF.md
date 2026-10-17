@@ -4,7 +4,17 @@
 > `docs/spec/` 与项目记忆。它记录「做到了什么、怎么验证、哪些坑别再踩」，
 > 而不是流水账。
 >
-> 最后更新：2026-10-15 晚（新增第十三轮：图片显示的最后一公里 /doc-assets/ 资源服务）
+> 最后更新：2026-10-16（新增第十四轮：⌘V 图片粘贴 —— 根因是命令分发绕过了 paste 事件）
+>
+> ✅ **2026-10-16 第十四轮：拖拽好了但复制粘贴还是不行（根因：⌘V 被 `edit.paste` 命令接管，DOM paste 事件从不触发）**
+> 第十三轮修完显示链路后真机复验：**拖拽插图且正常显示，⌘V 仍只出文件名文本**。
+> 真机探针（Go 侧 `SaveImageFromClipboard` 打点）证实：⌘V 时该函数**根本不被调用** ——
+> `installGlobalShortcuts` 对命中命令 `preventDefault()`，webview 原生粘贴与 DOM paste
+> 事件从此不再发生，imageDrop 的三条图片通道全挂在 paste 事件上、到不了键盘这条路；
+> `edit.paste` 命令处理器只做了 `ClipboardGet` 文本插入。修法：粘贴执行体下沉为
+> `editor/pasteCommand.js`（**图片优先、文本兜底**，异步上下文由 Go 字节嗅探精确裁定，
+> 无需弱启发式门槛）。真机复验通过（预置剪贴板 + 用户自复制两路均插图且显示）。
+> **测试 230 → 239**。详见 §2 第十四轮。
 >
 > 🟡 **2026-10-15 晚 第十三轮：拖拽的图片不显示（根因：文档相对路径没有解析到磁盘的一步）**
 > 第十二轮修完通道③ 后继续复验：拖拽插入的图片**落盘与 Markdown 都成功**，但编辑器
@@ -109,7 +119,7 @@
 cd /Users/aftery/Desktop/myapp/inkmark
 
 # 门禁全跑一遍（约 2 分钟，与 CI 口径一致）
-cd frontend && npm test; cd ..          # 期望 230/230
+cd frontend && npm test; cd ..          # 期望 239/239
 node scripts/verify/verify-shortcuts.mjs    # 快捷键契约，期望退出码 0
 node scripts/verify/scan-i18n-residue.mjs   # i18n 文案残留，期望退出码 0
 node scripts/verify/verify-visual-checklist.mjs  # 目视清单副本 ↔ §6 真源，期望退出码 0
@@ -242,7 +252,7 @@ frontend/src/
                    GFM 任务列表 markdown-it-task-lists、标题 id 由 anchors.js 生成）
                    ⚠ 标题 id 的引号必须是 ASCII 直引号（2026-10-11 修过一次弯引号污染）
   themes/          editor-wysiwyg.css 是 `.cm-md-*` 的唯一定义处（勿写进 CM theme，会顶破棘轮）
-  tests/           230 条测试（node:test，零依赖）
+  tests/           239 条测试（node:test，零依赖）
                    ⚠ 第八轮起含**真行为测试**（真 EditorState + ensureSyntaxTree），
                      此前全是源码正则断言 —— 详见 §2 第八轮
                    ⚠ 第十一轮起 keymap 接线 pin 也用**真扩展 + 真 keyName + 真 run**
@@ -791,6 +801,69 @@ webview 看不见，`fetch(file://)` 又被跨源策略拦死——**「文档�
 
 ---
 
+### 第十四轮：⌘V 图片粘贴 —— 命令分发绕过了 paste 事件（2026-10-16）
+
+第十三轮修完显示链路后真机复验：**拖拽插图且正常显示，⌘V 仍只出文件名文本**。
+两轮修复（通道③ / doc-assets）都没治到它，因为真正的断点在更上游。
+
+#### 根因（真机探针钉死，非推断）
+
+`installGlobalShortcuts`（useShortcuts.js）对命中命令的 keydown 一律
+`e.preventDefault()` —— **⌘V 命中 `edit.paste` 后，webview 的原生粘贴与 DOM paste
+事件从此不再发生**。而 imageDrop.js 的三条图片通道（①数据 ②file URL ③系统剪贴板）
+全部注册在 CM 的 `domEventHandlers.paste` 上，到不了键盘这条路。菜单「编辑 ▸ 粘贴」
+汇到同一个 `doPaste()` 命令处理器，它只做 `ClipboardGet` 文本插入 —— 于是
+**拖拽（走 drop 事件）正常、⌘V 只插文件名**，之前两轮修的东西对 ⌘V 完全不可达。
+
+取证手段：Go 侧 `SaveImageFromClipboard` 临时打点到 /tmp 日志 —— 修复前按 ⌘V
+**一条日志都不出现**（函数根本没被调），修复后两次 ⌘V 都有（预置剪贴板 + 用户自
+Finder 复制各一次，filePath 与 306KB 图片数据双形态均通）。**验证完探针即删**。
+
+#### 修法：粘贴执行体下沉为 `editor/pasteCommand.js`（图片优先、文本兜底）
+
+| 文件 | 职责 |
+|---|---|
+| `editor/pasteCommand.js`（新） | `pasteIntoView(view, io)`：先问 Go 剪贴板有无图片（有 → 插 `![](assets/…)`），无图 / 抛错 / 未落盘 / 旧构建一律静默落回文本路径；选区快照在 await 前取（沿用旧 doPaste 裁决） |
+| `useCommands.js` `doPaste` | 改调 `pasteIntoView`，新依赖 `getClipboardImage` 注入 |
+| `App.vue` | `getClipboardImage: () => assets.saveImageFromClipboard({ quiet: true })`（148/150 行，帽内） |
+| `useFileAssets.js` | `saveImageFromClipboard({ quiet })`：quiet=true 时环境性跳过（未落盘 / 旧构建）**不弹 toast** —— ⌘V 文本粘贴是高频动作，每次弹「请先保存」是噪音；真错误仍提示。imageDrop 路径（粘贴事件兜底）保持响亮 |
+
+**为什么这里不需要 imageDrop 那套弱启发式门槛**：paste 事件必须同步
+preventDefault，所以只能拿「文本像不像文件名」瞎猜；命令处理器本就是异步的，
+直接问 Go 由字节嗅探（`sniffImageMagic`）精确裁定 —— 误判不存在，误判还回文本的
+兜底也不需要。
+
+**顺带修出的隐性债（node:test 曝光）**：`useCommands.js` / `commands.js` 里有 6 处
+无 `.js` 后缀的相对导入 —— Vite 容忍、node ESM 不容忍。此前没有任何 node 测试
+导入过这两个文件所以从未暴露；本次 paste-image.test.mjs 首次真实 import 命令链
+即炸。已全部补后缀。
+
+#### 测试（230 → 239，全部真对象驱动，无源码正则）
+
+`tests/paste-image.test.mjs` 9 条：
+- `pasteIntoView` 6 条：图片命中不读文本 / 选区快照替换区间 / null 落回文本 /
+  **图片通道抛错不得吞文本** / 读文本失败 toast 且零 dispatch / 空剪贴板 toast；
+- `edit.paste` 接线 2 条：经**真实命令总线**（`registerCommands()` → `emitCommand`
+  ('edit.paste')）驱动，图片命中时 `ClipboardGet` 不被调、无图时落回文本 ——
+  正是「接线不许丢」用 §4 ⑲ 要求的形态；
+- quiet 契约 1 条：quiet 模式零 toast、非 quiet（对照）弹「请先保存」。
+
+#### 验证汇总
+
+`npm test` 239/239（50 suites）；`go vet`/`go test` exit 0；7 门禁 exit 全 0；
+`wails build` 成功；真机复验（macOS / aftery，2026-10-16）：① 预置剪贴板 ⌘V →
+插入且显示；② Finder 自复制 `wallhaven-e781gr.jpeg` ⌘V → 插入且显示；③ 拖拽
+（第十三轮范围）沿用通过。**#8 至此闭环**（跨 4 轮：通道② 错根因 → 通道③ →
+doc-assets 显示 → paste 命令通道）。
+
+> **#8 的完整教训链**（值得记住）：同一个用户症状「粘贴只是文件名」，先后有三个
+> 断点叠加 —— ① WKWebView 不暴露剪贴板图片（第十二轮修）；② 文档相对路径没有
+> 解析到磁盘的一步（第十三轮修）；③ **⌘V 根本不走 paste 事件**（本轮修）。
+> 每轮都只看到「下一个」断点：修好上一处后症状依旧，直到把输入链路从按键到像素
+> 整条走通。**修「静默失败」时要按数据流向逐段取证，而不是「又坏了」就推倒重修。**
+
+---
+
 本项目吃过两次教训：**「进程存活」不等于「界面渲染出来了」**（白屏时进程照样活着），
 **「我以为失败了」不等于「我确认失败了」**。所以：
 
@@ -1003,7 +1076,7 @@ WebKit 的默认粘贴行为就是**把它当纯文本插入**（这就是「粘
 
 | 门禁 | 卡什么 | 命令 |
 |---|---|---|
-| `frontend` | 230 条测试 + vite 构建 | `npm test && npm run build` |
+| `frontend` | 239 条测试 + vite 构建 | `npm test && npm run build` |
 | `go` ① | vet（printf 动词错 / 不可达代码 / 锁复制） | `go vet ./...` |
 | `go` ② | build（**vet 不做链接，cgo 导出代码要 build 才暴露**） | `go build -o /dev/null .` |
 | `go` ③ | **测试**（2026-10-15 新增。此前本仓零Go 测试，「什么字节才算图片」的判据完全裸奔） | `CGO_ENABLED=1 go test ./...` |
@@ -1192,7 +1265,8 @@ WebKit 的默认粘贴行为就是**把它当纯文本插入**（这就是「粘
 | **「最近打开」功能整体下线** | 它的唯一消费方是原生菜单的子菜单；自绘标题栏未做该入口。若要恢复，需前端加列表 + 重新暴露 Go 的 `GetRecents`（`recents.json` 持久化逻辑仍在 `app.go` 的 `recentsPath` 等函数里，但 `AddRecent` 调用点已删） |
 | **表格真渲染待真机验收** | 2026-10-14 落地：编辑器内 StateField block 装饰渲染真表格（`src/editor/tableRender.js`），单元格可直接编辑并同步回 Markdown 源码；单元测试已过，光标进出切换渲染/源码、Tab 换格、IME 输入等真机路径待目视（见 §6 第 20 项）。原「`useOutline` 阅读态分支未验证」随阅读态 2026-10-14 整体移除而消失 |
 | **通道③ 的 Linux / Windows 适配层未在真机验证** | 2026-10-15 落地：图片粘贴新增第三条通道（Go 侧读系统剪贴板）。**macOS 已用真实 NSPasteboard 端到端跑通两个场景**（复制的文件 / 纯图片数据），但 `clipboard_linux.go`（xclip / wl-paste）与 `clipboard_windows.go`（CF_DIBV5 / CF_DIB / CF_HDROP）**只做到「能交叉编译过」，剪贴板 IO 从未在真机跑过**。⚠️ 这正是本仓最熟悉的形态：**能编 ≠ 能用**。首次在Linux / Windows 真机上验过时，请更新本行。两处已知风险：① Linux 的剪贴板工具未装时静默返回空（图片插不进去，但不报错）；② Windows 的 CF_DIB 需补 `BITMAPFILEHEADER` 才被认成 BMP，若 alpha 处理不当可能得到黑底 |
-| **通道③ 的真机复验（#8）** | 2026-10-15 代码已完成并端到端验证，但**尚未在真机编辑器里复验**。复验要点：① 复制图片（截图工具 / 浏览器图片）后⌘V 应插入 `![](assets/…)` 而非文件名；② 从 Finder ⌘C 一个图片文件后 ⌘V 同上；③ **粘贴一段普通中文 / 代码不得被吞**（门槛是弱启发式，这是最需要盯的回归）；④ 文档未保存时粘贴应提示先保存 |
+| ✅ **通道③ 的真机复验（#8）** | **已闭环（2026-10-16，跨四轮）**：通道② 错根因（§2 第十二轮）→ 通道③ Go 读剪贴板 → doc-assets 显示链路（第十三轮）→ **⌘V 命令通道（第十四轮，真正的最后一环）**。真机复验通过：复制图片 ⌘V 插入 `![](assets/…)` 且显示、Finder ⌘C ⌘V 同、拖拽同、普通中文粘贴不被吞（弱启发式门槛回归重点）。通道③ 前端入口现仅服务**拖拽与 paste 事件兜底**；⌘V / 菜单粘贴走 `pasteCommand.js` 的图片优先路径（见 §2 第十四轮） |
+| **关闭守卫待复验（§6 #4）** | 2026-10-15 `CloseWindow` 重构为带参（`CloseWindow(dirty)`，dirty 随关闭请求同一条 IPC 携带，消除 50ms sleep 时序补丁；判定本体抽 `confirmClose` 与红绿灯路径共用，见 ADR-005 §五）。**改动后未在真机复验**：脏文档点红绿灯 / 自绘 × 应弹「未保存的更改」，取消能留在应用。Linux/Windows 的自绘 × 路径本就未验 |
 | **真正的「系统打印面板」未实现** | Wails 的 WKWebView 不实现 `window.print()`，故 `⌘P` 落地为「生成 PDF」（见 §2 第十一轮）。真正的系统打印需原生 `NSPrintOperation`（macOS）/ `GTK` 打印（Linux），未做。**已知的重复**：`⌘P`（`file.print`）与 `⇧⌘P`（`file.exportPdf`）目前**同效**——保留两条是因为 `⇧⌘P` 在快捷键表/README 里是既有契约，删除会破坏用户肌肉记忆与门禁口径。若将来做原生打印，`⌘P` 应切回真打印、`⇧⌘P` 保持导出 |
 | **CI 的 runner 表现** | 已实测（2026-10-11）：`5ad7434`/`21771c7`/`a105c51` success，`6bdf3d6`/`f1343eb` failure（仅 `go` job），**`18c2f28` success**（run `38143580960`，五 job 全绿）。「本地绿、runner 绿」这一关现在是通过的；那两行 failure 是仓库自身回归（占位文件被删），已修 |
 | **`release.yml` 真 runner** | 需 push 一个 `v*` tag 才会触发三平台打包。`ci.yml` 在 `18c2f28` 上已复绿（见上表），但 `release.yml` **一次都没跑过** —— 打第一个 tag 时它是首次执行，三平台构建的坑（Linux 的 webkit2_41 tag、macOS 签名）都还没被它验过 |
