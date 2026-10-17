@@ -9,8 +9,8 @@
 // 节点名均实测自 @lezer/markdown@1.7.2（node_modules Type 枚举）。
 
 import { syntaxTree } from '@codemirror/language'
-import { extractOutline } from './outline'
-import { createSlugCounter } from './anchors'
+import { extractOutline } from './outline.js'
+import { createSlugCounter } from './anchors.js'
 
 const FENCE_RE = /^\s*(```|~~~)/
 

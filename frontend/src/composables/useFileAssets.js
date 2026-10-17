@@ -114,8 +114,10 @@ export function useFileAssets({ getFilePath, notify }) {
    *
    * @returns {Promise<string|null>} 可插入的相对路径；剪贴板无图片时 null
    */
-  async function saveImageFromClipboard() {
-    const sink = requireImageSink(getFilePath, notify)
+  async function saveImageFromClipboard({ quiet = false } = {}) {
+    // quiet=true：⌘V 命令的图片探测用 —— 文本粘贴是高频动作，「未落盘 / 旧构建」
+    // 属环境性跳过，每次都 toast「请先保存」是噪音；真错误（Go 抛错）仍照常提示。
+    const sink = requireImageSink(getFilePath, quiet ? null : notify)
     if (!sink) return null
     // 旧构建没有这个绑定：静默降级，不打扰用户
     if (typeof sink.api.SaveImageFromClipboard !== 'function') return null

@@ -23,13 +23,14 @@ import {
   toggleLink, insertImage, toggleHeading,
   toggleBulletList, toggleOrderedList, toggleTaskList, toggleBlockquote,
   toggleCodeBlock, insertTable, insertHr, insertToc, clearFormatting,
-} from '../editor/commands'
-import { SYNTAX_DOC } from '../editor/sampleDocs'
+} from '../editor/commands.js'
+import { pasteIntoView } from '../editor/pasteCommand.js'
+import { SYNTAX_DOC } from '../editor/sampleDocs.js'
 import {
   commandsByGroup, fmtAccel, onCommand, installGlobalShortcuts,
 } from './useShortcuts.js'
-import { WindowMinimise, WindowToggleMaximise } from '../../wailsjs/runtime/runtime'
-import { ClipboardGet, ClipboardSet, Version } from '../../wailsjs/go/main/App'
+import { WindowMinimise, WindowToggleMaximise } from '../../wailsjs/runtime/runtime.js'
+import { ClipboardGet, ClipboardSet, Version } from '../../wailsjs/go/main/App.js'
 import { t } from '../i18n/index.js'
 
 /**
@@ -47,11 +48,14 @@ import { t } from '../i18n/index.js'
  * @param {Function} deps.askInput    打开输入对话框
  * @param {Function} deps.notify      (msg, isErr?) => void 轻提示
  * @param {import('vue').Ref} deps.slashRef 斜杠面板（它自己处理 Esc）
+ * @param {Function} deps.getClipboardImage () => Promise<string|null>
+ *   ⌘V 的图片通道（useFileAssets.saveImageFromClipboard，quiet 探测）：
+ *   剪贴板有图片返回相对路径，无图片 / 未落盘 / 旧构建均返回 null
  */
 export function useCommands(deps) {
   const {
     getEditor, session, docState, fileOps, workspace, prefs, outlineSync, help,
-    dialog, closeDialog, askInput, notify, slashRef,
+    dialog, closeDialog, askInput, notify, slashRef, getClipboardImage,
   } = deps
 
   // 设置面板（⌘, 打开；Esc / 关闭按钮收起）与关于面板（帮助菜单）
@@ -87,6 +91,9 @@ export function useCommands(deps) {
   // 走系统剪贴板 + CM6 事务：原生 EditMenu Role 的 copy:/paste: selector 在
   // 菜单下线后彻底不可用，而 document.execCommand('paste') 被浏览器安全策略
   // 禁用（无用户手势 / 非可编辑上下文），故只能自己读写。
+  // 【注意】粘贴的执行体在 editor/pasteCommand.js（图片优先、文本兜底）—— ⌘V 被
+  // 全局分发 preventDefault 后 DOM paste 事件不再触发，imageDrop 的三条图片
+  // 通道到不了命令这条路，本命令就是粘贴的唯一入口（第十四轮根因）。
   // 注意·顺序契约：粘贴必须【先 ClipboardGet 拿文本、再插入】，异步读取期间
   // 焦点/选区可能变化，故先捕获选区快照，读取成功后再用该快照插入。
   async function doCopy({ cut = false } = {}) {
@@ -114,21 +121,12 @@ export function useCommands(deps) {
   async function doPaste() {
     const view = getEditor()
     if (!view) return
-    const { from, to } = view.state.selection.main // 快照：异步期间选区可能变
-    let text = ''
-    try {
-      text = await ClipboardGet()
-    } catch (e) {
-      console.error('[clipboard] read failed:', e)
-      notify?.(t('toast.clipboardReadFailed'))
-      return
-    }
-    if (!text) {
-      notify?.(t('toast.clipboardEmpty'))
-      return
-    }
-    view.dispatch({ changes: { from, to, insert: text }, selection: { anchor: from + text.length } })
-    view.focus()
+    // 选区快照在 pasteIntoView 内完成（await 前先取，见其顺序契约）
+    await pasteIntoView(view, {
+      getClipboardImage,
+      getText: () => ClipboardGet(),
+      notify,
+    })
   }
 
   // ---------- 查找 / 跳转 / 复制为 HTML ----------
@@ -316,6 +314,7 @@ export function useCommands(deps) {
   })
 
   return {
+    registerCommands,
     menuGroups,
     showSettings, closeSettings,
     showAbout, aboutVersion, closeAbout,

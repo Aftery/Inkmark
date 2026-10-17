@@ -74,6 +74,8 @@ const help = useShortcutsHelp()
 const cmds = useCommands({
   getEditor, session, docState, fileOps, workspace, prefs, outlineSync, help,
   dialog, closeDialog, askInput, notify: showToast, slashRef,
+  // ⌘V 的图片通道（quiet：文本粘贴高频，环境性跳过不弹「请先保存」）
+  getClipboardImage: () => assets.saveImageFromClipboard({ quiet: true }),
 })
 const { menuGroups, showSettings, closeSettings, showAbout, aboutVersion, closeAbout,
   showShortcuts, shortcutRows } = cmds
