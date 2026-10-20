@@ -207,6 +207,11 @@ export default {
   'table.keepLastRow': '表には少なくとも 1 行必要です',
   'table.keepLastColumn': '表には少なくとも 1 列必要です',
 
+  // ---- コードブロック（editor/codeBlock.js のコピーボタン）----
+  'code.copy': 'コードをコピー',
+  'code.copyLabel': 'コピー',
+  'code.copied': 'コピーしました',
+  'code.copyFailed': 'コピーに失敗',
   // ---- 自前描画のタイトルバー（TitleBar.vue）----
   'titlebar.file': 'ファイル',
   'titlebar.help': 'ヘルプ',

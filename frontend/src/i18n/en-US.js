@@ -206,6 +206,11 @@ export default {
   'table.keepLastRow': 'A table must keep at least one row',
   'table.keepLastColumn': 'A table must keep at least one column',
 
+  // ---- Code blocks (copy button in editor/codeBlock.js) ----
+  'code.copy': 'Copy code',
+  'code.copyLabel': 'Copy',
+  'code.copied': 'Copied',
+  'code.copyFailed': 'Copy failed',
   // ---- Self-drawn title bar (TitleBar.vue) ----
   'titlebar.file': 'File',
   'titlebar.help': 'Help',

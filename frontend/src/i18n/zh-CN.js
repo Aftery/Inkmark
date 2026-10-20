@@ -223,6 +223,11 @@ export default {
   'table.keepLastColumn': '表格至少保留一列',
 
 
+  // ---- 代码块（editor/codeBlock.js 的复制按钮）----
+  'code.copy': '复制代码',
+  'code.copyLabel': '复制',
+  'code.copied': '已复制',
+  'code.copyFailed': '复制失败',
   // ---- 自绘标题栏（TitleBar.vue）----
   'titlebar.file': '文件',
   'titlebar.help': '帮助',

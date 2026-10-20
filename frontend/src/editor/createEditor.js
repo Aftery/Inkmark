@@ -20,6 +20,7 @@ import { tags as t } from '@lezer/highlight'
 import codeLanguages from './markdownHighlight'
 import { wysiwygField, wysiwygPlugin, wysiwygAtomicRanges } from './wysiwyg'
 import { taskToggleHandlers } from './taskToggle'
+import { codeLinePlugin, codeCopyPlugin } from './codeBlock.js'
 
 import { tableRenderField, tableScanKick } from './tableRender'
 import { slashCommandExtension } from './slashCommand'
@@ -249,6 +250,10 @@ export function createEditor(parent, { doc = '', onDocChange, onScroll, onUpdate
       // 任务列表勾选：点勾选框直接翻转 [ ] / [x]（交互在 taskToggle.js，
       // wysiwyg.js 只负责把标记渲染成勾选框，不碰文档）
       EditorView.domEventHandlers(taskToggleHandlers()),
+      // 代码块：行号（行装饰 + data-line 属性，CSS attr() 渲染）+ 一键复制按钮
+      // （首行行尾 widget）。位置在表格之前：两者互不影响。
+      codeLinePlugin,
+      codeCopyPlugin,
       markdown({ base: markdownLanguage, codeLanguages }),
       // 只注册 mdHighlight：fallback 样式在存在主样式时会被整体跳过
       //（getHighlighters: main.length ? main : fallback），曾与 defaultHighlightStyle
