@@ -156,6 +156,25 @@ export function useI18n() {
 }
 
 /**
+ * 把当前语言同步到 <html lang>。
+ *
+ * 【为什么必须有】index.html 里写死 lang="zh-CN" 作为基准语言，但切换界面语言
+ * 之后没有任何东西更新它 —— 结果 en-US / ja-JP 界面下，屏幕阅读器仍按中文
+ * 断词与发音（WCAG 3.1.1「页面语言」）。这是纯属性同步，与 data-theme 同属
+ * 「mount 之前就要落定、避免首帧错语言」的那一类（见 main.js 的初始化顺序）。
+ *
+ * 【为什么用 try】非浏览器环境（或极端沙箱）下 document 可能不可用；
+ * 语言切换本身不该因此失败。
+ */
+function syncDocumentLang() {
+  try {
+    if (typeof document !== 'undefined') document.documentElement.lang = locale.value
+  } catch {
+    /* 非 DOM 环境：忽略 */
+  }
+}
+
+/**
  * 初始化：把 prefs 里的语言偏好读进 ref，并挂上订阅。
  * 必须在 Vue mount 之前调用（与 initTheme / initPrefs 同一防闪烁约定）。
  * 重复调用安全（只装一次 prefs 订阅）。
@@ -163,12 +182,14 @@ export function useI18n() {
 export function initI18n() {
   const stored = getPref('locale')
   locale.value = isSupported(stored) ? stored : FALLBACK_LOCALE
+  syncDocumentLang()
   if (offPrefs) return
   // 语言偏好的真源在 prefs.js：任何一环改了 locale（设置面板、
   // 「恢复默认」resetPrefs）都会走到这里，故界面与 Go 菜单同步刷新。
   offPrefs = onPrefsChange((p) => {
     if (!isSupported(p.locale) || p.locale === locale.value) return
     locale.value = p.locale
+    syncDocumentLang()
     notifyListeners(locale.value)
   })
 }

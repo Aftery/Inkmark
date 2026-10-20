@@ -83,11 +83,16 @@ export function useOutline({ getEditor, sidebarOpen, outline }) {
     if (index !== outlineActive.value) outlineActive.value = index
   }
 
-  // 滚动事件高频触发，反查用 requestAnimationFrame 节流
+  // 滚动事件高频触发，反查用 requestAnimationFrame 节流。
+  // rafId 必须留着：组件卸载时（窗口关闭 / 热更新）还在队列里的那一帧若不取消，
+  // 回调会跑在已销毁的组件上（updateOutlineHighlight 虽有守卫，但 queued 标志
+  // 与缓存度量已无意义，且是纯空转）。
+  let rafId = 0
   function scheduleOutlineSync() {
     if (queued || !sidebarOpen.value) return
     queued = true
-    requestAnimationFrame(() => {
+    rafId = requestAnimationFrame(() => {
+      rafId = 0
       queued = false
       updateOutlineHighlight()
     })
@@ -105,7 +110,10 @@ export function useOutline({ getEditor, sidebarOpen, outline }) {
 
   // 窗口尺寸变化：视口高度变了，已缓存的 y 序列全部作废。
   onMounted(() => window.addEventListener('resize', invalidateMeasure))
-  onBeforeUnmount(() => window.removeEventListener('resize', invalidateMeasure))
+  onBeforeUnmount(() => {
+    window.removeEventListener('resize', invalidateMeasure)
+    if (rafId) cancelAnimationFrame(rafId)
+  })
 
   return {
     outlineActive,

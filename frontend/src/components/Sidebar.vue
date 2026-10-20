@@ -18,6 +18,13 @@ const props = defineProps({
 })
 
 const emit = defineEmits(['select', 'open-folder', 'jump', 'tab'])
+
+// 侧栏标题 = 文件夹名。两种分隔符都要认：Windows 的 folderPath 是 C:\dir\sub，
+// 只按 "/" 切会把整条路径显示成标题（与 useEditorSession 的 baseName 同口径）。
+function folderName(p) {
+  const i = Math.max(p.lastIndexOf('/'), p.lastIndexOf('\\'))
+  return i >= 0 ? p.slice(i + 1) : (p || '/')
+}
 </script>
 
 <template>
@@ -44,7 +51,7 @@ const emit = defineEmits(['select', 'open-folder', 'jump', 'tab'])
     <div v-show="props.tab === 'files'" class="sidebar-body">
       <template v-if="props.folderPath">
         <div class="sidebar-title" :title="props.folderPath">
-          {{ props.folderPath.split('/').pop() }}
+          {{ folderName(props.folderPath) }}
         </div>
         <FileTree
           :root="props.folderPath"

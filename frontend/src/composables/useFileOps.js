@@ -25,7 +25,7 @@
  * i18n/index.js 的模块级 ref，故切语言后这些文案自动跟着变，无需重新注入。
  */
 import { ref, watch } from 'vue'
-import { t } from '../i18n/index.js'
+import { t, getLocale } from '../i18n/index.js'
 
 /**
  * fs:changed 到来时是否该重载文件树（纯函数，导出供测试直接 import）。
@@ -94,16 +94,40 @@ export function useFileOps(deps) {
     docState.resetSession()
   }
 
-  async function openFile() {
-    const path = await OpenFileDialog()
-    if (!path) return
-    await docState.switchFile() // 破坏性边界：脏则先留快照
-    const content = await ReadFile(path)
+  // 【打开竞态守卫】ReadFile 是异步 IPC：用户在等待期间再点另一个文件时，
+  // 先发出的读取可能后返回，把**旧文件**的内容盖到**新文件**路径上 ——
+  // 表现为「点 A 再点 B，编辑器里是 A、标题却是 B」，下一次自动保存还会把
+  // A 的内容写进 B。故每次打开领一个序号，返回时序号已变即丢弃该结果。
+  let openSeq = 0
+
+  /**
+   * 读取并载入 path；失败给出提示而不是让 Promise 悬空。
+   * 旧实现直接 await ReadFile 且不 catch：文件被删 / 无权限时抛出的 rejection
+   * 无人接收，用户看到的是「点了没反应」（静默失败是本仓明确要避免的形态）。
+   */
+  async function openPath(path) {
+    const seq = ++openSeq
+    let content
+    try {
+      content = await ReadFile(path)
+    } catch (err) {
+      showToast(t('toast.openFailed', { error: err?.message || err }), true)
+      return
+    }
+    // 期间又发起了另一次打开 → 本次结果已过期，丢弃（守卫见上）
+    if (seq !== openSeq) return
     loadDocument(content, path)
   }
 
+  async function openFile() {
+    const path = await OpenFileDialog(getLocale())
+    if (!path) return
+    await docState.switchFile() // 破坏性边界：脏则先留快照
+    await openPath(path)
+  }
+
   async function openFolder() {
-    const path = await OpenDirectoryDialog()
+    const path = await OpenDirectoryDialog(getLocale())
     if (!path) return
     folderPath.value = path
     // 打开文件夹自动展开侧栏（文件 tab）
@@ -114,8 +138,7 @@ export function useFileOps(deps) {
   async function openTreeFile(path) {
     if (path === filePath.value) return
     await docState.switchFile()
-    const content = await ReadFile(path)
-    loadDocument(content, path)
+    await openPath(path)
   }
 
   async function newFile() {

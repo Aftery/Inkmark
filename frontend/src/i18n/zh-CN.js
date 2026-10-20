@@ -200,6 +200,7 @@ export default {
   'toast.saveBeforeRename': '请先保存文档（⌘S）再重命名',
   'toast.renameUnsupported': '当前环境不支持重命名',
   'toast.renamed': '已重命名',
+  'toast.openFailed': '打开文件失败：{error}',
   'toast.renameFailed': '重命名失败：{error}',
   'toast.autoSaveFailed': '自动保存失败：{error}',
   'toast.saveFailedWith': '保存失败：{error}',

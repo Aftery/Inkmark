@@ -23,10 +23,29 @@ const BASELINE = 'zh-CN'
 /** 从字典源文件里提取 key 集合（不 import，避免模块级副作用影响其他用例） */
 function keysOf(locale) {
   const src = readFileSync(join(ROOT, 'src/i18n', `${locale}.js`), 'utf8')
-  return new Set([...src.matchAll(/^\s*'([a-zA-Z][a-zA-Z0-9_.]*)':/gm)].map((m) => m[1]))
+  return new Set([...src.matchAll(/^\s*'([a-zA-Z][a-zA-Z0-9_.-]*)':/gm)].map((m) => m[1]))
 }
 
 describe('i18n · 语言包', () => {
+  // 【2026-10-20 补的自检】keysOf 的正则一旦漏掉某类字符，它「看不见」的 key
+  // 就会同时从 missing / extra 两侧消失 —— 等于该 key 永久免检，而测试全绿。
+  // 实测踩过：字符类缺 `-` 时，`titlebar.save-as` 在三份字典里都不可见，
+  // 把它从 en/ja 删掉也照样通过。故把「正则可见性」本身变成断言。
+  test('提取正则必须能看见每一个字典里真实存在的 key（防正则失明造成假绿灯）', () => {
+    for (const loc of LOCALES) {
+      const src = readFileSync(join(ROOT, 'src/i18n', `${loc}.js`), 'utf8')
+      // 宽松计数：任何行首的 'key': 形态都算（不限字符集）
+      const rawKeys = new Set([...src.matchAll(/^\s*'([^']+)'\s*:/gm)].map((m) => m[1]))
+      const visible = keysOf(loc)
+      const blind = [...rawKeys].filter((k) => !visible.has(k))
+      assert.equal(
+        blind.length, 0,
+        `${loc} 有 ${blind.length} 个 key 对提取正则不可见：${blind.slice(0, 8).join(', ')}` +
+          ' —— keysOf 的字符类需要补全，否则这些 key 的缺失/空串/占位符检查全部失效',
+      )
+    }
+  })
+
   test('三份字典的 key 集合与基准语言完全一致（不多不少）', () => {
     const base = keysOf(BASELINE)
     assert.ok(base.size > 0, `基准语言 ${BASELINE} 解析出 0 个 key —— 提取正则可能失效`)
@@ -51,9 +70,9 @@ describe('i18n · 语言包', () => {
     for (const loc of LOCALES) {
       const src = readFileSync(join(ROOT, 'src/i18n', `${loc}.js`), 'utf8')
       // 形如 'key': '' 或 'key': undefined / null
-      const empty = [...src.matchAll(/'([a-zA-Z][a-zA-Z0-9_.]*)':\s*''/g)].map((m) => m[1])
+      const empty = [...src.matchAll(/'([a-zA-Z][a-zA-Z0-9_.-]*)':\s*''/g)].map((m) => m[1])
       assert.equal(empty.length, 0, `${loc} 有空串值：${empty.join(', ')}`)
-      const nonStr = [...src.matchAll(/'([a-zA-Z][a-zA-Z0-9_.]*)':\s*(?:undefined|null|\d)/g)].map((m) => m[1])
+      const nonStr = [...src.matchAll(/'([a-zA-Z][a-zA-Z0-9_.-]*)':\s*(?:undefined|null|\d)/g)].map((m) => m[1])
       assert.equal(nonStr.length, 0, `${loc} 有非字符串值：${nonStr.join(', ')}`)
     }
   })
@@ -122,7 +141,7 @@ describe('i18n · t() 行为', () => {
     setLocale('en-US')
     // 找一个带占位符的 key
     const src = readFileSync(join(ROOT, 'src/i18n', 'en-US.js'), 'utf8')
-    const m = src.match(/'([a-zA-Z][a-zA-Z0-9_.]*)':\s*'[^']*\{(\w+)\}[^']*'/)
+    const m = src.match(/'([a-zA-Z][a-zA-Z0-9_.-]*)':\s*'[^']*\{(\w+)\}[^']*'/)
     if (!m) return // 当前字典无占位符，跳过但不算失败
     const out = t(m[1], { [m[2]]: 'X' })
     assert.ok(!out.includes(`{${m[2]}}`), `插值未生效，输出仍含占位符：${out}`)

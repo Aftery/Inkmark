@@ -185,6 +185,7 @@ export default {
   'toast.saveBeforeRename': '名前を変更する前にドキュメントを保存してください（⌘S）',
   'toast.renameUnsupported': 'ここでは名前を変更できません',
   'toast.renamed': '名前を変更しました',
+  'toast.openFailed': 'ファイルを開けませんでした：{error}',
   'toast.renameFailed': '名前の変更に失敗しました：{error}',
   'toast.autoSaveFailed': '自動保存に失敗しました：{error}',
   'toast.saveFailedWith': '保存に失敗しました：{error}',

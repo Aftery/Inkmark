@@ -24,7 +24,7 @@ import { SaveFileDialog, WriteFile } from '../../wailsjs/go/main/App'
 import { buildHtmlDocument } from '../export/exporters'
 import { replaceDocument } from '../editor/createEditor'
 import { getPref, onPrefsChange } from '../themes/prefs.js'
-import { t } from '../i18n/index.js'
+import { t, getLocale } from '../i18n/index.js'
 
 // ---------- 快照元数据展示格式化（历史面板 / 恢复提示共用） ----------
 
@@ -98,6 +98,33 @@ export function useDocumentState({ getEditor, filePath, title, renderedHtml, the
 
   const docText = () => getEditor()?.state.doc.toString() ?? ''
 
+  /**
+   * 落盘一份「当前内容」，并只在内容确实未再变化时解除标脏（ADR-005 的忠实实现）。
+   *
+   * 【为什么不能写完就 dirty=false】WriteFile 是异步 IPC，期间用户完全可能继续输入：
+   * 落盘的是 t0 的内容，而内存已是 t1。旧实现落盘后无条件清 dirty → 状态栏显示
+   * 「已保存」、关闭时不弹确认框，**t1 的改动被静默丢弃**。这正是「dirty 唯一含义」
+   * 被打破的形态，也是最难复现的一类丢稿。
+   * 故落盘前记下写入内容，成功后再比一次当前内容：仍相同才清零，否则保持脏
+   * （并把保存态退回 unsaved，让状态栏如实反映「还有未落盘的改动」）。
+   *
+   * @param {string} path 目标路径
+   * @returns {Promise<boolean>} 落盘是否成功（失败时已由调用方/本函数提示）
+   */
+  async function writeAndSettle(path) {
+    const written = docText()
+    await WriteFile(path, written)
+    if (filePath.value === path && docText() !== written) {
+      // 写入期间文档又被改：保持脏，且不覆盖 markDirty 已经排好的下一轮自动保存
+      dirty.value = true
+      saveState.value = 'unsaved'
+    } else {
+      dirty.value = false
+      saveState.value = 'saved'
+    }
+    return true
+  }
+
   // ---------- 自动保存（800ms 防抖，AC-13；未落盘文档不自动保存）----------
 
   function markDirty() {
@@ -112,9 +139,8 @@ export function useDocumentState({ getEditor, filePath, title, renderedHtml, the
     if (!filePath.value || !getEditor()) return
     saveState.value = 'saving'
     try {
-      await WriteFile(filePath.value, docText())
-      dirty.value = false // 落盘成功解除标脏（watch 同步 SetDirty(false) 给 Go）
-      saveState.value = 'saved'
+      // 落盘 + 核对是否仍为最新（写入期间又被改则保持脏，见 writeAndSettle）
+      await writeAndSettle(filePath.value)
     } catch (err) {
       saveState.value = 'error' // 只读目录等失败：状态栏明示，不静默
       notify?.(t('toast.autoSaveFailed', { error: errText(err) }), true)
@@ -166,9 +192,7 @@ export function useDocumentState({ getEditor, filePath, title, renderedHtml, the
     if (!path) return saveFileAs()
     saveState.value = 'saving'
     try {
-      await WriteFile(path, docText())
-      dirty.value = false
-      saveState.value = 'saved'
+      await writeAndSettle(path)
       writeSnapshot(true) // 显式保存 → 立即快照（Go 侧按内容哈希去重）
     } catch (err) {
       saveState.value = 'error'
@@ -177,11 +201,13 @@ export function useDocumentState({ getEditor, filePath, title, renderedHtml, the
   }
 
   async function saveFileAs() {
-    let path = await SaveFileDialog(title.value.endsWith('.md') ? title.value : `${t('common.untitled')}.md`)
+    let path = await SaveFileDialog(title.value.endsWith('.md') ? title.value : `${t('common.untitled')}.md`, getLocale())
     if (!path) return
     if (!path.endsWith('.md')) path += '.md'
     saveState.value = 'saving'
     try {
+      // 先落盘再切路径：writeAndSettle 用 filePath 判定「是否仍是当前文档」，
+      // 故切路径前必须完成写入，否则等于拿新路径当旧路径比对。
       await WriteFile(path, docText())
       filePath.value = path
       dirty.value = false
@@ -197,7 +223,7 @@ export function useDocumentState({ getEditor, filePath, title, renderedHtml, the
   // ---------- 导出 ----------
 
   async function exportHtml() {
-    const path = await SaveFileDialog(`${title.value.replace(/\.md$/, '')}.html`)
+    const path = await SaveFileDialog(`${title.value.replace(/\.md$/, '')}.html`, getLocale())
     if (!path) return
     const html = buildHtmlDocument(title.value, renderedHtml.value, theme.value)
     await WriteFile(path.endsWith('.html') ? path : path + '.html', html)

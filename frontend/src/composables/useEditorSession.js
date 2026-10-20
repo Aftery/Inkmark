@@ -28,6 +28,40 @@ import { SetDocDir } from '../../wailsjs/go/main/App'
 
 const PREVIEW_DEBOUNCE_MS = 120
 
+// CJK 判定（汉字 / 假名 / 韩文）；西文按 [A-Za-z0-9_'-]+ 计词
+const CJK_RE = /[\u3400-\u4DBF\u4E00-\u9FFF\u3040-\u30FF\uAC00-\uD7AF]/
+const LATIN_WORD_RE = /[A-Za-z0-9_'-]/
+
+/**
+ * 统计字数：CJK 逐字计，西文连续字母数字算一个词。
+ * 纯函数、无中间字符串分配（旧实现 replace 全文再 match，成本随文档长度线性放大）。
+ */
+export function countWords(s) {
+  let cjk = 0
+  let latin = 0
+  let inWord = false
+  for (const ch of s) {
+    if (CJK_RE.test(ch)) {
+      cjk++
+      inWord = false
+    } else if (LATIN_WORD_RE.test(ch)) {
+      if (!inWord) {
+        latin++
+        inWord = true
+      }
+    } else {
+      inWord = false
+    }
+  }
+  return cjk + latin
+}
+
+/** 取路径最后一段（同时支持 / 与 Windows 反斜杠；末尾分隔符忽略）。 */
+function baseName(p) {
+  const i = Math.max(p.lastIndexOf('/'), p.lastIndexOf('\\'))
+  return i >= 0 ? p.slice(i + 1) : p
+}
+
 export function useEditorSession({
   editorRef,
   onDocChange,
@@ -42,7 +76,9 @@ export function useEditorSession({
   const markdown = ref('')
   const filePath = ref('')
   const folderPath = ref('')
-  const title = computed(() => (filePath.value ? filePath.value.split('/').pop() : t('common.untitled')))
+  // 标题 = 路径最后一段。**两种分隔符都要认**：Go 侧返回的是各平台原生路径，
+  // Windows 上是 C:\dir\a.md —— 只按 "/" 切会把整条路径当成文件名显示。
+  const title = computed(() => (filePath.value ? baseName(filePath.value) : t('common.untitled')))
   const caret = ref({ line: 1, col: 1 })
 
   const renderer = createRenderer()
@@ -65,14 +101,10 @@ export function useEditorSession({
     { flush: 'sync' }
   )
 
-  // 字数：CJK 按字计，西文按词计
-  const wordCount = computed(() => {
-    const s = markdown.value
-    const cjkRe = /[㐀-䶿一-鿿぀-ヿ가-힯]/g
-    const cjk = (s.match(cjkRe) || []).length
-    const latin = (s.replace(cjkRe, ' ').match(/[A-Za-z0-9_'-]+/g) || []).length
-    return cjk + latin
-  })
+  // 字数：CJK 按字计，西文按词计。
+  // 两个正则提到模块级：computed 每次重算都新建正则 + replace 重建整份字符串，
+  // 大文档下每键一次全量拷贝。改为单次遍历计数，零中间字符串。
+  const wordCount = computed(() => countWords(markdown.value))
 
   // ---------- 预览渲染防抖 ----------
   let previewTimer = null
@@ -121,7 +153,9 @@ export function useEditorSession({
     // 「表格没渲染」提示：每次更新都查一遍（纯读语法树，开销可忽略），
     // 命中与否由 useTableHint 内部逐字段比较后决定是否触发重渲染。
     checkTableHint(u.state)
-    // 打字机模式：输入后把光标行滚到视口中部（rAF 避开 update 事务内再 dispatch）
+    // 打字机模式：输入后把光标行滚到视口中部（rAF 避开 update 事务内再 dispatch）。
+    // 回调里必须重新读 editorRef：rAF 排到下一帧，期间可能已经销毁 / 换文档，
+    // 捕获的旧 view 会被 centerCursor 访问到已释放的 DOM。
     if (typewriterOn?.value && u.docChanged) {
       requestAnimationFrame(() => centerCursor(editorRef.value))
     }

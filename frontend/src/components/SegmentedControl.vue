@@ -47,7 +47,7 @@ function onKeydown(e) {
 </script>
 
 <template>
-  <div ref="groupEl" class="segmented" role="radiogroup" :aria-label="ariaLabel">
+  <div ref="groupEl" class="segmented" role="radiogroup" :aria-label="ariaLabel || undefined">
     <button
       v-for="opt in options"
       :key="opt.value"

@@ -6,9 +6,35 @@
 -->
 <script setup>
 import { CheckUpdate } from '../../wailsjs/go/main/App'
+import { BrowserOpenURL } from '../../wailsjs/runtime/runtime'
 import { t } from '../i18n/index.js'
 
 const REPO_URL = 'https://github.com/Aftery/Inkmark'
+
+/**
+ * 在系统浏览器里打开外链。
+ *
+ * 【为什么不能用 window.open】两道坑叠在一起：
+ *  ① 模板表达式里 `window` **不是**允许的全局名 —— Vue 会编译成
+ *     `_ctx.window.open(...)`，而实例上并没有 window，点击必抛 TypeError
+ *     （直接表现就是「仓库链接点了没反应」）。
+ *  ② 即便在 <script> 里调，WKWebView 也不会开新窗口：Wails v2 的 macOS 前端
+ *     没有实现 createWebViewWithConfiguration: 新窗口 delegate，调用被静默丢弃。
+ * 故走 Wails runtime 的 BrowserOpenURL（三平台齐备，交给系统默认浏览器）。
+ * 浏览器预览（vite dev，无 wails runtime）下退回 window.open 作为兜底。
+ */
+function openRepo() {
+  openExternal(REPO_URL)
+}
+
+function openExternal(url) {
+  if (!url) return
+  try {
+    BrowserOpenURL(url)
+  } catch {
+    window.open(url, '_blank')
+  }
+}
 
 const props = defineProps({
   version: { type: String, default: '' },
@@ -26,7 +52,7 @@ async function checkUpdate() {
   }
   if (info.status === 'update') {
     props.notify?.(t('toast.newVersion', { version: info.latest }))
-    if (info.url) window.open(info.url, '_blank')
+    if (info.url) openExternal(info.url)
   } else if (info.status === 'latest') {
     props.notify?.(info.note || t('toast.alreadyLatest', { version: info.current }))
   } else {
@@ -42,13 +68,13 @@ async function checkUpdate() {
       <p class="about-line">{{ t('about.tagline') }}</p>
       <p class="about-line">{{ t('about.version', { version: props.version || t('common.unknown') }) }}</p>
       <p class="about-line">
-        <a class="about-link" href="#" @click.prevent="window.open(REPO_URL, '_blank')">{{ REPO_URL }}</a>
+        <a class="about-link" href="#" @click.prevent="openRepo">{{ REPO_URL }}</a>
       </p>
       <div class="dialog-actions">
         <button class="dialog-btn" type="button" @click="checkUpdate">
           {{ t('about.checkUpdate') }}
         </button>
-        <button class="dialog-btn" type="button" @click="window.open(REPO_URL, '_blank')">
+        <button class="dialog-btn" type="button" @click="openRepo">
           {{ t('about.repo') }}
         </button>
         <button class="dialog-btn primary" type="button" @click="emit('close')">

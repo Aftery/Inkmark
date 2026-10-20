@@ -17,10 +17,25 @@ const loaded = ref(false)
 
 const MD_EXTS = new Set(['md', 'markdown', 'mdown', 'txt'])
 
+// 序号守卫：快速切换根目录 / 连续收到 fs:changed 时会有多个 ListDir 并发在飞，
+// 先发的**后返回**就会把旧目录的内容盖到新目录上（表现为「切了文件夹但树还是旧的」）。
+// 每次加载领一个序号，回来时序号已变即丢弃自己的结果。
+let loadSeq = 0
+
 async function load() {
-  const all = await ListDir(props.root)
-  entries.value = all.filter((e) => e.isDir || MD_EXTS.has(e.ext))
-  loaded.value = true
+  const seq = ++loadSeq
+  try {
+    const all = await ListDir(props.root)
+    if (seq !== loadSeq) return // 已被更新的请求取代
+    entries.value = all.filter((e) => e.isDir || MD_EXTS.has(e.ext))
+  } catch (err) {
+    // 与 TreeNode 同族：根目录可能已被删除 / 无权限，不能让 rejection 悬空
+    if (seq !== loadSeq) return
+    console.warn('[tree] 读取根目录失败', props.root, err)
+    entries.value = []
+  } finally {
+    if (seq === loadSeq) loaded.value = true
+  }
 }
 load()
 

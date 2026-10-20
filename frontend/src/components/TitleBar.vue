@@ -19,7 +19,7 @@
 -->
 <script setup>
 import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
-import { t } from '../i18n/index.js'
+import { t, getLocale } from '../i18n/index.js'
 import { isDarwin } from '../composables/usePlatform.js'
 import { WindowMinimise, WindowToggleMaximise } from '../../wailsjs/runtime/runtime'
 import { CloseWindow } from '../../wailsjs/go/main/App'
@@ -59,7 +59,12 @@ function onDocPointerdown(e) {
   if (rootRef.value && !rootRef.value.contains(e.target)) openMenu.value = null
 }
 function onKeydown(e) {
-  if (e.key === 'Escape') openMenu.value = null
+  if (e.key !== 'Escape' || !openMenu.value) return
+  // 关闭前先记下是哪个菜单：Esc 之后焦点必须回到该按钮，否则键盘用户
+  // 的焦点落到 document.body，后续 Tab 从页首重新开始（无障碍回归）。
+  const id = openMenu.value
+  openMenu.value = null
+  rootRef.value?.querySelector(`[data-menu="${id}"]`)?.focus()
 }
 onMounted(() => {
   document.addEventListener('pointerdown', onDocPointerdown, true)
@@ -96,9 +101,10 @@ const toggleMaximise = () => runWin(WindowToggleMaximise)
 // → SetDirty 是异步镜像，用户快速输入后立即点 × 时 Go 侧镜像可能还是旧值。
 // 此前「先 await SetDirty 再关 + 50ms sleep」依赖 IPC 时序假设，改为入参
 // 携带后不存在竞态。
+// locale 随请求传入：Go 侧的原生确认框文案要跟着界面语言走（dialogs.go）。
 const close = async () => {
   try {
-    await CloseWindow(props.isDirty)
+    await CloseWindow(props.isDirty, getLocale())
   } catch {
     /* 浏览器预览或绑定未就绪 */
   }
@@ -114,6 +120,9 @@ const close = async () => {
           class="tb-menu-btn"
           :class="{ active: openMenu === g.id }"
           type="button"
+          :data-menu="g.id"
+          aria-haspopup="menu"
+          :aria-expanded="openMenu === g.id"
           @click="toggleMenu(g.id)"
           @mouseenter="hoverMenu(g.id)"
         >{{ t(`titlebar.${g.id}`) }}</button>

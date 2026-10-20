@@ -14,6 +14,25 @@ const TOP_KEY = 'inkmark-always-on-top'
 const TYPEWRITER_KEY = 'inkmark-typewriter'
 const FOCUS_HINT_KEY = 'inkmark-focus-hint'
 
+// localStorage 在隐私模式 / 禁用 cookie 的 webview 里**访问即抛** SecurityError，
+// 且一旦抛出就会打断 setup → 整个界面白屏。这几项都是「有更好、没有也能用」的
+// 界面偏好，故全部降级为静默读写（与 themes/prefs.js 的内存兜底同一取向）。
+function readFlag(key) {
+  try {
+    return localStorage.getItem(key) === '1'
+  } catch {
+    return false
+  }
+}
+
+function writeFlag(key, on) {
+  try {
+    localStorage.setItem(key, on ? '1' : '0')
+  } catch {
+    // 存储不可用：仅本次会话内生效
+  }
+}
+
 export function useWorkspace({ getEditor, notify }) {
   // 专注模式：叠加在编辑态上的「让位」——隐藏标题栏 / 侧栏 / 状态栏，只留正文。
   // 淡化本体在 createEditor.js（setFocusMode effect）。
@@ -27,7 +46,7 @@ export function useWorkspace({ getEditor, notify }) {
 
   // 打字机模式与窗口置顶原先由原生菜单 checkbox 承载，菜单下线后
   // 偏好真源在前端 localStorage，窗口置顶直接调 Wails runtime。
-  const typewriterOn = ref(localStorage.getItem(TYPEWRITER_KEY) === '1')
+  const typewriterOn = ref(readFlag(TYPEWRITER_KEY))
   const alwaysOnTop = ref(false)
 
   function toggleFocus() {
@@ -39,8 +58,8 @@ export function useWorkspace({ getEditor, notify }) {
     focusOn.value = true
     getEditor()?.focus()
     // 首次进入给一次轻提示（之后不再打扰）
-    if (localStorage.getItem(FOCUS_HINT_KEY) !== '1') {
-      localStorage.setItem(FOCUS_HINT_KEY, '1')
+    if (!readFlag(FOCUS_HINT_KEY)) {
+      writeFlag(FOCUS_HINT_KEY, true)
       focusToast.value = true
       focusToastTimer = setTimeout(() => (focusToast.value = false), 3000)
     }
@@ -52,14 +71,14 @@ export function useWorkspace({ getEditor, notify }) {
 
   function toggleTypewriter() {
     typewriterOn.value = !typewriterOn.value
-    localStorage.setItem(TYPEWRITER_KEY, typewriterOn.value ? '1' : '0')
+    writeFlag(TYPEWRITER_KEY, typewriterOn.value)
     notify?.(t(typewriterOn.value ? 'toast.typewriterOn' : 'toast.typewriterOff'))
   }
 
   function toggleAlwaysOnTop() {
     alwaysOnTop.value = !alwaysOnTop.value
     applyAlwaysOnTop(alwaysOnTop.value)
-    localStorage.setItem(TOP_KEY, alwaysOnTop.value ? '1' : '0')
+    writeFlag(TOP_KEY, alwaysOnTop.value)
   }
 
   function applyAlwaysOnTop(on) {
@@ -71,7 +90,7 @@ export function useWorkspace({ getEditor, notify }) {
   }
 
   onMounted(() => {
-    if (localStorage.getItem(TOP_KEY) === '1') {
+    if (readFlag(TOP_KEY)) {
       alwaysOnTop.value = true
       applyAlwaysOnTop(true)
     }

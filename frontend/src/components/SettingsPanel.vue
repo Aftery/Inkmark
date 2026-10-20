@@ -16,7 +16,7 @@
  */
 import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
 import SegmentedControl from './SegmentedControl.vue'
-import { getPref, getPrefs, setPref, resetPrefs, onPrefsChange } from '../themes/prefs.js'
+import { getPrefs, setPref, resetPrefs, onPrefsChange } from '../themes/prefs.js'
 import { getPreference, setPreference, onThemeChange } from '../themes/theme.js'
 import { t, setLocale, LOCALE_OPTIONS } from '../i18n/index.js'
 
@@ -98,7 +98,8 @@ const ROWS = computed(() => ({
     { key: 'lineHeight', labelKey: 'settings.lineHeight.label', descKey: 'settings.lineHeight.desc', options: withLabels(LINE_HEIGHT_OPTIONS), get: () => prefs.value.lineHeight, set: (v) => setPref('lineHeight', v) },
     { key: 'measure', labelKey: 'settings.measure.label', descKey: 'settings.measure.desc', options: withLabels(MEASURE_OPTIONS), get: () => prefs.value.measure, set: (v) => setPref('measure', v) },
     // 语言项与主题/字体同级：写 prefs.locale（i18n/index.js 订阅它并驱动全站重渲染），
-    // 同时 main.js 的 onLocaleChange 会通知 Go 侧重建原生菜单。
+    // 同时 main.js 的 onLocaleChange 会把语言镜像同步给 Go（供原生「未保存」确认框
+    // 取文案；原生菜单已于单栏重构下线，见 app.go SetLocale 与 dialogs.go 的裁决）。
     { key: 'locale', labelKey: 'settings.locale.label', descKey: 'settings.locale.desc', options: LOCALE_OPTIONS, get: () => prefs.value.locale, set: (v) => setLocale(v) },
   ],
   editor: [

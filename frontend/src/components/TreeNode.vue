@@ -30,9 +30,18 @@ async function toggle() {
   open.value = !open.value
   if (open.value && children.value === null) {
     loading.value = true
-    const all = await ListDir(props.entry.path)
-    children.value = all.filter((e) => e.isDir || MD_EXTS.has(e.ext))
-    loading.value = false
+    try {
+      const all = await ListDir(props.entry.path)
+      children.value = all.filter((e) => e.isDir || MD_EXTS.has(e.ext))
+    } catch (err) {
+      // 目录可能已被外部删除 / 无权限（Go 侧 ListDir 明确返回 error）。
+      // 不 catch 的话 rejection 无人接收，且 loading 永远停在 true ——
+      // 该目录此后一直显示「加载中」，是最难自查的一类卡死。
+      console.warn('[tree] 读取目录失败', props.entry.path, err)
+      children.value = [] // 降级成空目录：再次点击会重试
+    } finally {
+      loading.value = false
+    }
   }
 }
 </script>

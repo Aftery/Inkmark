@@ -184,6 +184,7 @@ export default {
   'toast.saveBeforeRename': 'Save the document (⌘S) before renaming',
   'toast.renameUnsupported': 'Renaming is not supported here',
   'toast.renamed': 'Renamed',
+  'toast.openFailed': 'Could not open file: {error}',
   'toast.renameFailed': 'Rename failed: {error}',
   'toast.autoSaveFailed': 'Autosave failed: {error}',
   'toast.saveFailedWith': 'Save failed: {error}',
