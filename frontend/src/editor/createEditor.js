@@ -19,6 +19,8 @@ import { markdown, markdownLanguage } from '@codemirror/lang-markdown'
 import { tags as t } from '@lezer/highlight'
 import codeLanguages from './markdownHighlight'
 import { wysiwygField, wysiwygPlugin, wysiwygAtomicRanges } from './wysiwyg'
+import { taskToggleHandlers } from './taskToggle'
+
 import { tableRenderField, tableScanKick } from './tableRender'
 import { slashCommandExtension } from './slashCommand'
 import { imageDropHandlers } from './imageDrop'
@@ -244,6 +246,9 @@ export function createEditor(parent, { doc = '', onDocChange, onScroll, onUpdate
       // 图片粘贴 / 拖拽：仅在拿到图片（数据 / file URL）且注册了对应回调时拦截，其余放行。
       // 通道③ 可选：未注册时行为与加通道③之前完全一致。
       EditorView.domEventHandlers(imageDropHandlers(onImageFile, onClipboardImage)),
+      // 任务列表勾选：点勾选框直接翻转 [ ] / [x]（交互在 taskToggle.js，
+      // wysiwyg.js 只负责把标记渲染成勾选框，不碰文档）
+      EditorView.domEventHandlers(taskToggleHandlers()),
       markdown({ base: markdownLanguage, codeLanguages }),
       // 只注册 mdHighlight：fallback 样式在存在主样式时会被整体跳过
       //（getHighlighters: main.length ? main : fallback），曾与 defaultHighlightStyle

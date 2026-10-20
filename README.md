@@ -16,6 +16,9 @@
 | 实时预览 | markdown-it + highlight.js（`src/preview/`），GFM 任务列表（markdown-it-task-lists），highlight.js 按需注册 **79 种语言**（含别名，非整库导入）；正文限宽居中 |
 | **预览渲染防抖** | 输入期预览渲染防抖 ~120ms，大文档连续输入不卡；打开 / 恢复文件即时渲染，导出前强制 flush 保证内容最新（`useEditorSession`） |
 | **所见即所得渲染** | 编辑器内渐进渲染（Bear 式行内装饰 + 表格真渲染：`src/editor/wysiwyg.js` + `src/editor/tableRender.js`，单元格可编辑并同步回 Markdown 源码）；`⌘⇧F` 专注模式收起界面干扰（`useWorkspace`） |
+| **任务列表勾选** | 点勾选框直接翻转 `[ ]` ⇄ `[x]`（`src/editor/taskToggle.js`）；渲染仍在 wysiwyg.js，交互单独一层，不打破「装饰层不碰文档」的约束 |
+| **代码块增强** | 代码块内显示行号（各块独立从 1 起）、悬停出现「复制」按钮（复制纯代码，不含围栏）；编辑器侧语法高亮覆盖 js/ts 家族、java、html/xml 家族、css 家族、json 家族、python（`src/editor/codeBlock.js` + `markdownHighlight.js`）。go / rust 等语言**只在预览区**高亮（编辑器侧无对应语言包，本仓不新增依赖） |
+| **表格行列增删** | 悬停表格右上角出现操作条：下方插行 / 删当前行 / 右侧插列 / 删当前列（`src/editor/tableOps.js` + `tableWidget.js`）；最少保留 1 行 1 列，操作在 model 上改到自洽再整体序列化，杜绝列数不一致的非法 Markdown |
 | **主题 4 档（含跟随系统）** | 浅 Indigo / 深 Indigo / 纸感赭石三套配色（`src/themes/tokens/design-tokens.css`）+ 跟随系统，共 4 档；`system` 偏好由 `theme.js` 解析为具体主题并写入（纸感不会被系统自动选中）；切换只改 `<html data-theme>`，**不重建编辑器** |
 | **大纲视图** | `⌘B` 开关（`src/components/Outline.vue` + `editor/outline.js` + `useOutline.js`），从文档提取标题层级、高亮当前节、点击跳转 |
 | **历史快照** | `src/components/HistoryPanel.vue`：与自动保存**解耦**——编辑会话每 ≥3 分钟节流一次 + 显式保存 + 切换文件前 + 手动触发；轮转 / 去重由 Go 侧 `SnapshotWrite` 负责 |
@@ -182,7 +185,7 @@ inkmark/
     │   └── themes/          # tokens/design-tokens.css（Token 唯一真源）+ index.css（唯一样式入口）
     │                        #   + app-shell.css / platform-darwin.css / editor-wysiwyg.css
     │                        #   + theme.js（主题解析）/ prefs.js（偏好唯一真源）
-    ├── tests/           # node:test 测试网（239 条测试 / 50 个 suite，零第三方依赖），需 Node ≥22
+    ├── tests/           # node:test 测试网（274 条测试 / 57 个 suite，零第三方依赖），需 Node ≥22
     └── wailsjs/         # Wails 自动生成的 IPC 绑定（勿手改）
 ```
 
@@ -216,7 +219,7 @@ npm install
 
 npm run dev      # 本地开发服务器
 npm run build    # 生产构建 → frontend/dist
-npm test         # 测试网（239 条测试，零第三方依赖），【需 Node ≥22】
+npm test         # 测试网（274 条测试，零第三方依赖），【需 Node ≥22】
 ```
 
 > - `npm test` 用的是 Node **内置** `node:test`（无第三方测试依赖），因此**必须 Node ≥22**；低版本会报 `node --test` 不可用。
@@ -227,7 +230,7 @@ npm test         # 测试网（239 条测试，零第三方依赖），【需 No
 ### 门禁脚本（与 CI 同口径）
 
 ```bash
-cd frontend && npm test                                    # 测试网，期望 239/239
+cd frontend && npm test                                    # 测试网，期望 274/274
 node scripts/verify/verify-readme-claims.mjs               # README 数字声明 ↔ 实测（自己会再跑一遍测试网；退出码 1=漂移 / 2=测量失效）
 node scripts/verify/verify-shortcuts.mjs                   # 快捷键三方对齐（README ↔ 速查表 ↔ COMMANDS）
 node scripts/verify/scan-i18n-residue.mjs                  # i18n 文案残留
@@ -271,14 +274,17 @@ node scripts/probe/probe-r11-fixes.mjs             # 第十一轮修复：全角
 7. **渲染进程零 Node 能力**：前端只能通过生成的 `wailsjs` 绑定调 Go 方法，文件系统攻击面收在 `app.go`。
 8. **WYSIWYG 即时渲染的边界**：只产装饰、绝不 `dispatch` 文档变更（内容零篡改）；`view.composing` 为 true（中文输入中）时冻结重算，避免抖动；装饰只在 `visibleRanges` 内计算（大文档性能）；活跃行向上下各扩 1 行，避免方向键因标记符显隐突变而跳跃。
 9. **快照与自动保存解耦**：自动保存 800ms 防抖覆盖原文件；快照独立按「节流 / 显式保存 / 切换文件边界 / 手动」触发，避免每次按键都落快照、污染历史。
-10. **关闭拦截的状态同步（`dirty` 语义已固化为不变量）**：`dirty` 只有一个含义——「编辑器内存内容 ≠ 磁盘内容」（含从未落盘的新文档）。真源在前端、关闭钩子在 Go，前端 `watch(dirty)` 调 `SetDirty` 镜像；Go 侧不读盘比对。硬约束：任何改动文档内容的路径都必须**显式声明**对 `dirty` 的影响（标脏或落盘归零），不得默认继承。对话框异常时保守「阻止关闭」，宁可多问一次也不丢内容。完整定义、生命周期表与多文档扩展路径见 [`docs/architecture/ADR-005-dirty-semantics.md`](docs/architecture/ADR-005-dirty-semantics.md)。
-11. **关闭窗口走 `App.CloseWindow()`**：Wails v2.16 没有 `WindowClose`，`Quit` 是强制退出、会绕过 `OnBeforeClose` 的未保存确认，故自绘关闭按钮统一走「先问再退」的 `CloseWindow`。
-12. **图片落盘位置**：写入「文档同级 `assets/`」而非全局目录，让 `.md` 能连附件整体搬移；文件名带时间戳 + 随机，避免同毫秒 / 同名覆盖。
-13. **代码块高亮按需注册**：预览侧 `highlight.js` 用 `lib/core` + 注册 79 种常用语言（非整库导入），前端 JS 包从 1756kB 降到 891kB（gzip 603kB → 324kB）。新增语言只需加一行 import + 一行注册。
-14. **窗口形态按平台差异化**：darwin 用 `Frameless:false` + `mac.TitleBarHidden()`（隐藏长条、保留红绿灯、内容全尺寸）+ 透明 + 半透明（系统 Vibrant 毛玻璃）；Linux/Windows 用 `Frameless:true` 无边框纯净模式，标题栏与窗口按钮全自绘。一套参数走天下会同时踩「macOS 丢红绿灯」与「无边框平台不能拖」两个坑。
-15. **静默失败必须主动提示**：用户写 `| a | b |` 却没看到表格时，标准 Markdown 的行为是「当普通段落渲染、不报错」。这在本仓属于典型的静默失败（构建绿、测试绿、运行时无异常），所以额外做了状态栏常驻提示：判定复用**编辑器同一棵语法树**（顶层 `Paragraph` + 连续 ≥2 行管道行 → 判定为疑似未渲染），**常驻而非 toast**（toast 3.2 秒就消失，而这是「用户没察觉」的问题），且**只读不写文档**。注意 GFM 要求分隔行在**第 2 行**且只含 `-`/`:`，这正是用户最常踩空的规则。
+10. **交互必须与装饰分层**：wysiwyg.js 的第 5 条架构约束是「只产装饰、永不 dispatch」，所以「点勾选框改文档」不能写在那里 —— 它落在 `taskToggle.js`（用 `EditorView.domEventHandlers` 捕获 mousedown，因为 click 之前 widget 可能已被替换掉）。同理表格的行列操作拆成「model 变换（`tableOps.js`）/ DOM widget（`tableWidget.js`）/ 装饰（`tableRender.js`）/ 自同步标记（`tableSync.js`）」四个文件，既守住 300 有效行的门禁红线，也让循环依赖只在一个无依赖的小模块里断开。
+11. **关闭拦截的状态同步（`dirty` 语义已固化为不变量）**：`dirty` 只有一个含义——「编辑器内存内容 ≠ 磁盘内容」（含从未落盘的新文档）。真源在前端、关闭钩子在 Go，前端 `watch(dirty)` 调 `SetDirty` 镜像；Go 侧不读盘比对。硬约束：任何改动文档内容的路径都必须**显式声明**对 `dirty` 的影响（标脏或落盘归零），不得默认继承。对话框异常时保守「阻止关闭」，宁可多问一次也不丢内容。完整定义、生命周期表与多文档扩展路径见 [`docs/architecture/ADR-005-dirty-semantics.md`](docs/architecture/ADR-005-dirty-semantics.md)。
+12. **代码块增强的三个实现要点**：① **行号不进文档** —— 走 CodeMirror 的行装饰把编号写进 `data-line` 属性，由 CSS `attr()` 渲染成伪元素；写进 DOM 文本会被复制/编辑带出去，写进文档则污染内容。② **每个代码块独立从 1 计数** —— CSS counter 做不到「按块重置」（CM 的行装饰不提供块级容器），跨块累加会让行号失去定位意义，故编号在 JS 侧算好后经属性下发。③ **复制按钮按光标就近显隐** —— 光标在某块内只给那块显示，光标不在任何块内则全部可见；纯 hover 显现在触屏与无鼠标环境不可达。
+13. **原生对话框文案本地化**：打开 / 选目录 / 另存为 / 「未保存」确认框的文案只能由 Go 侧传给系统 API，故由前端随调用传入 locale（`dialogs.go` 按主语言子标签取表，未知语言回落中文）。`OnBeforeClose`（macOS 红绿灯）由 Wails 直接触发、拿不到请求参数，读 `SetLocale` 写入的镜像——**镜像不是真源**，前端每次切换整值覆盖（`main.js` 同步，`app.go` 有裁决注释）。
+14. **关闭窗口走 `App.CloseWindow()`**：Wails v2.16 没有 `WindowClose`，`Quit` 是强制退出、会绕过 `OnBeforeClose` 的未保存确认，故自绘关闭按钮统一走「先问再退」的 `CloseWindow`。
+15. **图片落盘位置**：写入「文档同级 `assets/`」而非全局目录，让 `.md` 能连附件整体搬移；文件名带时间戳 + 随机，避免同毫秒 / 同名覆盖。
+16. **代码块高亮按需注册**：预览侧 `highlight.js` 用 `lib/core` + 注册 79 种常用语言（非整库导入），前端 JS 包从 1756kB 降到 891kB（gzip 603kB → 324kB）。新增语言只需加一行 import + 一行注册。
+17. **窗口形态按平台差异化**：darwin 用 `Frameless:false` + `mac.TitleBarHidden()`（隐藏长条、保留红绿灯、内容全尺寸）+ 透明 + 半透明（系统 Vibrant 毛玻璃）；Linux/Windows 用 `Frameless:true` 无边框纯净模式，标题栏与窗口按钮全自绘。一套参数走天下会同时踩「macOS 丢红绿灯」与「无边框平台不能拖」两个坑。
+18. **静默失败必须主动提示**：用户写 `| a | b |` 却没看到表格时，标准 Markdown 的行为是「当普通段落渲染、不报错」。这在本仓属于典型的静默失败（构建绿、测试绿、运行时无异常），所以额外做了状态栏常驻提示：判定复用**编辑器同一棵语法树**（顶层 `Paragraph` + 连续 ≥2 行管道行 → 判定为疑似未渲染），**常驻而非 toast**（toast 3.2 秒就消失，而这是「用户没察觉」的问题），且**只读不写文档**。注意 GFM 要求分隔行在**第 2 行**且只含 `-`/`:`，这正是用户最常踩空的规则。
 
-16. **跨层事件名是契约，必须两侧锁名 + 变异自证**：Go 侧 `EventsEmit(a.ctx, "fs:changed", root)` 与前端 `EventsOn('fs:changed', …)` 靠字符串对接，单侧改名不会报错、只会静默失效（本仓最恨的失效模式）。所以测试里有一条**跨文件集合比对契约**（两侧事件名集合必须逐字相等），且变异自证过：前端名改错 → 行为 + 契约测试双红；Go 侧名改错 → 契约测试红。同理，浏览器预览（vite dev 无 Wails runtime）下的订阅必须可选链兜底——具名 import `wailsjs/runtime` 会展开为 `window.runtime.EventsOnMultiple(...)` 直取而必抛，兜底只允许出现在**已知的环境分支**上。**降级路径的用例必须让「降级条件」成为被测代码的显式入参**（`mountOps({ installRuntime: 'no-runtime' })`），不能在用例里靠一次全局赋值当前置条件——helper 里的无条件初始化会静默覆盖它，用例就此变成恒绿的摆设（第九轮 QA 实测抓到过，见 HANDOFF §4 ⑰）。
+19. **跨层事件名是契约，必须两侧锁名 + 变异自证**：Go 侧 `EventsEmit(a.ctx, "fs:changed", root)` 与前端 `EventsOn('fs:changed', …)` 靠字符串对接，单侧改名不会报错、只会静默失效（本仓最恨的失效模式）。所以测试里有一条**跨文件集合比对契约**（两侧事件名集合必须逐字相等），且变异自证过：前端名改错 → 行为 + 契约测试双红；Go 侧名改错 → 契约测试红。同理，浏览器预览（vite dev 无 Wails runtime）下的订阅必须可选链兜底——具名 import `wailsjs/runtime` 会展开为 `window.runtime.EventsOnMultiple(...)` 直取而必抛，兜底只允许出现在**已知的环境分支**上。**降级路径的用例必须让「降级条件」成为被测代码的显式入参**（`mountOps({ installRuntime: 'no-runtime' })`），不能在用例里靠一次全局赋值当前置条件——helper 里的无条件初始化会静默覆盖它，用例就此变成恒绿的摆设（第九轮 QA 实测抓到过，见 HANDOFF §4 ⑰）。
 
 ## 已知问题与待办
 
@@ -302,6 +308,8 @@ node scripts/probe/probe-r11-fixes.mjs             # 第十一轮修复：全角
 | 14 | **无拼写检查（刻意不做）** | CodeMirror 的 lint 对 CJK 基本无效，中文写作场景是**伪需求**，故不引入。英文拼写需自行接第三方 lint 扩展 |
 | 15 | **导出模板文案未国际化** | `export/exporters.js` 的 HTML 模板未接 `t()`（Spec 明确留待后续） |
 | 16 | **`App.vue` 行数余量极小** | 装配层硬上限 **总行数** 150 行、当前 148 行（契约 5 实测）。新增行为一律先下沉到 composables/，门禁口径是**总行数**（含注释与空行，比有效行更严） |
+| 17 | **Go 侧错误串仍是中文（已裁决的残余）** | 2026-10 复查：原生**对话框**文案已全部本地化（`dialogs.go`，按前端传入的 locale 取表；`OnBeforeClose` 读 `SetLocale` 镜像）。但各方法的**错误信息**（如「同名文件已存在: x」）仍是中文，经 IPC 回到前端后被嵌进本地化模板显示为「保存失败：<中文原因>」。裁决见 `dialogs.go` 文件头：模态对话框必须本地化，错误细节保留技术原文；彻底解决的正确方向是 Go 返回**错误码**由前端查表，属独立协议改造 |
+| 18 | **Windows 路径处理未真机验证** | 2026-10 复查修掉了三处只认 `/` 的路径切分（标题栏文件名、侧栏文件夹名、字数统计无关），改为同时认 `\`；逻辑已由 `frontend/src` 内的实现覆盖，但 Windows 真机路径仍未跑过（与 #1 同源） |
 
 ## 关于插件系统（现在不做）
 

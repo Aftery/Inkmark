@@ -31,7 +31,15 @@
   border-radius: var(--radius-sm);
   vertical-align: -2px;
   margin: 0 4px 0 2px;
+  /* 可点击（交互见 editor/taskToggle.js）：光标换成手型是唯一能让用户
+     发现「这个框能点」的线索 —— 静态勾选框看起来纯装饰。 */
+  cursor: pointer;
+  /* hover 反馈：不加会让人以为点了没反应 */
+  transition: border-color var(--motion-fast) var(--ease-standard),
+              background-color var(--motion-fast) var(--ease-standard);
 }
+.cm-md-task-box:hover { border-color: var(--accent); }
+.cm-md-task-box.checked:hover { background: var(--accent-hover, var(--accent)); }
 .cm-md-task-box.checked { background-color: var(--accent); border-color: var(--accent); }
 .cm-md-task-box.checked::after {
   content: '';
@@ -89,7 +97,11 @@
 
 /* ---- 表格真渲染（StateField block widget，tableRender.js）----
    视觉与 preview.css 的表格规则同源（发丝边框 / 表头底色），单一观感 */
-.cm-md-table { margin: var(--space-4) 0; }
+.cm-md-table {
+  margin: var(--space-4) 0;
+  /* 操作条的定位基准（浮层贴在表格右上角） */
+  position: relative;
+}
 .cm-md-table table {
   border-collapse: collapse;
   width: 100%;
@@ -107,6 +119,67 @@
   font-weight: var(--weight-emphasize);
   background: var(--surface-warm);
 }
+/* ---- 表格行列操作条（悬停出现，见 tableRender.js 的 runAction）----
+   为什么悬停才出现：常驻会挤占行高、并在窄单元格里盖住文字；浮层不进入阅读
+   视线。用 opacity 而非 display，是为了让可点击区域稳定 —— display 切换会让
+   鼠标位置在出现/消失间抖动，按钮在指针下反复闪动。 */
+.cm-md-table-bar {
+  position: absolute;
+  top: calc(-1 * var(--space-4));
+  right: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 2px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  box-shadow: var(--elev-raised);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity var(--motion-fast) var(--ease-standard);
+}
+.cm-md-table.is-hover .cm-md-table-bar,
+.cm-md-table-bar:focus-within {
+  opacity: 1;
+  pointer-events: auto;
+}
+.cm-md-table-btn {
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--fg-2);
+  font-size: 13px;
+  line-height: 1;
+  cursor: pointer;
+  transition: background-color var(--motion-fast) var(--ease-standard),
+              color var(--motion-fast) var(--ease-standard);
+}
+.cm-md-table-btn:hover { background: var(--surface-2); color: var(--fg); }
+.cm-md-table-btn:active { background: var(--border); }
+.cm-md-table-btn:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+/* 删除按钮视觉上稍弱：破坏性操作不该和插入一样抢眼 */
+.cm-md-table-btn[data-action^='del'] { color: var(--muted); }
+.cm-md-table-btn[data-action^='del']:hover { background: var(--danger-soft); color: var(--danger); }
+.cm-md-table-sep {
+  width: 1px;
+  height: 12px;
+  margin: 0 2px;
+  background: var(--border);
+}
+/* 拒绝操作（删到只剩一行/一列）时的短暂描边提示，说明「不是按钮坏了」 */
+.cm-md-table.is-refused table { animation: cm-table-refuse var(--motion-slow) var(--ease-standard); }
+@keyframes cm-table-refuse {
+  0%, 100% { outline: 2px solid transparent; outline-offset: 2px; }
+  40% { outline: 2px solid var(--danger); outline-offset: 2px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .cm-md-table.is-refused table { animation: none; outline: 2px solid var(--danger); outline-offset: 2px; }
+}
+
 /* 编辑焦点：单元格内一圈内嵌 accent 描边（不外扩，避免行高跳动） */
 .cm-md-table [contenteditable]:focus {
   outline: 2px solid var(--accent);

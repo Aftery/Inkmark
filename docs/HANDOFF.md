@@ -314,7 +314,7 @@ docs/spec/                   契约文档（见下）
 
 ---
 
-## 2. 各轮做了什么（第一~十二轮；第七轮为 2026-10-11 按 git show 回补）
+## 2. 各轮做了什么（第一~十九轮；第七轮为 2026-10-11 按 git show 回补）
 
 ### 第一轮：设置面板 + 打印菜单规范化
 - 新增 `components/SettingsPanel.vue`（外观 / 编辑器两分类，7 项）
@@ -1048,6 +1048,173 @@ README #6、HANDOFF §6 #22、§7 三处都登记着「去抖边界双发（同 
 `render-check` 已内建**采集有效性自检**（HTTP 200 前置 + 预期噪声下限）——
 它会先确认「采集链路是活的」再采信结果。这套机制是为了防我那次
 「vite 根本没起来却把 0 条 warning 当成正常」的错误。
+
+---
+
+### 第十七轮：全仓代码审查与优化（2026-10-20）
+
+本轮不是功能轮，是**审查轮**：按「Go 按 Go 的规矩、前端按前端的规矩」通读全部
+源码，只修有实据的缺陷，不做风格洁癖式改写。所有改动都跑过既有门禁，契约测试
+239 条保持全绿，新增 Go 测试 13 条（`dialogs_test.go` / `fileops_test.go` /
+`rename_test.go`）。
+
+#### Go 侧
+
+| 缺陷 | 形态 | 修法 |
+|---|---|---|
+| `WriteFile` 用固定临时名 `path+".tmp"` | **并发写静默损坏**：自动保存（800ms 防抖）与 ⌘S 交错时，两次写入共用同一临时文件，rename 后落盘的是混合内容 | `os.CreateTemp` 唯一名 + 失败路径清理 + 还原 0644；`fileops_test.go` 用 16 并发写钉住（**已变异自证**：换回旧实现后该测试立刻红，报 `rename: no such file or directory`） |
+| `shortRandHex` 失败回退固定串 `"00000000"` | 随机源失败时图片文件名退化为「只靠毫秒区分」，同毫秒两张图互相覆盖且**无任何错误** | 改为返回 error 并上抛，宁可这次插图失败也不静默覆盖用户文件 |
+| `RenameFile` 只校验 `newName` | `oldPath` 为空串时 `filepath.Dir("")=="."` → 在进程工作目录造文件；目录也能被「重命名」 | 补 `oldPath` 存在性/非目录校验、`.`/`..` 拒绝、判等改 `filepath.Clean` 比较；`rename_test.go` 覆盖 4 类非法输入 |
+| `clipboard_windows.go` 的 `uintptr→unsafe.Pointer` | `GOOS=windows go vet` 报 possible misuse —— 而 CI 跑 `go vet ./...` 时**只分析 darwin 那份**，两类门禁都抓不到 | 抽出 `globalPtr` 让 vet 看到指针→指针的转换（语义不变：Win32 全局堆不受 GC 管理）；**并在 CI 补交叉 vet 一步**，堵住这条盲区 |
+| `readClipboardTextRaw` 全平台死代码 | staticcheck U1000；四个平台文件 + ObjC 桥（`.h`/`.m`）各有一份实现，从无调用方（文本剪贴板走 `runtime.ClipboardGetText`） | 连 ObjC 桥一起删除，`clipboard_other.go` 的注释同步改成只兜 `readClipboardImageRaw` |
+| 原生对话框文案写死中文 | 界面已支持 en-US / ja-JP，点「打开文件」弹出的却是中文标题 —— 属于**用户直接可见**的不一致 | 新增 `dialogs.go` 三语文案表，locale 由前端随调用传入；`OnBeforeClose`（Wails 直接调用、无参数通道）读 `SetLocale` 镜像 —— 镜像不是真源，前端每次切换整值覆盖 |
+| `snapshot.go` 的文件名分配是 `for i := 0; ; i++` | Stat 返回任何非 ENOENT 错误（权限/路径过长）时**无限空转**，UI 挂死 | 加上界（≤ 快照上限 +1 个候选）并如实报错 |
+| `watcher.go` 的 `watchMu/watchGen/watchCancel` 是包级全局 | 隐式单例；`watchLoop` 内还跨 goroutine 读 `a.ctx`（`fire` 里读，`startup` 里写） | 收进 `App.watch` 结构体字段；`emitCtx` 与 `gen` 在起 goroutine 时快照传入，goroutine 内不再读可变字段 |
+| `sort.Slice` / `os.IsNotExist` | 非现代惯用法（go.mod 声明 go 1.25） | `slices.SortStableFunc` + `cmp.Compare`/`cmp.Or` 风格；`errors.Is(err, fs.ErrNotExist)`（能穿透 `*PathError`） |
+| 全仓 11 个文件未过 `gofmt` | Go 官方格式即规范 | `gofmt -w`（实测差异只有注释缩进与文件末尾换行，零逻辑变更） |
+
+#### 前端侧
+
+| 缺陷 | 形态 | 修法 |
+|---|---|---|
+| **保存落盘后无条件清 `dirty`** | `WriteFile` 是异步 IPC，写入期间用户继续输入 → 内存已是 t1、落盘是 t0，dirty 却被清零：状态栏显示「已保存」、关闭不弹确认框 → **t1 静默丢失**。这是 ADR-005「dirty 唯一含义」被打破的形态 | 抽出 `writeAndSettle`：落盘前记下写入内容，成功后再比一次当前内容，仍相同才清零；否则保持脏并退回 `unsaved` |
+| 打开文件无竞态守卫、无错误处理 | ① 连点两个文件时先发的读取可能后返回，把旧文件内容盖到新路径上（下次自动保存还会把旧内容写进新文件）② `ReadFile` 失败直接抛 rejection，用户看到「点了没反应」 | 加 `openSeq` 序号守卫（过期结果丢弃）+ try/catch + 新增 `toast.openFailed`（三语） |
+| 三处路径切分只认 `/` | Windows 上 `C:\dir\a.md` 会被当成完整文件名显示在标题栏 / 侧栏 | `baseName` / `folderName` 同时认两种分隔符 |
+| `wordCount` 每次重算新建正则 + 重建整份字符串 | 大文档下每键一次全量拷贝 | 提为模块级常量 + 单次遍历计数（`countWords`，已用 15 组用例逐字验证与旧实现等价） |
+| `useWorkspace` 直接访问 `localStorage` | 隐私模式 / 禁用 cookie 的 webview 下**访问即抛**，异常打断 setup → 白屏（而 `themes/prefs.js` 早就有内存兜底） | 统一走 `readFlag`/`writeFlag` 静默降级 |
+| `tableScanKick` 的轮询在 destroy 后不停 | 视图已销毁仍每 60ms 轮询，且可能对已销毁 view 派发事务 | 加 `destroyed` 标志，`destroy()` 里置位并清定时器 |
+| `useOutline` 的 rAF 未取消 | 卸载后回调仍会跑一次 | 保留 `rafId` 并在 `onBeforeUnmount` 里 `cancelAnimationFrame` |
+
+#### 本轮刻意**没**做的事（附理由）
+
+- **Go 侧错误信息不翻译**：数量多且分散，逐条改造会把「校验逻辑」与「展示语言」耦合；
+  且系统底层错误本身只有英文/本地化文案两种。裁决写进 `dialogs.go` 文件头，
+  README 已知问题 #17 登记了残余与正确的后续方向（返回错误码而非错误串）。
+- **`docassets.go` 的 `isLocal` 改造**：现有 `filepath.Rel` 包含校验已是承载性判据，
+  再前置一个判定会变成「双口径」（本仓在该文件注释里明确反对，理由是会失真变异自证）。
+- **App.vue 一行不动**：它是 148/150 行的装配层红线，且 README 数字声明门禁钉着它。
+- **不引入任何新依赖、不迁移 TypeScript、不删注释**（注释是本仓的裁决资产）。
+
+#### 验证口径（与 CI 一致）
+
+```
+gofmt -l .                                    # 空
+go vet . && GOOS=windows go vet .             # 双平台均空
+staticcheck .                                 # 空
+go test -race ./...                           # ok
+cd frontend && npm test                       # 239/239
+npm run build                                 # 成功
+node scripts/verify/{5 个门禁脚本}            # 全 PASS
+```
+`verify-i18n-switch.mjs` 退出码 2 = 本机无无头浏览器（脚本显式区分「未验证」与「失败」，
+不冒充通过）；`scripts/smoke/render-check.mjs` 同因跳过。
+
+---
+
+### 第十八轮：交互补全 —— 任务勾选 + 表格行列增删（2026-10-20）
+
+#### 需求
+两处「看起来是装饰、其实该能操作」的空白：任务列表的勾选框点不动；表格只能靠手写
+`| --- |` 增删行列。
+
+#### 关键决策：交互不能写进装饰层
+
+`wysiwyg.js` 的第 5 条架构约束是「**只产装饰、永不 dispatch 文档变更**」，而勾选
+必须改文档。若就地加 dispatch，那条约束失效 → WYSIWYG 可靠性论证整段作废。
+故新增 `editor/taskToggle.js`，用 `EditorView.domEventHandlers` 捕获 **mousedown**
+（不是 click：click 之前编辑器可能已把 widget 换回源码，目标节点消失）。
+
+表格行列操作同理按职责拆成四个文件（原 `tableRender.js` 加功能后会到 406 有效行，
+撞契约 5 的 300 红线）：
+
+| 文件 | 职责 |
+|---|---|
+| `tableRender.js` | 语法树扫描 + StateField block 装饰（**什么时候渲染**） |
+| `tableWidget.js` | 可编辑单元格 DOM + 键盘导航 + 触发行列操作（**渲染出来怎么编辑**） |
+| `tableOps.js` | 行列增删的纯 model 变换 + 悬停操作条 DOM |
+| `tableSync.js` | `selfSync` 标记 + 「正在编辑的 widget」共享状态（**循环依赖的唯一断点**） |
+
+⚠ 拆分踩到的第一手坑：`activeWidget` 原本是 tableRender.js 的模块级变量，装饰层要把它
+置 null、DOM 层要给它赋值。跨文件共享可变状态在 ESM 里**不能靠 import 赋值**（Rollup
+直接报 `Illegal reassignment of import`，而 jest/node:test 不报）—— 必须走
+`tableSync.js` 的 getter/setter。**这类错误只有真 build 才暴露，`npm test` 全绿也没用。**
+
+#### 行列操作的正确性要点
+
+- **在 model 上改到自洽再整体序列化**，不直接改 DOM：列数散布在表头 / 每一行 /
+  `aligns` / `delimRaw` 四处，漏改一处就产出**非法 Markdown**（GFM 列数不一致 →
+  整表退化成段落，用户看到「表格突然变成一堆竖线」）。测试用「改完重新 `parseTable`
+  必须成功且列数一致」做判据。
+- **最少保留 1 行 1 列**：删空后 GFM 仍合法，但用户几乎总是手滑。拒绝时给短暂描边
+  提示（`is-refused`），不让按钮看起来是坏的。
+- **`mousedown` + `preventDefault()`**：单元格是 contenteditable，若用 click，mousedown
+  会先把焦点移走 → focusout → 同步 → widget 重建 → click 丢失。
+
+#### 顺带修掉的真实缺陷（来自前端专项审查，均已实证）
+
+| 缺陷 | 形态 |
+|---|---|
+| `AboutDialog` 模板里的 `window.open(...)` | Vue 模板**不允许** `window` 全局名，编译成 `_ctx.window.open(...)` → 点击必抛 TypeError，两个仓库链接点了没反应。且 WKWebView 本就不实现新窗口 delegate，`window.open` 静默无效 → 改走 `BrowserOpenURL`（三平台齐备，零新依赖） |
+| `<html lang>` 永不更新 | `index.html` 硬编码 `zh-CN`，切到 en/ja 后读屏器仍按中文断词（WCAG 3.1.1）→ `initI18n` 同步 `documentElement.lang` |
+| i18n 差集自检「假绿灯」 | `i18n.test.mjs` 的 `keysOf()` 字符类缺 `-`，实测对 `titlebar.save-as` 失明：把它从 en/ja 删掉测试仍全绿。已补字符类 + 新增「正则必须看见每个真实 key」的自检断言，让正则失明本身变红 |
+| `TreeNode`/`FileTree` 的 `ListDir` 未 catch | Go 侧明确返回 error（目录被删/无权限）→ rejection 悬空，`loading` 永久 true，该目录此后一直显示「加载中」。另加序号守卫防 stale response（先发后到的旧结果覆盖新目录） |
+| `InputDialog` 在 prop 上写值 | `v-model="props.dialog.value"` 编译成对 props 的赋值，每次敲字走 mutating-prop 告警且把输入态焊死 → 改本地镜像 ref |
+| `SegmentedControl` 的 `aria-label=""` | 空值属性比不写更糟（部分 AT 读成「无名控件」）→ `ariaLabel \|\| undefined` |
+| `TitleBar` 菜单无键盘路径 | 补 `aria-haspopup` / `aria-expanded`；Esc 关闭后把焦点还给触发按钮 |
+| `tableScanKick` 轮询在 destroy 后不停 | 视图已销毁仍每 60ms 轮询，且可能对已销毁 view 派发事务 |
+| `useOutline` 的 rAF 未取消 | 卸载后回调仍跑一次 |
+
+#### 验证
+`npm test` **253/253**（新增 14 条：task-toggle 8 条 + 表格行列 5 条 + i18n 正则自检 1 条）；
+`npm run build` 成功；行数门禁 5 个文件分别 127 / 230 / 73 / 9 / 46 有效行，全在 300 红线内；
+README 数字声明门禁已同步（239→253 条 / 50→52 suite）。
+**变异自证**：把 `insertColumn` 改成「只改表头不改每一行」→ 测试立刻红（合法 GFM 判据命中），
+还原后复绿。
+
+---
+
+### 第十九轮：代码块增强 —— 行号 + 一键复制 + 高亮扩面（2026-10-20）
+
+#### 需求
+代码块高亮、一键复制、行号显示。
+
+#### 先说清现状（避免误判「已实现」）
+- **高亮**：编辑器侧早就有（`@codemirror/lang-markdown` + `codeLanguages` + `mdHighlight`
+  的 `--hl-*` 配色），但**只覆盖 7 个语言包**；预览/导出侧由 highlight.js 覆盖 79 种。
+  两边色板同源（`--hl-*`），但**语言覆盖面不同源** —— 这是依赖边界，不是遗漏。
+- **行号 / 复制**：此前**完全没有**。
+
+#### 三个实现要点（都是「看起来能跑、实际会错」的地方）
+
+1. **行号不进文档，也不进 DOM 文本**。走 CodeMirror 行装饰把编号写进 `data-line`
+   属性，由 CSS `attr()` 渲染成 `::before` 伪元素。写进 DOM 文本 → 复制/编辑会把它
+   带出去；写进文档 → 污染用户内容。
+   ⚠️ 曾想用 CSS counter，**行不通**：CM6 的行装饰不提供块级容器，counter 无法
+   「按代码块重置」—— 第二个块的行号会接着第一个累加（实测），行号就此失去定位意义。
+   故编号在 JS 侧按块算好（各块独立从 1 起）再经属性下发。
+2. **复制内容必须剥掉围栏**。初版按「首个 CodeMark 之后 → 第二个 CodeMark 之前」
+   手工 trim 换行，**被自己写的测试抓到**：多切/少切一个换行（`trim` 实测把
+   `line1` 切成了 `line1\n`）。正解是直接取 Lezer 的 **CodeText** 子节点 ——
+   它的区间恰好就是正文（不含前后换行），空块/未闭合块/CRLF 都自然正确。
+3. **复制按钮按光标就近显隐**。光标在某块内 → 只给那块显示；光标不在任何块内 →
+   全部可见（保持可发现性：用户可能只是扫读全文想复制某段，光标位置不该是障碍）。
+   纯 hover 显现在触屏 / 无鼠标环境**永远不可达**。
+
+#### 顺带修掉
+- `markdownHighlight.js` 的别名补全（`htm`/`mts`/`cts`/`jsonl`/`astro`/`hbs`…），
+  并把**依赖边界写进注释**：go / rust 等在编辑器侧无语言包，只在预览区高亮。
+  测试里有一条把这个边界**写死**（`codeLanguages('go') === null`）—— 将来真装了
+  语言包时它会红，提醒同步更新注释与文档，而不是让边界悄悄漂移。
+- 复制按钮的装饰层从 StateField 改成 ViewPlugin：StateField 的 update 拿不到
+  `visibleRanges`，只能全文档遍历（大文档下每敲一个字都遍历整棵树，违反 AC-05）。
+
+#### 验证
+`npm test` **274/274**（新增 21 条：行号 6 + 复制 5 + 可见性 3 + 语言映射 4 + 接线 3）；
+`npm run build` 成功；`codeBlock.js` 172 有效行（红线 300）。
+**变异自证**：把行号改成跨块累加 → 3 条测试立刻红，还原后复绿。
+
+⚠️ 需真机目视（本机无 GUI 权限）：行号与代码的对齐、复制按钮的悬停手感与
+成功/失败反馈、按钮与围栏行的位置关系。
 
 ---
 

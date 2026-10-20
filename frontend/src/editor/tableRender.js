@@ -24,15 +24,15 @@
 // 场景可接受；大文档出现卡顿再做按块缓存。仅选区变化时不重扫（复用上次表
 // 清单只重算可见性，widget 经 eq 命中，零 DOM 重建）。
 
-import { Decoration, EditorView, ViewPlugin, WidgetType } from '@codemirror/view'
+import { Decoration, EditorView, ViewPlugin } from '@codemirror/view'
 import { Annotation, RangeSetBuilder, StateEffect, StateField } from '@codemirror/state'
 import { ensureSyntaxTree, syntaxTree, syntaxTreeAvailable } from '@codemirror/language'
-import { redo, undo } from '@codemirror/commands'
+// 行列增删（纯 model 变换）与操作条 DOM —— 见该文件头注的职责切分
+import { TableWidget } from './tableWidget.js'
+import { selfSync, setEditingWidget } from './tableSync.js'
 
 // 自家同步事务的标记：field 见到它就保留 activeWidget（编辑中），否则视为
 // 外部改动（撤销 / 文件监听 / 命令插入）→ 强制重渲染，避免单元格 DOM 与文档脱节。
-const selfSync = Annotation.define()
-
 // ---------------- 解析 / 序列化（导出供测试） ----------------
 
 /** 把一行按未转义的 `|` 切成单元格；`\|` 还原为字面竖线，首尾管道可省略 */
@@ -123,192 +123,7 @@ function decoOf(state, tables) {
   return b.finish()
 }
 
-// ---------------- 可编辑表格 widget ----------------
-
-// 正在被编辑（单元格持有焦点）的 widget 实例。编辑期间文档不断被自家同步
-// 改写，装饰随之重建 —— eq 靠它识别「还是我」，让 CM 复用同一份 DOM，
-// 焦点与 IME 不被打断。
-let activeWidget = null
-
-function focusEnd(el) {
-  el.focus()
-  const r = document.createRange()
-  r.selectNodeContents(el)
-  r.collapse(false)
-  const s = window.getSelection()
-  s.removeAllRanges()
-  s.addRange(r)
-}
-
-class TableWidget extends WidgetType {
-  constructor(t) {
-    super()
-    this.model = t.model
-    this.key = t.source
-    this.from = t.from
-    this.to = t.to
-    this.source = t.source
-    this.dom = null
-    this.viewRef = null
-    this.composing = false
-    this.ac = new AbortController()
-  }
-
-  eq(other) {
-    if (activeWidget && activeWidget.dom?.isConnected && (activeWidget === this || activeWidget === other)) return true
-    return other.key === this.key
-  }
-
-  // 事件全部由 widget 自己处理（Tab/Enter 导航、Esc 退出、粘贴转纯文本），
-  // CM 不参与 —— 否则点击单元格会被当作普通光标点击。
-  ignoreEvent() { return true }
-
-  toDOM(view) {
-    this.viewRef = view
-    const wrap = document.createElement('div')
-    wrap.className = 'cm-md-table'
-    const table = document.createElement('table')
-    const { header, aligns, rows } = this.model
-
-    const mk = (tag, text, i) => {
-      const el = document.createElement(tag)
-      el.contentEditable = 'true'
-      el.textContent = text
-      if (aligns[i] === 'center') el.style.textAlign = 'center'
-      else if (aligns[i] === 'right') el.style.textAlign = 'right'
-      return el
-    }
-    const thead = document.createElement('thead')
-    const htr = document.createElement('tr')
-    header.forEach((c, i) => htr.appendChild(mk('th', c, i)))
-    thead.appendChild(htr)
-    table.appendChild(thead)
-    const tbody = document.createElement('tbody')
-    for (const row of rows) {
-      const tr = document.createElement('tr')
-      row.forEach((c, i) => tr.appendChild(mk('td', c, i)))
-      tbody.appendChild(tr)
-    }
-    table.appendChild(tbody)
-    wrap.appendChild(table)
-
-    const opt = { signal: this.ac.signal }
-    wrap.addEventListener('input', () => this.sync(), opt)
-    wrap.addEventListener('compositionstart', () => { this.composing = true }, opt)
-    wrap.addEventListener('compositionend', () => { this.composing = false; this.sync() }, opt)
-    wrap.addEventListener('keydown', (e) => this.onKeydown(e), opt)
-    wrap.addEventListener('paste', (e) => this.onPaste(e), opt)
-    wrap.addEventListener('focusin', () => { activeWidget = this }, opt)
-    wrap.addEventListener('focusout', (e) => {
-      if (e.relatedTarget && wrap.contains(e.relatedTarget)) return // 单元格间移动
-      if (activeWidget === this) activeWidget = null
-      this.sync() // 离场前把最后一次未同步的输入落盘
-    }, opt)
-
-    this.dom = wrap
-    return wrap
-  }
-
-  destroy() {
-    this.ac.abort()
-    if (activeWidget === this) activeWidget = null
-  }
-
-  /** 单元格 DOM → serializeTable → 文档。定位失败宁可不同步，绝不猜区间 */
-  sync() {
-    const view = this.viewRef
-    if (!view || !this.dom || view.composing || this.composing) return
-    const table = this.dom.querySelector('table')
-    if (!table) return
-    const grid = [...table.rows].map((tr) => [...tr.cells].map((td) => td.textContent))
-    const model = { header: grid[0], aligns: this.model.aligns, delimRaw: this.model.delimRaw, rows: grid.slice(1) }
-    const text = serializeTable(model)
-    const state = view.state
-    let { from, to } = this
-    if (state.doc.sliceString(from, to) !== this.source) {
-      const found = locateTable(state, from)
-      if (!found) return
-      ;({ from, to } = found)
-    }
-    if (text === state.doc.sliceString(from, to)) return
-    view.dispatch({ changes: { from, to, insert: text }, annotations: selfSync.of(true) })
-    this.from = from
-    this.to = from + text.length
-    this.source = text
-    this.model = model
-  }
-
-  onKeydown(e) {
-    const view = this.viewRef
-    const cell = e.target.closest?.('td,th')
-    if (!view || !cell) return
-    // 撤销重做必须路由给 CM：contenteditable 的原生 undo 只改 DOM 不改文档，
-    // 放任不管会造成「界面撤销了、文档没变」的分叉
-    if ((e.metaKey || e.ctrlKey) && !e.altKey && e.key.toLowerCase() === 'z') {
-      e.preventDefault()
-      if (e.shiftKey) redo(view)
-      else undo(view)
-      return
-    }
-    if (e.altKey || e.metaKey || e.ctrlKey) return
-    const table = this.dom.querySelector('table')
-    if (e.key === 'Tab') {
-      e.preventDefault()
-      if (!this.stepCell(table, cell, e.shiftKey ? -1 : 1)) this.appendRow(table, e.shiftKey ? -1 : 0)
-    } else if (e.key === 'Enter') {
-      e.preventDefault() // Enter 不得在单元格里造 <div>；语义 = 下一行同列（末行则加行）
-      const rowsArr = [...table.rows]
-      const col = cell.cellIndex
-      const next = rowsArr[rowsArr.indexOf(cell.closest('tr')) + 1]
-      if (next && next.cells[col]) focusEnd(next.cells[col])
-      else this.appendRow(table, col)
-    } else if (e.key === 'Escape') {
-      e.preventDefault()
-      this.sync()
-      view.dispatch({ selection: { anchor: Math.min(this.to, view.state.doc.length) }, scrollIntoView: true })
-      view.focus()
-    }
-  }
-
-  stepCell(table, cell, delta) {
-    const cells = [...table.querySelectorAll('th,td')]
-    const j = cells.indexOf(cell) + delta
-    if (j < 0 || j >= cells.length) return false
-    focusEnd(cells[j])
-    return true
-  }
-
-  appendRow(table, focusCol = 0) {
-    const n = this.model.header.length
-    const { aligns } = this.model
-    const tr = document.createElement('tr')
-    const tds = []
-    for (let i = 0; i < n; i++) {
-      const td = document.createElement('td')
-      td.contentEditable = 'true'
-      if (aligns[i] === 'center') td.style.textAlign = 'center'
-      else if (aligns[i] === 'right') td.style.textAlign = 'right'
-      tr.appendChild(td)
-      tds.push(td)
-    }
-    table.tBodies[0].appendChild(tr)
-    focusEnd(tds[Math.min(Math.max(focusCol, 0), n - 1)])
-    this.sync()
-  }
-
-  onPaste(e) {
-    if (!e.target.closest?.('td,th')) return
-    const text = e.clipboardData?.getData('text/plain')
-    if (text == null) return
-    e.preventDefault()
-    // 单元格是单行语义：换行折叠为空格，防止破坏表格结构。
-    // execCommand 虽被标记过时，但在 contenteditable 插入纯文本仍是最可靠手段。
-    document.execCommand('insertText', false, text.replace(/\s*\n\s*/g, ' '))
-  }
-}
-
-/** 区间失效时（表前内容被外部改动）沿语法树重新定位所在 Table */
-function locateTable(state, pos) {
+export function locateTable(state, pos) {
   const p = Math.max(0, Math.min(pos, state.doc.length))
   for (const bias of [1, -1]) {
     let node = syntaxTree(state).resolveInner(p, bias)
@@ -332,7 +147,7 @@ export const tableRenderField = StateField.define({
   },
   update(value, tr) {
     // 外部改动（撤销 / 文件监听 / 命令插入）打断单元格编辑：清标记强制重渲染
-    if (tr.docChanged && !tr.annotation(selfSync)) activeWidget = null
+    if (tr.docChanged && !tr.annotation(selfSync)) setEditingWidget(null)
     const force = tr.effects.some((e) => e.is(rescanTables))
     // partial：上次扫描时语法树没补齐（结果不可信），任何一笔事务都要重扫
     if (force || tr.docChanged || value.partial) {
@@ -358,20 +173,27 @@ export function tableScanKick() {
   return ViewPlugin.fromClass(
     class {
       constructor(view) {
+        this.destroyed = false
         this.poll(view)
       }
       poll(view) {
+        // destroy() 之后必须停：视图已销毁仍每 60ms 轮询，既白烧 CPU，
+        // 又可能对已销毁的 view 派发事务（CM6 会抛 update 异常）。
+        if (this.destroyed) return
         // 统一经 setTimeout：插件构造发生在 view 的 update 周期内，
         // 同步 dispatch 会嵌套事务
         if (syntaxTreeAvailable(view.state, view.state.doc.length)) {
           this.timer = setTimeout(() => {
-            if (view.dom?.isConnected) view.dispatch({ effects: rescanTables.of(null) })
+            if (!this.destroyed && view.dom?.isConnected) {
+              view.dispatch({ effects: rescanTables.of(null) })
+            }
           }, 0)
           return
         }
         this.timer = setTimeout(() => this.poll(view), 60)
       }
       destroy() {
+        this.destroyed = true
         clearTimeout(this.timer)
       }
     },

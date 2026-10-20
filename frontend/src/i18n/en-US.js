@@ -196,6 +196,16 @@ export default {
   'toast.unknownError': 'Unknown error',
   'task.done': 'Completed task',
   'task.unchecked': 'Uncompleted task',
+
+  // ---- Table row / column actions (hover toolbar in editor/tableRender.js) ----
+  'table.actions': 'Table actions',
+  'table.addRow': 'Insert row below',
+  'table.deleteRow': 'Delete current row',
+  'table.addColumn': 'Insert column right',
+  'table.deleteColumn': 'Delete current column',
+  'table.keepLastRow': 'A table must keep at least one row',
+  'table.keepLastColumn': 'A table must keep at least one column',
+
   // ---- Self-drawn title bar (TitleBar.vue) ----
   'titlebar.file': 'File',
   'titlebar.help': 'Help',

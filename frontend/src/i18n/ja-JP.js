@@ -197,6 +197,16 @@ export default {
   'toast.unknownError': '不明なエラー',
   'task.done': '完了したタスク',
   'task.unchecked': '未完了のタスク',
+
+  // ---- 表の行・列操作（editor/tableRender.js のホバーツールバー）----
+  'table.actions': '表の操作',
+  'table.addRow': '下に行を挿入',
+  'table.deleteRow': '現在の行を削除',
+  'table.addColumn': '右に列を挿入',
+  'table.deleteColumn': '現在の列を削除',
+  'table.keepLastRow': '表には少なくとも 1 行必要です',
+  'table.keepLastColumn': '表には少なくとも 1 列必要です',
+
   // ---- 自前描画のタイトルバー（TitleBar.vue）----
   'titlebar.file': 'ファイル',
   'titlebar.help': 'ヘルプ',

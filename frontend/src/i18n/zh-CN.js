@@ -212,6 +212,17 @@ export default {
   'toast.unknownError': '未知错误',
   'task.done': '已完成任务',
   'task.unchecked': '未完成任务',
+
+  // ---- 表格行列操作（editor/tableRender.js 的悬停操作条）----
+  'table.actions': '表格操作',
+  'table.addRow': '在下方插入行',
+  'table.deleteRow': '删除当前行',
+  'table.addColumn': '在右侧插入列',
+  'table.deleteColumn': '删除当前列',
+  'table.keepLastRow': '表格至少保留一行',
+  'table.keepLastColumn': '表格至少保留一列',
+
+
   // ---- 自绘标题栏（TitleBar.vue）----
   'titlebar.file': '文件',
   'titlebar.help': '帮助',

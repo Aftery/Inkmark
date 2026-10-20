@@ -94,6 +94,88 @@ test('接线契约：createEditor 注册 tableRenderField，wysiwyg 退位', () 
   const tr = src(join('editor', 'tableRender.js'))
   assert.match(tr, /StateField\.define/, 'block 装饰必须出自 StateField')
   assert.match(tr, /block: true/, '表格替换必须是 block 装饰')
-  assert.match(tr, /selfSync/, '必须带自同步 annotation 防装饰回环')
-  assert.match(tr, /contentEditable/, '单元格必须可编辑（产品决策：单元格直接编辑）')
+  // 【2026-10-20 口径更新】行列操作条让 tableRender.js 越过 300 有效行红线，
+  // 故按契约 5 的要求拆分：widget（含 contentEditable）→ tableWidget.js，
+  // 行列增删与操作条 → tableOps.js，selfSync 标记 → tableSync.js。
+  // 判据因此跨四个文件 —— **锚点跟着代码走，不留指向已搬走内容的死规则**。
+  const tw = src(join('editor', 'tableWidget.js'))
+  assert.match(tw, /contentEditable/, '单元格必须可编辑（产品决策：单元格直接编辑）')
+  assert.match(src(join('editor', 'tableSync.js')), /Annotation\.define/,
+    '必须带自同步 annotation 防装饰回环')
+  // 自同步标记必须真的被用上：装饰层见到它才保留 activeWidget，否则编辑中每键都重建 DOM
+  assert.match(tr, /tr\.annotation\(selfSync\)/, '装饰层必须检查 selfSync 标记')
+  assert.match(tw, /annotations: selfSync\.of\(true\)/, 'widget 同步必须打 selfSync 标记')
+  // widget 必须被装饰层真正使用（拆出去但没人 new 就渲染不出表格）
+  assert.match(tr, /new TableWidget\(/, 'block 装饰必须实例化 TableWidget')
+})
+
+// ---------------------------------------------------------------------------
+// 行列增删（editor/tableOps.js）：纯 model 变换，可直接驱动
+// ---------------------------------------------------------------------------
+test('insertRow / removeRow：行结构正确，列数跟随表头', async () => {
+  const { insertRow, removeRow } = await import('../src/editor/tableOps.js')
+  const m = parseTable(TABLE) // 2 列 1 行
+
+  insertRow(m, 1) // 追加到末尾
+  assert.equal(m.rows.length, 2)
+  assert.deepEqual(m.rows[1], ['', ''], '新行空单元格数必须等于列数')
+
+  removeRow(m, 0)
+  assert.equal(m.rows.length, 1)
+  assert.deepEqual(m.rows[0], ['', ''], '删掉的是第 0 行')
+})
+
+test('insertColumn：表头/每行/对齐/分隔行四处同步，产物仍是合法 GFM', async () => {
+  const { insertColumn } = await import('../src/editor/tableOps.js')
+  const m = parseTable('| a | b |\n| --- | -: |\n| 1 | 2 |\n| 3 | 4 |')
+
+  insertColumn(m, 1) // 插在 a 与 b 之间
+  assert.deepEqual(m.header, ['a', '', 'b'])
+  assert.deepEqual(m.rows, [['1', '', '2'], ['3', '', '4']], '每一行都要插，否则列数不一致')
+  assert.deepEqual(m.aligns, ['left', 'left', 'right'])
+
+  const out = serializeTable(m)
+  // 关键判据：重新解析必须成功，且列数与写入时一致
+  const back = parseTable(out)
+  assert.ok(back, `产出的表格必须是合法 GFM:\n${out}`)
+  assert.equal(back.header.length, 3)
+  assert.ok(back.rows.every((r) => r.length === 3))
+})
+
+test('removeColumn：四处同步收缩，删到只剩 1 列仍合法', async () => {
+  const { removeColumn } = await import('../src/editor/tableOps.js')
+  const m = parseTable(TABLE)
+
+  removeColumn(m, 0)
+  assert.deepEqual(m.header, ['b'])
+  assert.deepEqual(m.rows, [['2']])
+  const out = serializeTable(m)
+  assert.ok(parseTable(out), `单列表格必须仍能解析:\n${out}`)
+})
+
+test('对齐在列操作后不串位（center/right 必须跟着列走）', async () => {
+  const { insertColumn, removeColumn } = await import('../src/editor/tableOps.js')
+  const m = parseTable('| a | b | c |\n| :-: | --- | ---: |\n| 1 | 2 | 3 |')
+  assert.deepEqual(m.aligns, ['center', 'left', 'right'])
+
+  removeColumn(m, 0) // 删掉居中的 a
+  assert.deepEqual(m.aligns, ['left', 'right'], 'b 左对齐、c 右对齐，不串位')
+  const back = parseTable(serializeTable(m))
+  assert.deepEqual(back.aligns, ['left', 'right'], '序列化后对齐必须还原一致')
+})
+
+test('行列操作条：按钮齐全且动作名与 runAction 的分支一致', async () => {
+  const ops = await import('../src/editor/tableOps.js')
+  const tw = src(join('editor', 'tableWidget.js'))
+  // 操作条在 tableOps 里定义的动作名，必须都被 widget 的 switch 接住，
+  // 否则点按钮静默无反应（本仓最恨的失效形态）。
+  for (const action of ['add-row', 'del-row', 'add-col', 'del-col']) {
+    assert.ok(typeof ops.insertColumn === 'function')
+    assert.match(tw, new RegExp(`case '${action}':`), `widget 必须处理 ${action}`)
+  }
+  // 最少保留约束必须存在（否则能把表格删成 0 行/0 列，产出的 Markdown 不再是表格）
+  assert.match(tw, /rows\.length <= 1/, '必须拒绝删除最后一行')
+  assert.match(tw, /colCount <= 1/, '必须拒绝删除最后一列')
+  // 行列操作后必须写回文档（只改 DOM 会在重渲染时弹回）
+  assert.match(tw, /this\.writeModel\(\)/, '结构变更必须写回文档')
 })
