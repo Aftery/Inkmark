@@ -4,12 +4,13 @@
 //
 // 上一轮（34db4b3）认定根因是「Finder ⌘C 给的是 file URL（text/uri-list）」，
 // 并据此新增了 Go 的 SaveImageFromPath。**这个根因是错的**，真机上从没生效过：
-//   实测剪贴板内容（osascript 'clipboard info'）= public.png / TIFF / JPEG 等**图片数据**，
-//   **没有任何 file:// URL**；
-//   而 WKWebView（Safari 内核）**不把剪贴板图片暴露给 clipboardData.files /
-//   .items**，也不在 text/uri-list 里给 file:// —— 证据就是症状本身：
-//   前端两条通道全部落空 → 事件被交回 WebKit 默认处理 → 默认行为是
-//   **把文件名当纯文本插入**（截图里粘进来的正是 `1643208705644.jpg`）。
+//
+//	实测剪贴板内容（osascript 'clipboard info'）= public.png / TIFF / JPEG 等**图片数据**，
+//	**没有任何 file:// URL**；
+//	而 WKWebView（Safari 内核）**不把剪贴板图片暴露给 clipboardData.files /
+//	.items**，也不在 text/uri-list 里给 file:// —— 证据就是症状本身：
+//	前端两条通道全部落空 → 事件被交回 WebKit 默认处理 → 默认行为是
+//	**把文件名当纯文本插入**（截图里粘进来的正是 `1643208705644.jpg`）。
 //
 // 为什么探针 18/18 全绿却没抓到：scripts/probe 跑在**无头 Chrome**上，
 // Chrome 的剪贴板实现与 WKWebView 不同（会给 files / file://）。

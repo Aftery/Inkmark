@@ -1,14 +1,16 @@
 package main
 
 import (
+	"cmp"
 	"crypto/sha1"
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"regexp"
-	"sort"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -23,10 +25,10 @@ import (
 // 文件名保证字典序 = 时间序（固定前缀 + 定宽毫秒时间戳）。
 
 const (
-	snapshotMaxCount = 10                 // 最多保留 10 份（AC-15：写第 11 份淘汰最旧）
-	snapshotMaxBytes = 10 << 20           // 单份内容上限 10MB，超出拒绝写入
-	snapshotPrefix   = "snapshot-"        // 快照文件名前缀
-	snapshotExt      = ".md"              // 快照文件名后缀（内容即 Markdown 原文）
+	snapshotMaxCount = 10          // 最多保留 10 份（AC-15：写第 11 份淘汰最旧）
+	snapshotMaxBytes = 10 << 20    // 单份内容上限 10MB，超出拒绝写入
+	snapshotPrefix   = "snapshot-" // 快照文件名前缀
+	snapshotExt      = ".md"       // 快照文件名后缀（内容即 Markdown 原文）
 )
 
 // snapshotsBaseDir 供测试注入临时目录；为空时用 os.UserConfigDir()/Inkmark/snapshots
@@ -125,16 +127,27 @@ func (a *App) SnapshotWrite(absPath string, content string) error {
 		return nil
 	}
 
-	// 文件名 snapshot-<unix毫秒>.md；同一毫秒内连续写入时顺延时间戳，保证不互相覆盖
+	// 文件名 snapshot-<unix毫秒>.md；同一毫秒内连续写入时顺延时间戳，保证不互相覆盖。
+	//
+	// 【为什么循环有上界】旧实现是 for i := 0; ; i++：只要 Stat 返回的不是
+	// 「不存在」（例如目录被删、权限变化、路径过长），它既不 break 也不报错，
+	// **无限空转**把 UI 卡死。快照目录里至多留 10 份，候选名不可能超过
+	// snapshotMaxCount+1 个；给出上界后，异常态变成一条可读错误而不是挂起。
 	ts := time.Now().UnixMilli()
-	var name string
 	var target string
-	for i := 0; ; i++ {
-		name = fmt.Sprintf("%s%d%s", snapshotPrefix, ts+int64(i), snapshotExt)
-		target = filepath.Join(dir, name)
-		if _, err := os.Stat(target); os.IsNotExist(err) {
+	for i := 0; i <= snapshotMaxCount; i++ {
+		cand := filepath.Join(dir, fmt.Sprintf("%s%d%s", snapshotPrefix, ts+int64(i), snapshotExt))
+		_, statErr := os.Stat(cand)
+		if errors.Is(statErr, fs.ErrNotExist) {
+			target = cand
 			break
 		}
+		if statErr != nil {
+			return fmt.Errorf("检查快照文件名失败: %w", statErr)
+		}
+	}
+	if target == "" {
+		return fmt.Errorf("无法为快照分配文件名（%d 个候选均已被占用）", snapshotMaxCount+1)
 	}
 
 	tmp := target + ".tmp"
@@ -202,7 +215,9 @@ func (a *App) SnapshotDocKey(absPath string) (string, error) {
 func listSnapshotsIn(dir string) ([]SnapshotMeta, error) {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
-		if os.IsNotExist(err) {
+		// errors.Is(err, fs.ErrNotExist) 而非 os.IsNotExist：前者能穿透 *PathError
+		// 的包装（os.IsNotExist 只认顶层错误），是现代 Go 的标准判定。
+		if errors.Is(err, fs.ErrNotExist) {
 			return []SnapshotMeta{}, nil
 		}
 		return nil, fmt.Errorf("读取快照目录失败: %w", err)
@@ -232,7 +247,11 @@ func listSnapshotsIn(dir string) ([]SnapshotMeta, error) {
 			Name: name, Size: info.Size(), CreatedAt: ts, ContentHash: hash,
 		})
 	}
-	sort.Slice(metas, func(i, j int) bool { return metas[i].CreatedAt > metas[j].CreatedAt })
+	// 稳定排序：CreatedAt 撞车时保持 ReadDir 的字典序，淘汰顺序才是可复现的
+	// （sort.Slice 不稳定，同毫秒的两份快照谁先被淘汰取决于算法内部实现）。
+	slices.SortStableFunc(metas, func(a, b SnapshotMeta) int {
+		return cmp.Compare(b.CreatedAt, a.CreatedAt)
+	})
 	return metas, nil
 }
 
@@ -256,7 +275,7 @@ func rotateSnapshots(dir string) error {
 		return nil
 	}
 	for _, m := range metas[snapshotMaxCount:] {
-		if err := os.Remove(filepath.Join(dir, m.Name)); err != nil && !os.IsNotExist(err) {
+		if err := os.Remove(filepath.Join(dir, m.Name)); err != nil && !errors.Is(err, fs.ErrNotExist) {
 			return fmt.Errorf("淘汰旧快照失败: %w", err)
 		}
 	}

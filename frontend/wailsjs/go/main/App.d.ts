@@ -9,7 +9,7 @@ export function ClipboardGet():Promise<string>;
 
 export function ClipboardSet(arg1:string):Promise<void>;
 
-export function CloseWindow(arg1:boolean):Promise<void>;
+export function CloseWindow(arg1:boolean,arg2:string):Promise<void>;
 
 export function DocAssetHandler():Promise<http.Handler>;
 
@@ -17,15 +17,15 @@ export function ExportPDF(arg1:string,arg2:string):Promise<string>;
 
 export function ListDir(arg1:string):Promise<Array<main.DirEntry>>;
 
-export function OpenDirectoryDialog():Promise<string>;
+export function OpenDirectoryDialog(arg1:string):Promise<string>;
 
-export function OpenFileDialog():Promise<string>;
+export function OpenFileDialog(arg1:string):Promise<string>;
 
 export function ReadFile(arg1:string):Promise<string>;
 
 export function RenameFile(arg1:string,arg2:string):Promise<string>;
 
-export function SaveFileDialog(arg1:string):Promise<string>;
+export function SaveFileDialog(arg1:string,arg2:string):Promise<string>;
 
 export function SaveImage(arg1:string,arg2:string,arg3:string):Promise<string>;
 
@@ -50,3 +50,4 @@ export function Version():Promise<string>;
 export function WatchDir(arg1:string):Promise<void>;
 
 export function WriteFile(arg1:string,arg2:string):Promise<void>;
+export function SetLocale(arg1:string):Promise<void>;

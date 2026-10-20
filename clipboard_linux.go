@@ -3,9 +3,10 @@
 // clipboard_linux.go — 通道③的平台适配层（Linux）：从 X11/Wayland 剪贴板取图片
 //
 // ⚠️ **本文件未在真机验证**（开发机是 macOS，无 Linux 环境）。
-//    这是本仓「静默失败」高发区，故实现刻意保守：
-//    **任何不确定的情形一律返回 nil**，让调用方走原有通道（而不是报错或写坏文件）。
-//    首次在 Linux 真机上验证后，应把结论补进 docs/HANDOFF.md §7 未决项。
+//
+//	这是本仓「静默失败」高发区，故实现刻意保守：
+//	**任何不确定的情形一律返回 nil**，让调用方走原有通道（而不是报错或写坏文件）。
+//	首次在 Linux 真机上验证后，应把结论补进 docs/HANDOFF.md §7 未决项。
 //
 // 【为什么需要它】见 clipboard_image.go 文件头：WKWebView/GTK WebKit 同样不把
 // 剪贴板图片暴露给前端 clipboardData，Linux 上没有 AppKit 可用，只能靠外部命令。
@@ -99,18 +100,6 @@ func firstFilePath(s string) string {
 			p = strings.ReplaceAll(p, "%20", " ")
 			return p
 		}
-	}
-	return ""
-}
-
-// readClipboardTextRaw 返回剪贴板纯文本（无则空串）。
-func readClipboardTextRaw() string {
-	switch displayServerFromEnv() {
-	case "wayland":
-		return string(runClipboardTool("wl-paste", "--no-newline"))
-	case "x11":
-		// -text/plain 只取文本，不会把 NUL 结尾的原始二进制当字符串返回
-		return strings.TrimRight(string(runClipboardTool("xclip", "-selection", "clipboard", "-t", "text/plain", "-o")), "\x00")
 	}
 	return ""
 }

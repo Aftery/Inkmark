@@ -14,8 +14,8 @@ export function ClipboardSet(arg1) {
   return window['go']['main']['App']['ClipboardSet'](arg1);
 }
 
-export function CloseWindow(arg1) {
-  return window['go']['main']['App']['CloseWindow'](arg1);
+export function CloseWindow(arg1, arg2) {
+  return window['go']['main']['App']['CloseWindow'](arg1, arg2);
 }
 
 export function DocAssetHandler() {
@@ -30,12 +30,12 @@ export function ListDir(arg1) {
   return window['go']['main']['App']['ListDir'](arg1);
 }
 
-export function OpenDirectoryDialog() {
-  return window['go']['main']['App']['OpenDirectoryDialog']();
+export function OpenDirectoryDialog(arg1) {
+  return window['go']['main']['App']['OpenDirectoryDialog'](arg1);
 }
 
-export function OpenFileDialog() {
-  return window['go']['main']['App']['OpenFileDialog']();
+export function OpenFileDialog(arg1) {
+  return window['go']['main']['App']['OpenFileDialog'](arg1);
 }
 
 export function ReadFile(arg1) {
@@ -46,8 +46,8 @@ export function RenameFile(arg1, arg2) {
   return window['go']['main']['App']['RenameFile'](arg1, arg2);
 }
 
-export function SaveFileDialog(arg1) {
-  return window['go']['main']['App']['SaveFileDialog'](arg1);
+export function SaveFileDialog(arg1, arg2) {
+  return window['go']['main']['App']['SaveFileDialog'](arg1, arg2);
 }
 
 export function SaveImage(arg1, arg2, arg3) {
@@ -96,4 +96,8 @@ export function WatchDir(arg1) {
 
 export function WriteFile(arg1, arg2) {
   return window['go']['main']['App']['WriteFile'](arg1, arg2);
+}
+
+export function SetLocale(arg1) {
+  return window['go']['main']['App']['SetLocale'](arg1);
 }

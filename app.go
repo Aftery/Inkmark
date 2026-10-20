@@ -1,6 +1,7 @@
 package main
 
 import (
+	"cmp"
 	"context"
 	"crypto/rand"
 	"encoding/base64"
@@ -11,7 +12,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
-	"sort"
+	"slices"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -45,6 +46,13 @@ type App struct {
 	// 与 dirty 同族：「前端真源 → Go 镜像」；空串（含从未同步）= 没有已落盘文档。
 	// 并发说明：资源服务跑在 asset server 的 goroutine，镜像用 atomic.Value。
 	docDir atomic.Value
+	// watch 是文件树监听的当前状态（见 watcher.go）。零值即「没有活跃监听」。
+	watch watchState
+	// locale 是「界面当前语言」的最小镜像，**只服务于 Wails 直接调用的钩子**：
+	// OnBeforeClose（macOS 红绿灯）由 runtime 触发，不经过前端，拿不到当次请求
+	// 的语言；此时只能读一个镜像值。除这条路之外，所有对话框的 locale 都随
+	// 调用传入，不做任何持久化 —— 语言真源仍只在前端 i18n 一处（见 dialogs.go）。
+	locale atomic.Value
 }
 
 // NewApp 新建 App。
@@ -74,17 +82,17 @@ func (a *App) startup(ctx context.Context) {
 //
 // 【Linux 特殊处理】
 // Linux/GTK 下，自绘关闭按钮点击不会自动触发 Wails 的 OnBeforeClose 钩子
-//（无边框窗口 + 自定义关闭逻辑），因此必须在这里显式调用同一套判定。
+// （无边框窗口 + 自定义关闭逻辑），因此必须在这里显式调用同一套判定。
 // macOS 下原生红绿灯由 Wails runtime 接管，会自动调用 OnBeforeClose，
 // 但 CloseWindow 只在前端自绘按钮场景下被调用（TitleBar.vue 用 isDarwin 隔离），
 // 所以两条路径互不重叠。
-func (a *App) CloseWindow(dirty bool) {
+func (a *App) CloseWindow(dirty bool, locale string) {
 	if a.ctx == nil || a.closing {
 		return
 	}
 	a.closing = true
 	// 复用 OnBeforeClose 的判定逻辑（含 dirty 检查与确认框）
-	shouldBlock := a.confirmClose(a.ctx, dirty)
+	shouldBlock := a.confirmClose(a.ctx, dirty, locale)
 	if !shouldBlock {
 		runtime.Quit(a.ctx)
 	} else {
@@ -131,6 +139,20 @@ type DirEntry struct {
 // RenameFile 重命名当前文档（仅限同目录改名），返回新路径供前端更新 filePath。
 // 通过 window.go.main.App.RenameFile 调用（新方法，未走 wailsjs 代码生成）。
 func (a *App) RenameFile(oldPath, newName string) (string, error) {
+	// oldPath 必须是一个真实存在的**文件**：空串下 filepath.Dir("") 是 "."，
+	// 会把文件建到进程当前工作目录（对 GUI 应用而言那是位置不明的目录）。
+	// 前端只会在已落盘文档上调用，但绑定是公开入口，不能靠调用方自觉。
+	if strings.TrimSpace(oldPath) == "" {
+		return "", fmt.Errorf("文档路径不能为空")
+	}
+	info, err := os.Stat(oldPath)
+	if err != nil {
+		return "", fmt.Errorf("读取文件信息失败: %w", err)
+	}
+	if info.IsDir() {
+		return "", fmt.Errorf("不能重命名目录: %s", oldPath)
+	}
+
 	newName = strings.TrimSpace(newName)
 	if newName == "" {
 		return "", fmt.Errorf("文件名不能为空")
@@ -138,8 +160,14 @@ func (a *App) RenameFile(oldPath, newName string) (string, error) {
 	if strings.ContainsAny(newName, "/\\") {
 		return "", fmt.Errorf("文件名不能包含路径分隔符")
 	}
+	if newName == "." || newName == ".." {
+		return "", fmt.Errorf("非法的文件名: %q", newName)
+	}
 	newPath := filepath.Join(filepath.Dir(oldPath), newName)
-	if newPath == oldPath {
+	// 用 Clean 后比较而非原样字符串比较：oldPath 可能是 ./a.md 或带冗余分隔符的
+	// 等价形态，直接比会把「改成同一个名字」误判成有效操作，随后 rename 到自身
+	// 在多数平台上虽不报错，却会让前端拿到一个「看起来变了」的路径。
+	if filepath.Clean(newPath) == filepath.Clean(oldPath) {
 		return "", fmt.Errorf("文件名未变化")
 	}
 	if _, err := os.Stat(newPath); err == nil {
@@ -152,26 +180,31 @@ func (a *App) RenameFile(oldPath, newName string) (string, error) {
 }
 
 // ---------- 对话框 ----------
+//
+// 原生的三只对话框（打开 / 选目录 / 另存为）都在系统层弹出，文案只能由 Go 传给
+// 系统 API。locale 参数由前端随调用传入（语言真源仍只在前端一处，见 dialogs.go）。
+// 参数为 BCP-47 标签（zh-CN / en-US / ja-JP），空串按默认语言处理。
 
-func (a *App) OpenFileDialog() (string, error) {
+func (a *App) OpenFileDialog(locale string) (string, error) {
+	t := dialogTextFor(locale)
 	return runtime.OpenFileDialog(a.ctx, runtime.OpenDialogOptions{
-		Title: "打开 Markdown 文件",
+		Title: t.OpenFileTitle,
 		Filters: []runtime.FileFilter{
 			{DisplayName: "Markdown", Pattern: "*.md;*.markdown;*.txt"},
-			{DisplayName: "所有文件", Pattern: "*.*"},
+			{DisplayName: t.OpenFileFilter, Pattern: "*.*"},
 		},
 	})
 }
 
-func (a *App) OpenDirectoryDialog() (string, error) {
+func (a *App) OpenDirectoryDialog(locale string) (string, error) {
 	return runtime.OpenDirectoryDialog(a.ctx, runtime.OpenDialogOptions{
-		Title: "选择文件夹",
+		Title: dialogTextFor(locale).OpenDirTitle,
 	})
 }
 
-func (a *App) SaveFileDialog(defaultName string) (string, error) {
+func (a *App) SaveFileDialog(defaultName string, locale string) (string, error) {
 	return runtime.SaveFileDialog(a.ctx, runtime.SaveDialogOptions{
-		Title:           "导出 / 另存为",
+		Title:           dialogTextFor(locale).SaveTitle,
 		DefaultFilename: defaultName,
 	})
 }
@@ -186,13 +219,46 @@ func (a *App) ReadFile(path string) (string, error) {
 	return string(data), nil
 }
 
+// WriteFile 原子写：先写同目录临时文件，再 rename 覆盖目标。
+//
+// 【为什么临时名必须是唯一的】自动保存（800ms 防抖）与手动保存可能交错触发，
+// 固定名 path+".tmp" 会让两次写入共用同一个临时文件：后一次截断前一次的字节，
+// rename 之后落盘的就是「A 的内容被 B 写了一半」的混合体 —— 静默损坏。
+// os.CreateTemp 每次给出唯一名（且落在同一目录，rename 才是同一文件系统内的原子操作）。
+// 保留 ".tmp" 后缀是 README「先写 .tmp 再 rename」那条声明的口径。
+//
+// 【失败路径必须清理】写失败 / rename 失败都要删掉临时文件，否则用户目录里
+// 会永久残留一份 .tmp 垃圾（README 已知问题 #16 同族：静默残留最难被发现）。
 func (a *App) WriteFile(path string, content string) error {
-	// 写临时文件再 rename，避免写到一半崩溃留下半个文件
-	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, []byte(content), 0o644); err != nil {
+	dir, base := filepath.Split(path)
+	if dir == "" {
+		dir = "."
+	}
+	tmpFile, err := os.CreateTemp(dir, base+".*.tmp")
+	if err != nil {
 		return fmt.Errorf("写入失败: %w", err)
 	}
-	return os.Rename(tmp, path)
+	tmp := tmpFile.Name()
+	// 命名成功之后才登记清理：CreateTemp 失败时没有文件可删。
+	defer func() { _ = os.Remove(tmp) }()
+
+	if _, err := tmpFile.WriteString(content); err != nil {
+		_ = tmpFile.Close()
+		return fmt.Errorf("写入失败: %w", err)
+	}
+	// 显式 Close 而非 defer：rename 之前必须确保刷盘句柄已释放
+	// （Windows 上句柄未关时 rename 会失败，且 defer 顺序会让 Close 晚于 rename）。
+	if err := tmpFile.Close(); err != nil {
+		return fmt.Errorf("写入失败: %w", err)
+	}
+	// CreateTemp 建的是 0600，按项目惯例还原成 0644
+	if err := os.Chmod(tmp, 0o644); err != nil {
+		return fmt.Errorf("写入失败: %w", err)
+	}
+	if err := os.Rename(tmp, path); err != nil {
+		return fmt.Errorf("写入失败: %w", err)
+	}
+	return nil
 }
 
 // ---------- 目录遍历（文件树用，只返回一层） ----------
@@ -219,17 +285,40 @@ func (a *App) ListDir(path string) ([]DirEntry, error) {
 		})
 	}
 
-	// 目录在前、按名称排序，树更耐看
-	sort.Slice(result, func(i, j int) bool {
-		if result[i].IsDir != result[j].IsDir {
-			return result[i].IsDir
+	// 目录在前、按名称排序，树更耐看。
+	// 用 slices.SortStableFunc（Go 1.21+ 的现代写法）而非 sort.Slice：
+	// 稳定性保证「大小写仅差的同名项」保持 os.ReadDir 给出的字典序，不再依赖排序算法实现。
+	slices.SortStableFunc(result, func(a, b DirEntry) int {
+		if a.IsDir != b.IsDir {
+			if a.IsDir {
+				return -1
+			}
+			return 1
 		}
-		return strings.ToLower(result[i].Name) < strings.ToLower(result[j].Name)
+		return cmp.Compare(strings.ToLower(a.Name), strings.ToLower(b.Name))
 	})
 	return result, nil
 }
 
 // ---------- 未保存关闭拦截 ----------
+
+// SetLocale 由前端在语言切换时调用，把当前界面语言镜像给后端。
+//
+// 【为什么需要这个镜像】原生「未保存」确认框有两条触发路径：
+// 自绘关闭按钮（CloseWindow，locale 随参数传入）与 macOS 红绿灯 / 系统菜单
+// （OnBeforeClose，Wails 直接调用，没有参数通道）。后者只能读镜像。
+// 这不是「Go 侧持有语言状态」的复活：镜像只被 OnBeforeClose 读一次，
+// 且不存在需要与前端对账的第二真源（前端每次切换都整值覆盖）。
+func (a *App) SetLocale(locale string) {
+	a.locale.Store(locale)
+}
+
+// localeSnapshot 取语言镜像；从未同步过（Load 返回 nil）按空串处理，
+// 由 dialogTextFor 回落到默认语言。
+func (a *App) localeSnapshot() string {
+	v, _ := a.locale.Load().(string)
+	return v
+}
 
 // SetDirty 由前端 watch(dirty) 调用，把「文档是否落后于磁盘」镜像到后端。
 // 只接收、不推断：Go 侧不读盘比对内容；语义与生命周期以 ADR-005 为准。
@@ -242,35 +331,38 @@ func (a *App) SetDirty(d bool) {
 // 读 SetDirty 镜像判定；自绘关闭按钮路径（CloseWindow）用请求携带的 dirty
 // 走同一份判定，见 confirmClose。
 func (a *App) OnBeforeClose(ctx context.Context) bool {
-	return a.confirmClose(ctx, a.dirty)
+	return a.confirmClose(ctx, a.dirty, a.localeSnapshot())
 }
 
 // confirmClose 是关闭守卫的判定本体，OnBeforeClose / CloseWindow 两条路径共用，
 // 语义不得分叉（ADR-005）：dirty 为假直接放行；为真弹系统确认，返回 true 阻止关闭。
 // 说明：不提供「保存并退出」——项目已有 800ms 自动保存，dirty 通常只在输入后的
 // 短暂窗口或「未落盘的新文档」为真，此时给一个明确的二选一即可。
-func (a *App) confirmClose(ctx context.Context, dirty bool) bool {
+func (a *App) confirmClose(ctx context.Context, dirty bool, locale string) bool {
 	if !dirty {
 		return false
 	}
+	t := dialogTextFor(locale)
 	choice, err := runtime.MessageDialog(ctx, runtime.MessageDialogOptions{
 		Type:          runtime.QuestionDialog,
-		Title:         "未保存的更改",
-		Message:       "当前文档有未保存的更改，确定要退出吗？",
-		Buttons:       []string{"取消", "不保存退出"},
-		DefaultButton: "取消",
-		CancelButton:  "取消",
+		Title:         t.UnsavedTitle,
+		Message:       t.UnsavedMessage,
+		Buttons:       []string{t.UnsavedCancel, t.UnsavedDiscard},
+		DefaultButton: t.UnsavedCancel,
+		CancelButton:  t.UnsavedCancel,
 	})
 	if err != nil {
 		return true // 对话框异常时保守阻止关闭，避免误丢内容
 	}
 	// Linux/GTK 下 MessageDialog 返回值因后端而异：
-	//   - 点"取消"按钮 → "取消" / "0" / "No"
-	//   - 点"不保存退出"按钮 → "不保存退出" / "1" / "Yes"
+	//   - 点「取消」按钮 → 取消文案 / "0" / "No"
+	//   - 点「不保存退出」按钮 → 退出文案 / "1" / "Yes"
 	//   - 点对话框 X / ESC → "" (空串) 或 "cancel"
 	// 策略：只要不是明确的退出选择，一律视为取消（保守保护）。
+	// 按文案比较时必须用**本次语言的文案** —— 写死中文会让 en/ja 界面下的
+	// 「Quit Without Saving」被误判成取消，退出永远失败。
 	trimmed := strings.TrimSpace(choice)
-	return trimmed != "不保存退出" && trimmed != "1" && trimmed != "Yes"
+	return trimmed != t.UnsavedDiscard && trimmed != "1" && trimmed != "Yes"
 }
 
 // ---------- 图片粘贴 / 拖拽插入 ----------
@@ -284,12 +376,17 @@ var allowedImageExt = map[string]bool{
 }
 
 // shortRandHex 生成 n 字节的随机 hex（图片文件名后缀，避免同毫秒冲突）。
-func shortRandHex(n int) string {
+//
+// 【失败为什么必须报错而不是回退常量】旧实现在 rand.Read 失败时返回 "00000000"：
+// 那会让文件名退化成「只由中国时间戳区分」，同毫秒的两张图互相覆盖 —— 用户看到的是
+// 「粘了第二张，第一张不见了」，而代码里没有任何错误。宁可让这一次插图失败并提示，
+// 也不能静默替换掉用户的文件。
+func shortRandHex(n int) (string, error) {
 	b := make([]byte, n)
 	if _, err := rand.Read(b); err != nil {
-		return "00000000"
+		return "", fmt.Errorf("生成文件名随机后缀失败: %w", err)
 	}
-	return hex.EncodeToString(b)
+	return hex.EncodeToString(b), nil
 }
 
 // SaveImage 把粘贴/拖拽的图片写入「文档同级 assets/ 目录」，返回可写进 Markdown 的
@@ -389,7 +486,11 @@ func writeImageAsset(docPath string, raw []byte, ext string) (string, error) {
 		return "", fmt.Errorf("无法创建 assets 目录: %w", err)
 	}
 	// 文件名 img-<unix毫秒>-<随机>.<ext>：避免同毫秒 / 同名覆盖
-	name := fmt.Sprintf("img-%d-%s.%s", time.Now().UnixMilli(), shortRandHex(4), ext)
+	suffix, err := shortRandHex(4)
+	if err != nil {
+		return "", err
+	}
+	name := fmt.Sprintf("img-%d-%s.%s", time.Now().UnixMilli(), suffix, ext)
 	if err := os.WriteFile(filepath.Join(dir, name), raw, 0o644); err != nil {
 		return "", fmt.Errorf("写入图片失败: %w", err)
 	}
@@ -453,13 +554,12 @@ func parseSemver(s string) (semver, bool) {
 }
 
 // compareSemver 返回 a 与 b 的大小关系：a>b 为正，a==b 为 0，a<b 为负。
+// 逐段比较等价于 slices.Compare(a[:], b[:])，但省掉切片分配与 reflect 化路径；
+// 语义（含返回符号）与基准包保持一致，调用方只判符号。
 func compareSemver(a, b semver) int {
-	for i := 0; i < 3; i++ {
-		if a[i] != b[i] {
-			if a[i] > b[i] {
-				return 1
-			}
-			return -1
+	for i := range a {
+		if c := cmp.Compare(a[i], b[i]); c != 0 {
+			return c
 		}
 	}
 	return 0

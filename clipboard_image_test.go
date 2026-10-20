@@ -18,7 +18,9 @@ import (
 // 而是断言**返回的扩展名**与**拒绝时的 nil** —— 两者都是可观测差异。
 
 // 各格式的最小合法文件头（后缀随便补，嗅探只看头部）。
-func pngBytes() []byte  { return append([]byte{0x89, 'P', 'N', 'G', 0x0D, 0x0A, 0x1A, 0x0A}, make([]byte, 32)...) }
+func pngBytes() []byte {
+	return append([]byte{0x89, 'P', 'N', 'G', 0x0D, 0x0A, 0x1A, 0x0A}, make([]byte, 32)...)
+}
 func jpegBytes() []byte { return append([]byte{0xFF, 0xD8, 0xFF, 0xE0}, make([]byte, 32)...) }
 func gifBytes() []byte  { return append([]byte("GIF89a"), make([]byte, 32)...) }
 func bmpBytes() []byte  { return append([]byte("BM"), make([]byte, 32)...) }
@@ -98,10 +100,10 @@ func TestSniffImageMagic_拒绝非图片(t *testing.T) {
 
 func TestSniffImageMagic_SVG文本格式(t *testing.T) {
 	cases := []struct {
-		name  string
-		data  []byte
-		want  bool
-		why   string
+		name string
+		data []byte
+		want bool
+		why  string
 	}{
 		{"纯 svg 根元素", []byte(`<svg xmlns="http://www.w3.org/2000/svg"></svg>`), true, "基本形态"},
 		{"带 XML 声明", []byte(`<?xml version="1.0"?><svg width="10"></svg>`), true, "导出器常带声明"},

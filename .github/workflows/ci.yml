@@ -131,6 +131,17 @@ jobs:
           CGO_ENABLED=0 GOOS=linux  GOARCH=amd64 go build -o /dev/null .
           CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -o /dev/null .
 
+      # 【为什么还要交叉 vet】上面的 go build **不做 vet**，而 `go vet ./...`
+      # 在 macOS runner 上只分析 darwin 那份 —— 于是「只在 Windows 文件里才有的
+      # 缺陷」两类门禁都抓不到。实测（2026-10 复查）：clipboard_windows.go 的
+      # uintptr→unsafe.Pointer 转换就属于这一类，`GOOS=windows go vet` 才报
+      # possible misuse，而 CI 一直是绿的。两行命令把这条盲区补上。
+      # 只 build 不 vet 不行、只 vet 不 build 也不行 —— 两者查的是不同东西。
+      - name: 交叉 vet Linux / Windows 适配层（补「能编但误用」的盲区）
+        run: |
+          CGO_ENABLED=0 GOOS=linux   GOARCH=amd64 go vet .
+          CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go vet .
+
   # --------------------------------------------------------------------------
   # 门禁 3：P0-1 零 emoji
   # 卡的是专家团 P0 绝对规则：界面不得用 emoji 表情当功能图标（图标必须是

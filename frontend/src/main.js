@@ -2,7 +2,8 @@ import { createApp } from 'vue'
 import App from './App.vue'
 import { initTheme } from './themes/theme.js'
 import { initPrefs } from './themes/prefs.js'
-import { initI18n } from './i18n/index.js'
+import { initI18n, getLocale, onLocaleChange } from './i18n/index.js'
+import { SetLocale } from '../wailsjs/go/main/App'
 import { initPlatform } from './composables/usePlatform.js'
 
 // 样式统一由 App.vue 引入 ./themes/index.css（token → base → preview → app-shell → platform-darwin）
@@ -31,9 +32,12 @@ initI18n()
 // 【2026-10-06 单栏重构：原生菜单下线后的启动路径简化】
 // 本文件此前还有两处与原生菜单耦合的逻辑，现已整体删除：
 //
-//  1) onLocaleChange → SetLocale(locale)：把语言同步给 Go 侧，
-//     好让 RefreshMenu 重建出另一种语言的原生菜单。菜单既已下线，
-//     Go 侧不再持有语言副本，这个同步是纯粹的空转。
+//  1) onLocaleChange → SetLocale(locale)：当时的用途是让 Go 侧 RefreshMenu
+//     重建另一种语言的原生菜单。菜单下线后这条用途消失 —— 但 2026-10 的
+//     复查发现它还有第二个消费者：原生「未保存」确认框（OnBeforeClose）
+//     由 Wails 直接触发、不经过前端，拿不到当次请求的语言，只能读镜像。
+//     故恢复一行镜像同步（见 app.go SetLocale 的裁决）：**镜像不是真源**，
+//     前端每次切换整值覆盖，不存在需要两端对账的状态。
 //  2) safeEventsOn('menu:toggle-theme', …)：主题循环的第二个入口
 //     （⌘⇧L 的 accelerator 由原生菜单注册）。现在唯一入口是
 //     usePrefs 的 cycleTheme，由 App.vue 注册到命令表，键位与行为都在前端，
@@ -41,5 +45,16 @@ initI18n()
 //
 // 保留 initTheme / initPrefs / initI18n 三者的 mount 前初始化不变 ——
 // 它们防的是首帧闪烁，与菜单无关。
+
+// 语言镜像 → Go（仅供 OnBeforeClose 的原生确认框取文案；见上方说明与 dialogs.go）
+function syncLocaleToGo(locale) {
+  try {
+    SetLocale?.(locale)
+  } catch {
+    /* 浏览器预览无绑定 */
+  }
+}
+syncLocaleToGo(getLocale())
+onLocaleChange(syncLocaleToGo)
 
 createApp(App).mount('#app')

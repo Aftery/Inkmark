@@ -55,15 +55,3 @@ func readClipboardImageRaw() (pngBytes []byte, filePath string) {
 	copy(out, unsafe.Slice((*byte)(unsafe.Pointer(buf)), int(length)))
 	return out, filePath
 }
-
-// readClipboardTextRaw 返回剪贴板里的纯文本（无则空串）。
-// 只用于「WebKit 把复制的文件塞成纯文件名」时的辅助判定，
-// **绝不作为落盘依据** —— 真源永远是 sniffImageMagic 嗅探出的字节。
-func readClipboardTextRaw() string {
-	p := C.ink_clipboard_text()
-	if p == nil {
-		return ""
-	}
-	defer C.free(unsafe.Pointer(p))
-	return C.GoString(p)
-}

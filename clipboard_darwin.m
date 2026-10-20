@@ -95,15 +95,3 @@ char *ink_clipboard_file_path(void) {
     return strdup([result UTF8String]);
   }
 }
-
-// 取剪贴板纯文本（CF_UNICODETEXT / public.utf8-plain-text）。
-// 返回 malloc 出的 C 字符串（调用方 free），无则返回 NULL。
-char *ink_clipboard_text(void) {
-  @autoreleasepool {
-    NSPasteboard *pb = [NSPasteboard generalPasteboard];
-    NSString *s = [pb stringForType:@"public.utf8-plain-text"];
-    if (!s) s = [pb stringForType:@"NSStringPboardType"];
-    if (!s) return NULL;
-    return strdup([s UTF8String]);
-  }
-}

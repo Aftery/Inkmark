@@ -4,7 +4,7 @@
 // 而 webview 的页面 origin 是应用自身的资源服务（wails://…）——相对路径会被
 // 解析到**前端构建产物**的同名目录（404）。文档旁边的真实文件 webview 看不见，
 // fetch(file://) 又被跨源策略拦死。唯一出路：前端把 src 改写成 /doc-assets/…
-//（editor/assetUrl.js，改写口径唯一真源），内嵌资源 404 的请求落到这里的
+// （editor/assetUrl.js，改写口径唯一真源），内嵌资源 404 的请求落到这里的
 // Handler（v2.16 assetserver.Options.Handler 语义：Assets miss 的 GET 都到这），
 // 由 Go 按当前文档目录读盘返回。
 //
@@ -16,6 +16,7 @@
 //   - 任何含 ".." 段或反斜杠的路径直接 404（目录穿越在 URL 解码后的 Path 上
 //     判定，net/http 已把 %2e%2e 解码成 ".."，这里就是最终判定点）；
 //   - filepath.Rel 二次校验落点确在文档目录内（防 join 后的形态意外）。
+//
 // 目录外的文件、目录内的非图片文件，一律 404 —— 与修复前「内嵌资源 miss」
 // 的默认行为（StatusNotFound）完全一致，不新增任何可观测面。
 package main
