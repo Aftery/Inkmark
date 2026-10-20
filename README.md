@@ -158,7 +158,7 @@ inkmark/
 │   ├── p0-check-emoji.sh        # P0-1 emoji 扫描（零容忍，CI 门禁之一）
 │   ├── smoke/render-check.mjs   # 真渲染冒烟（dev + dist 双路径）
 │   ├── probe/                   # CDP 交互探针（斜杠面板 / WYSIWYG 装饰 / 主题计算色 / 表格提示）
-│   └── verify/                  # 快捷键契约 / i18n 残留 / 目视清单同步 / 图标与主题校验脚本
+│   └── verify/                  # 快捷键契约 / README 数字声明 / i18n 残留 / 目视清单同步 / 图标与主题校验脚本
 ├── docs/                # 交接说明 HANDOFF.md、架构决策（architecture/ADR-00x）、规格（spec/）、
 │                        #   悬而未决登记册（decisions/OPEN-DECISIONS.md）、
 │                        #   真机目视验收工具（qa/：visual-checklist.html + VERIFICATION-LOG.md）
@@ -182,7 +182,7 @@ inkmark/
     │   └── themes/          # tokens/design-tokens.css（Token 唯一真源）+ index.css（唯一样式入口）
     │                        #   + app-shell.css / platform-darwin.css / editor-wysiwyg.css
     │                        #   + theme.js（主题解析）/ prefs.js（偏好唯一真源）
-    ├── tests/           # node:test 测试网（221 条测试 / 44 个 suite，零第三方依赖），需 Node ≥22
+    ├── tests/           # node:test 测试网（239 条测试 / 50 个 suite，零第三方依赖），需 Node ≥22
     └── wailsjs/         # Wails 自动生成的 IPC 绑定（勿手改）
 ```
 
@@ -216,7 +216,7 @@ npm install
 
 npm run dev      # 本地开发服务器
 npm run build    # 生产构建 → frontend/dist
-npm test         # 测试网（221 条测试，零第三方依赖），【需 Node ≥22】
+npm test         # 测试网（239 条测试，零第三方依赖），【需 Node ≥22】
 ```
 
 > - `npm test` 用的是 Node **内置** `node:test`（无第三方测试依赖），因此**必须 Node ≥22**；低版本会报 `node --test` 不可用。
@@ -227,7 +227,8 @@ npm test         # 测试网（221 条测试，零第三方依赖），【需 No
 ### 门禁脚本（与 CI 同口径）
 
 ```bash
-cd frontend && npm test                                    # 测试网，期望 221/221
+cd frontend && npm test                                    # 测试网，期望 239/239
+node scripts/verify/verify-readme-claims.mjs               # README 数字声明 ↔ 实测（自己会再跑一遍测试网；退出码 1=漂移 / 2=测量失效）
 node scripts/verify/verify-shortcuts.mjs                   # 快捷键三方对齐（README ↔ 速查表 ↔ COMMANDS）
 node scripts/verify/scan-i18n-residue.mjs                  # i18n 文案残留
 ./scripts/p0-check-emoji.sh frontend/src main.go app.go    # P0 零 emoji
@@ -300,7 +301,7 @@ node scripts/probe/probe-r11-fixes.mjs             # 第十一轮修复：全角
 | 13 | **零多标签页 / 多文档** | 当前一次只开一个文档。ADR-005 已预留 `dirty` 语义的升级路径，多文档需重新定义「关闭哪个文档」的判定 |
 | 14 | **无拼写检查（刻意不做）** | CodeMirror 的 lint 对 CJK 基本无效，中文写作场景是**伪需求**，故不引入。英文拼写需自行接第三方 lint 扩展 |
 | 15 | **导出模板文案未国际化** | `export/exporters.js` 的 HTML 模板未接 `t()`（Spec 明确留待后续） |
-| 16 | **`App.vue` 行数余量极小** | 装配层硬上限 150 行、当前 146 行（HANDOFF 第十二轮实测）。新增行为一律先下沉到 composables/，门禁口径是剥注释后的有效行 |
+| 16 | **`App.vue` 行数余量极小** | 装配层硬上限 **总行数** 150 行、当前 148 行（契约 5 实测）。新增行为一律先下沉到 composables/，门禁口径是**总行数**（含注释与空行，比有效行更严） |
 
 ## 关于插件系统（现在不做）
 

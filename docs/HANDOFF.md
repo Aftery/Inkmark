@@ -4,7 +4,24 @@
 > `docs/spec/` 与项目记忆。它记录「做到了什么、怎么验证、哪些坑别再踩」，
 > 而不是流水账。
 >
-> 最后更新：2026-10-16（新增第十四轮：⌘V 图片粘贴 —— 根因是命令分发绕过了 paste 事件）
+> 最后更新：2026-10-17（新增第十五轮：README 数字声明漂移 —— 补一条「声明 ↔ 实测」门禁）
+>
+> ✅ **2026-10-17 第十五轮：README 里写死的数字漂了没人管（221/44 vs 实测 239/50），补上门禁**
+> 一次全门禁巡检发现：README 的「测试网 221 条测试 / 44 个 suite」「期望 221/221」
+> 与「App.vue 当前 146 行」全部**停在旧轮次**，实测已是 **239 条 / 50 suite**、
+> App.vue **148 行**（总行数口径）。这类数字此前**无任何门禁**——键位有
+> `verify-shortcuts`、目视清单有 `verify-visual-checklist`，唯独 README 里的实测数字
+> 是裸的，于是第十四轮把测试加到 239 时它就悄悄过期了。更糟的一处：README 写
+> App.vue 门禁口径是「剥注释后的有效行」，而契约 5 实为**总行数**（更严）——**口径写反**，
+> 会让人低估改动成本。本轮：
+> ① 把 README 三处测试数与 App.vue 行数/口径改回实测真值；
+> ② 新增 `scripts/verify/verify-readme-claims.mjs`：真跑一遍 `node --test` 取实测条数
+>    与 suite 数，并按 `helpers/line-metric.mjs` 的 `countTotalLines` 实测 App.vue 行数，
+>    逐项与 README 声明比对（挂 CI 的 frontend job，因为它要 node_modules）；
+> ③ **变异自证 6 个方向**：改条数 / 改行数 / 改口径说法各报红（退出码 1），
+>    删掉任一锚点则退出码 2（判据失效不得假绿）。其中**一处自证抓到门禁自身假绿**
+>    （口径判据 `includes('总行数')` 被行首前半句抢先命中，已收紧为锚定「门禁口径是…」）。
+>    详见 §2 第十五轮。
 >
 > ✅ **2026-10-16 第十四轮：拖拽好了但复制粘贴还是不行（根因：⌘V 被 `edit.paste` 命令接管，DOM paste 事件从不触发）**
 > 第十三轮修完显示链路后真机复验：**拖拽插图且正常显示，⌘V 仍只出文件名文本**。
@@ -120,6 +137,7 @@ cd /Users/aftery/Desktop/myapp/inkmark
 
 # 门禁全跑一遍（约 2 分钟，与 CI 口径一致）
 cd frontend && npm test; cd ..          # 期望 239/239
+node scripts/verify/verify-readme-claims.mjs  # README 数字声明 ↔ 实测（自跑测试网），期望退出码 0
 node scripts/verify/verify-shortcuts.mjs    # 快捷键契约，期望退出码 0
 node scripts/verify/scan-i18n-residue.mjs   # i18n 文案残留，期望退出码 0
 node scripts/verify/verify-visual-checklist.mjs  # 目视清单副本 ↔ §6 真源，期望退出码 0
@@ -266,6 +284,8 @@ scripts/
   p0-check-emoji.sh        薄封装（Node 实现）
   verify/parse-main-menu.mjs   main.go 菜单真源解析（共享）
   verify/verify-shortcuts.mjs  键位文档契约（CI 门禁）
+  verify/verify-readme-claims.mjs  README 数字声明 ↔ 实测（CI 门禁，frontend job）
+  verify/verify-visual-checklist.mjs  目视清单副本 ↔ §6 真源（CI 门禁）
   verify/scan-i18n-residue.mjs  i18n 文案残留（CI 门禁）
   verify/verify-i18n-switch.mjs 真浏览器三语切换（手动跑）
   verify/scripts-verify-icons.mjs  图标 SVG 与 phaseC 规格逐字比对（手动，不在 CI）
@@ -856,6 +876,61 @@ preventDefault，所以只能拿「文本像不像文件名」瞎猜；命令处
 （第十三轮范围）沿用通过。**#8 至此闭环**（跨 4 轮：通道② 错根因 → 通道③ →
 doc-assets 显示 → paste 命令通道）。
 
+### 第十五轮：README 数字声明漂移 —— 补「声明 ↔ 实测」门禁（2026-10-17）
+
+#### 发现：一次全门禁巡检，三处写死的数字全停在旧轮次
+
+| 位置 | README 声明 | 实测 |
+|---|---|---|
+| 目录树 `tests/` 注释 | 221 条测试 / 44 个 suite | **239 条 / 50 suite** |
+| 前端小节 `npm test` 说明 | 221 条测试 | **239 条** |
+| 门禁脚本清单 | 期望 221/221 | **239/239** |
+| 「已知问题」#16 App.vue | 当前 146 行，门禁口径是「剥注释后的有效行」 | **148 行**，口径是**总行数** |
+
+第十四轮把测试从 230 加到 239 时，README 那三处**没跟改**——因为**没有任何门禁
+会看它们**。键位有 `verify-shortcuts`、目视清单有 `verify-visual-checklist`，
+唯独 README 里的实测数字是裸的。第四处更隐蔽：数字错只影响读者判断，而**口径写反**
+（说成「有效行」、实为更严的「总行数」）会让人**低估**往 App.vue 加行的代价。
+
+#### 修法与判据设计
+
+新增 `scripts/verify/verify-readme-claims.mjs`，三条判据：
+
+1. **测试条数 ↔ 真跑 `node --test`**。不用静态数 `test()` 调用——参数化循环、
+   `describe` 嵌套、条件跳过与 `t.skip` 会让静态计数立刻失真；**唯一诚实的口径是
+   reporter 自己报的数**。故脚本真跑一遍测试网（`--test-reporter=spec` 锁输出形态，
+   解析 `ℹ tests N` / `ℹ suites N`），代价约 4s。
+2. **App.vue 行数 ↔ `helpers/line-metric.mjs` 的 `countTotalLines`**。直接 import
+   契约 5 用的同一个 helper，避免出现「门禁说 148、本脚本说 149」的荒谬对撞。
+3. **口径声明本身也是判据**：App.vue 那行必须把「门禁口径」说成总行数。
+
+**为什么挂 CI 的 frontend job 而不是 docs-contract**：本脚本要 `node_modules`
+（三条测试从 `@codemirror/*` 导入），docs-contract 不装依赖、跑不了测试网。
+
+**退出码**沿用同族约定：0 一致 / 1 漂移（逐条含实测值、声明值、行号）/ 2 测量或
+解析失效——**判据锚点消失时必须报 2 而不是绿灯**，否则删掉那行就等于悄悄关掉检查。
+
+#### 变异自证（6 个方向，全绿）
+
+| 注入 | 期望 | 实测 |
+|---|---|---|
+| 目录树条数 239→240 | 报红 | 退出 1，报「第 185 行声明 240，实测 239」 |
+| App.vue 148→140 | 报红 | 退出 1，报「声明 140，实测 148」 |
+| 「期望 239/239」→「239/240」 | 报红 | 退出 1，报「声明自相矛盾」 |
+| 口径改回「剥注释后的有效行」 | 报红 | 退出 1，报「门禁口径声明失真」 |
+| 删掉「期望 N/N」整行 | 报锚点失效 | 退出 2 |
+| 删掉 App.vue 声明整行 | 报锚点失效 | 退出 2 |
+
+⚠ **一处自证抓到门禁自身的假绿**（第四行）：口径判据初版用 `line.includes('总行数')`，
+而那行**前半句**「装配层硬上限 **总行数** 150 行」会抢先命中——把后半句的口径失真
+说法删掉照样退出 0。已收紧为**锚定「门禁口径是…」这一句本身**
+（`/门禁口径是(.{0,12})/`），与 §4 ⑲⑳⑳ 的教训同源：**判据必须锚在唯一上下文上，
+不能锚在整行**。
+
+另有一处早期判据瑕疵被第 1 行自证抓到：前端小节锚点原为裸 `测试网（N 条测试`，
+会被目录树那行抢先命中，导致**行号归属错误且同处漂移重复上报**；已收紧为
+与 `npm test #` 同行锚定（`/npm test\s+# 测试网（(\d+) 条测试/`）。
+
 > **#8 的完整教训链**（值得记住）：同一个用户症状「粘贴只是文件名」，先后有三个
 > 断点叠加 —— ① WKWebView 不暴露剪贴板图片（第十二轮修）；② 文档相对路径没有
 > 解析到磁盘的一步（第十三轮修）；③ **⌘V 根本不走 paste 事件**（本轮修）。
@@ -1077,6 +1152,7 @@ WebKit 的默认粘贴行为就是**把它当纯文本插入**（这就是「粘
 | 门禁 | 卡什么 | 命令 |
 |---|---|---|
 | `frontend` | 239 条测试 + vite 构建 | `npm test && npm run build` |
+| `frontend` 新增 | **README 数字声明 ↔ 实测**（2026-10-17 第十五轮新增）。README 里「221 条测试 / 44 个 suite」「App.vue 当前 146 行」等写死的数字此前无门禁，加测试后常忘记跟改；本脚本真跑一遍测试网取实测值并逐项比对（挂 frontend job 是因为它要 node_modules） | `node scripts/verify/verify-readme-claims.mjs` |
 | `go` ① | vet（printf 动词错 / 不可达代码 / 锁复制） | `go vet ./...` |
 | `go` ② | build（**vet 不做链接，cgo 导出代码要 build 才暴露**） | `go build -o /dev/null .` |
 | `go` ③ | **测试**（2026-10-15 新增。此前本仓零Go 测试，「什么字节才算图片」的判据完全裸奔） | `CGO_ENABLED=1 go test ./...` |

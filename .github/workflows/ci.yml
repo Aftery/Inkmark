@@ -3,7 +3,8 @@
 # 为什么需要这个文件：改动本仓库的人（前端 / Go / 菜单 / 文档）此前全靠人肉执行门禁，
 # 漏跑一次不会有人知道，直到线上静默失效。本 workflow 把五条门禁固化到每次 push / PR：
 #
-#   1. frontend      —— 测试网（npm test）+ 生产构建（npm run build）
+#   1. frontend      —— 测试网（npm test）+ **README 数字声明同步**（新增，真跑测试网
+#                       取实测值）+ 生产构建（npm run build）
 #                       + 真渲染冒烟（render-check：防「构建通过但白屏」）
 #   2. go            —— 静态检查（go vet）+ 真实编译（go build）+ 测试（go test）
 #                       + Linux/Windows 交叉编译（通道③ 的另两个平台适配层）
@@ -56,6 +57,15 @@ jobs:
 
       - name: 运行测试网
         run: npm test
+
+      # README 数字声明 ↔ 实测（2026-10-17 第十五轮新增）。
+      # 挂在 frontend job 而非 docs-contract：本脚本要**真跑一遍测试网**取实测值
+      # （静态数 test() 会在参数化/嵌套/条件跳过处失真），而三条测试从
+      # @codemirror/* 导入，故必须先有 node_modules —— 只有本 job 跑了 npm ci。
+      # 它自己会再跑一次 node --test（约 4s），换取「README 里写死的条数不会
+      # 悄悄过期」——这正是第十四轮留下 221/239 那种失真的根因。
+      - name: 校验 README 数字声明与实测一致
+        run: node ../scripts/verify/verify-readme-claims.mjs
 
       - name: 生产构建
         run: npm run build

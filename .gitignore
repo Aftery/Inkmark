@@ -12,12 +12,22 @@ frontend/dist/*
 # ============ 依赖 ============
 node_modules/
 
+# Go 模块与构建缓存：默认落在 ~/go/pkg/mod 与 ~/Library/Caches/go-build，
+# 但在文件策略只允许写工作区的环境下（go vet/test 会报
+# "open ~/Library/Caches/go-build/...: operation not permitted"）需重定向到仓内，
+# 故忽略这两个本地目录。
+.gocache/
+.gopath/
+
 # ============ 系统 / 编辑器 ============
 .DS_Store
 Thumbs.db
 .idea/
 .vscode/
 *.swp
+
+# AI 编辑器 / 本地助手的会话计划缓存（非仓库内容）
+.zcode/
 
 # ============ 日志与临时文件 ============
 *.log
