@@ -81,7 +81,8 @@ func (a *App) WatchDir(path string) error {
 func (a *App) watchLoop(ctx context.Context, w *fsnotify.Watcher, root string, gen uint64) {
 	defer func() { _ = w.Close() }()
 
-	var timer *time.Timer
+	// fire 是去抖到期后的唯一推送动作。live 代际校验照旧：监听被替换/停止后
+	// 残留的定时器不得把陈旧目录推给前端。
 	fire := func() {
 		watchMu.Lock()
 		live := watchGen == gen
@@ -94,6 +95,53 @@ func (a *App) watchLoop(ctx context.Context, w *fsnotify.Watcher, root string, g
 		runtime.EventsEmit(a.ctx, "fs:changed", root)
 	}
 
+	// 去抖本体抽成独立函数（见 runDebounced）：它不碰 Wails runtime，可被
+	// Go 测试直接驱动 —— 「去抖语义」从此是被钉死的契约，而不是只能靠真机目视。
+	// fsnotify 错误通道一并交给它：监听内部错误不打扰用户，但必须留痕
+	// （静默吞掉会让「监听已死」无从排查，README 已知问题 #6 的建议落地）。
+	runDebounced(ctx, w.Events, w.Errors, fire)
+}
+
+// runDebounced 是去抖本体（生产入口，窗口固定为 watchDebounce）。
+func runDebounced(ctx context.Context, events <-chan fsnotify.Event, errs <-chan error, onFire func()) {
+	runDebouncedWindow(ctx, events, errs, onFire, watchDebounce)
+}
+
+// runDebouncedWindow 是去抖本体：消费 events，每个事件把去抖窗口重置到「现在 + 窗口」，
+// 窗口内无新事件才调用 onFire 一次。errs 只用于记日志（不触发推送、不中断监听）。
+//
+// 【为什么窗口做成入参，而不是写死常量】
+// 窗口若写死，测试要么按 250ms 真等（每个用例多花 0.3s），要么**复制一份实现**
+// 到测试里 —— 后者就是本仓 §4 ⑱⑲ 记过的假绿灯（「断言了条数不等于断言了行为」
+// 「源码正则守不住接线」）：测的是副本，改的是本体。
+// 故本体把窗口作为入参，测试直接驱动**本体**、只把窗口调小。
+//
+// 【为什么独立成函数 —— 为了可测】
+// 原实现内嵌在 watchLoop 里，而 watchLoop 末尾调 runtime.EventsEmit，
+// 那需要 Wails runtime 才能跑，Go 测试里无法直接驱动。抽出来后，
+// watcher_test.go 用真实 time 与注入通道即可把语义钉死：
+//   ① 窗口内的一批事件 → 只触发 1 次；
+//   ② 跨窗口的两次独立变更 → 触发 2 次（**这是正确行为，不是缺陷**）；
+//   ③ 簇跨度超窗口但事件连续到达 → 仍只触发 1 次；
+//   ④ ctx 取消 → 立即退出，不再触发。
+//
+// 【串行状态机：定时器与事件在同一个 select 里】
+// 用 *time.Timer + Reset（而非 time.AfterFunc）让「到期」回到本 goroutine 的
+// select 通道，与事件到达**严格串行**。AfterFunc 的回调跑在独立 goroutine，
+// 与事件循环并发；实测 200/200 命中「定时器已到期时 Stop() 返回 false、
+// 停不掉已在执行的回调」这一 API 事实。旧写法真正的毛病不是「会多推一次」
+// （实测同批变更只推 1 次），而是**行为取决于调度顺序**——
+// 「能跑≠行为确定」。去掉并发后，行为只由事件到达时刻决定。
+func runDebouncedWindow(ctx context.Context, events <-chan fsnotify.Event, errs <-chan error, onFire func(), window time.Duration) {
+	// timer 为 nil 表示「当前没有待触发的去抖」
+	var timer *time.Timer
+	var timerC <-chan time.Time
+	defer func() {
+		if timer != nil {
+			timer.Stop()
+		}
+	}()
+
 	for {
 		select {
 		case <-ctx.Done():
@@ -101,16 +149,39 @@ func (a *App) watchLoop(ctx context.Context, w *fsnotify.Watcher, root string, g
 				timer.Stop()
 			}
 			return
-		case _, ok := <-w.Events:
+		case <-timerC:
+			// 去抖到期：触发一次，并把定时器归位（下一批事件重新起算一个周期）
+			timerC = nil
+			onFire()
+		case _, ok := <-events:
 			if !ok {
+				if timer != nil {
+					timer.Stop()
+				}
 				return
 			}
-			if timer != nil {
-				timer.Stop()
+			// 新事件：把去抖窗口重置到「现在 + 窗口」。
+			// 若定时器已到期（timerC 已消费、fire 已发出），这里起的是**新的一轮**
+			// —— 那说明这批事件确实晚于上一轮去抖窗口，属于独立的后续变更，
+			// 应当再触发一次（这与「同一次保存被拆成两次」是两件事，不可混同）。
+			if timer == nil {
+				timer = time.NewTimer(window)
+			} else {
+				if !timer.Stop() {
+					// 定时器已到期且其值已被消费（timerC 已是 nil）：无需 drain
+					select {
+					case <-timer.C:
+					default:
+					}
+				}
+				timer.Reset(window)
 			}
-			timer = time.AfterFunc(watchDebounce, fire)
-		case err, ok := <-w.Errors:
+			timerC = timer.C
+		case err, ok := <-errs:
 			if !ok {
+				if timer != nil {
+					timer.Stop()
+				}
 				return
 			}
 			// 监听错误不打扰用户（下一次变更仍可正常触发），但必须留痕：
