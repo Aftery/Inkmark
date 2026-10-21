@@ -2,7 +2,6 @@
 // ----------------------------------------------------------------------------
 // 从 tableRender.js 拆出：那个文件负责「什么时候把表格渲染出来」（语法树扫描 +
 // StateField block 装饰），本文件负责「渲染出来之后用户怎么编辑它」。
-// 边界是一条 import 线，两边互不感知实现细节。
 //
 // 【为什么单元格用 contenteditable】嵌套 EditorView 会在 block 装饰里与宿主
 // 视图争抢焦点/选区，IME 合成事件还会串层。单层 contenteditable + 显式序列化
@@ -11,16 +10,22 @@
 // 【编辑期间的重渲染保护】用户打字会让文档变化 → 装饰重建。eq() 靠 activeWidget
 // 识别「还是同一个表格」，让 CM 复用同一份 DOM，焦点与 IME 不被打断；
 // 没有这道保护，每敲一个字光标都会跳回行首。
+//
+// 【结构变更后必须自己重建 DOM —— 这是个真陷阱】eq() 返回 true 时 CM **复用旧
+// DOM**，而增删行列/重排/改对齐之后文档已变、旧 DOM 却还是老结构：用户会看到
+// 「点了按钮没反应」，一离开再回来才对（因为那时才真正重建）。故结构类操作
+// 一律走 rebuild()：按 model 重建 <table> 并把焦点按行列下标还原。
 
 import { WidgetType } from '@codemirror/view'
 import { redo, undo } from '@codemirror/commands'
 import { serializeTable, locateTable } from './tableRender.js'
 import { selfSync, currentEditingWidget, setEditingWidget } from './tableSync.js'
-import { createActionBar, insertColumn, insertRow, removeColumn, removeRow } from './tableOps.js'
+import {
+  ALIGN_CYCLE, createActionBar, insertColumn, insertRow, moveColumn, moveRow,
+  nextAlign, removeColumn, removeRow, setAlignIndicator, setColumnAlign,
+} from './tableOps.js'
+import { attachTableDrag } from './tableDrag.js'
 import { t } from '../i18n/index.js'
-
-// 编辑期间文档不断被自家同步改写，装饰随之重建 —— eq 靠 tableSync 里的
-// 「正在编辑的 widget」识别「还是我」，让 CM 复用同一份 DOM，焦点与 IME 不被打断。
 
 function focusEnd(el) {
   el.focus()
@@ -41,12 +46,14 @@ export class TableWidget extends WidgetType {
     this.to = t.to
     this.source = t.source
     this.dom = null
+    this.table = null
     this.viewRef = null
     this.composing = false
     // 操作条的作用目标：最后一次获得焦点的单元格（未点过时默认表头第 0 列）
     this.activeCol = 0
     this.activeRow = -1
     this.ac = new AbortController()
+    this.drag = null
   }
 
   eq(other) {
@@ -59,19 +66,15 @@ export class TableWidget extends WidgetType {
   // CM 不参与 —— 否则点击单元格会被当作普通光标点击。
   ignoreEvent() { return true }
 
-  toDOM(view) {
-    this.viewRef = view
-    const wrap = document.createElement('div')
-    wrap.className = 'cm-md-table'
+  /** 按 model 构建 <table>（重建与首次渲染共用，保证两条路径绝不会画出两种结构） */
+  buildTable() {
     const table = document.createElement('table')
     const { header, aligns, rows } = this.model
-
     const mk = (tag, text, i) => {
       const el = document.createElement(tag)
       el.contentEditable = 'true'
       el.textContent = text
-      if (aligns[i] === 'center') el.style.textAlign = 'center'
-      else if (aligns[i] === 'right') el.style.textAlign = 'right'
+      el.style.textAlign = aligns[i] ?? 'left'
       return el
     }
     const thead = document.createElement('thead')
@@ -86,7 +89,15 @@ export class TableWidget extends WidgetType {
       tbody.appendChild(tr)
     }
     table.appendChild(tbody)
-    wrap.appendChild(table)
+    return table
+  }
+
+  toDOM(view) {
+    this.viewRef = view
+    const wrap = document.createElement('div')
+    wrap.className = 'cm-md-table'
+    this.table = this.buildTable()
+    wrap.appendChild(this.table)
 
     const opt = { signal: this.ac.signal }
     wrap.addEventListener('input', () => this.sync(), opt)
@@ -94,17 +105,7 @@ export class TableWidget extends WidgetType {
     wrap.addEventListener('compositionend', () => { this.composing = false; this.sync() }, opt)
     wrap.addEventListener('keydown', (e) => this.onKeydown(e), opt)
     wrap.addEventListener('paste', (e) => this.onPaste(e), opt)
-    wrap.addEventListener('focusin', (e) => {
-      setEditingWidget(this)
-      // 记下当前单元格的行列：行列操作作用在「用户正在编辑的那一格」，
-      // 而不是固定作用在表尾 —— 否则插列永远加在最后一列，与直觉相反。
-      const cell = e.target?.closest?.('td,th')
-      if (!cell) return
-      this.activeCol = cell.cellIndex
-      const rowIndex = [...table.rows].indexOf(cell.closest('tr'))
-      // 表头行记为 -1（在其下方插行即表体第 0 行），表体行按 0 基计
-      this.activeRow = rowIndex <= 0 ? -1 : rowIndex - 1
-    }, opt)
+    wrap.addEventListener('focusin', (e) => this.onFocusIn(e), opt)
     wrap.addEventListener('focusout', (e) => {
       if (e.relatedTarget && wrap.contains(e.relatedTarget)) return // 单元格间移动
       if (currentEditingWidget() === this) setEditingWidget(null)
@@ -113,18 +114,70 @@ export class TableWidget extends WidgetType {
 
     // ---- 行列操作条（构建逻辑在 tableOps.js）----
     // 挂在 wrap 内而不是 body：它继承 ignoreEvent()=true，点击不会被 CM 当成
-    // 点击文档；且随 widget 一起销毁（AbortSignal 在 destroy 里 abort），不必手工清理。
-    wrap.appendChild(createActionBar((action) => this.runAction(action), this.ac.signal))
+    // 点击文档；且随 widget 一起销毁（AbortSignal 在 destroy 里 abort）。
+    this.bar = createActionBar((action) => this.runAction(action), this.ac.signal)
+    wrap.appendChild(this.bar)
     // 悬停显形（样式见 editor-wysiwyg.css 的 .cm-md-table.is-hover）
     wrap.addEventListener('mouseenter', () => wrap.classList.add('is-hover'), opt)
     wrap.addEventListener('mouseleave', () => wrap.classList.remove('is-hover'), opt)
 
+    // ---- 行列拖拽重排（tableDrag.js）----
+    // getTable 而不是直接传元素：结构变更后 <table> 会被换掉，闭包里必须取最新那个
+    this.drag = attachTableDrag({
+      wrap,
+      getTable: () => this.table,
+      signal: this.ac.signal,
+      onMove: (kind, from, to) => this.move(kind, from, to),
+    })
+
     this.dom = wrap
+    this.refreshIndicators()
     return wrap
   }
 
+  /** 记录当前单元格行列（键盘导航 / 操作条 / 对齐按钮的作用目标都依赖它） */
+  onFocusIn(e) {
+    setEditingWidget(this)
+    const cell = e.target?.closest?.('td,th')
+    if (!cell) return
+    this.activeCol = cell.cellIndex
+    const rowIndex = [...this.table.rows].indexOf(cell.closest('tr'))
+    // 表头行记为 -1（在其下方插行即表体第 0 行），表体行按 0 基计
+    this.activeRow = rowIndex <= 0 ? -1 : rowIndex - 1
+    this.refreshIndicators()
+  }
+
+  /** 对齐指示器随活动列更新（操作条上高亮当前列的对齐档） */
+  refreshIndicators() {
+    const align = this.model.aligns?.[this.activeCol] ?? 'left'
+    setAlignIndicator(this.bar, align)
+  }
+
   /**
-   * 行列增删的唯一入口。
+   * 按 model 重建 DOM，并把焦点还原到同一行列。
+   *
+   * 只用于**结构变更**（增删行列 / 重排 / 改对齐）：这类操作后文档已变，但
+   * CM 因 eq() 命中会复用旧 DOM，不主动重建就是「界面没反应」（见文件头）。
+   */
+  rebuild({ focusRow = null, focusCol = null } = {}) {
+    const wrap = this.dom
+    if (!wrap) return
+    const old = this.table
+    const next = this.buildTable()
+    wrap.replaceChild(next, old)
+    this.table = next
+    this.drag?.refresh?.()
+    this.refreshIndicators()
+    // 焦点还原：优先调用方指定，否则沿用操作前的活动单元格
+    const row = focusRow ?? (this.activeRow + 1)
+    const col = focusCol ?? this.activeCol
+    const tr = this.table.rows[Math.max(0, Math.min(row, this.table.rows.length - 1))]
+    const cell = tr?.cells?.[Math.max(0, Math.min(col, (tr?.cells?.length ?? 1) - 1))]
+    if (cell) focusEnd(cell)
+  }
+
+  /**
+   * 行列增删 / 对齐 / 重排的唯一入口。
    *
    * 【为什么改 model 再整体写回】列数散布在表头/每一行/对齐/分隔行四处，
    * 直接改 DOM 再同步时只要有一处跟不上，产出的就是**非法 Markdown**
@@ -140,8 +193,20 @@ export class TableWidget extends WidgetType {
     const row = this.activeRow ?? -1
     const colCount = model.header.length
 
+    // 对齐：点同一个档位再循环到下一档（左 → 中 → 右 → 左）
+    if (action.startsWith?.('align:')) {
+      const want = action.slice(6)
+      const target = want === 'cycle' ? nextAlign(model.aligns[col]) : want
+      setColumnAlign(model, col, ALIGN_CYCLE.includes(target) ? target : nextAlign(model.aligns[col]))
+      this.writeModel()
+      this.rebuild({ focusCol: col })
+      return
+    }
+
+    let focusRow = null
     switch (action) {
       case 'add-row':
+        focusRow = row + 2 // 表体新行插在 row+1（0 基），DOM 行号 = +1（表头占一位）+1（新行）
         insertRow(model, row + 1)
         break
       case 'add-col':
@@ -161,6 +226,18 @@ export class TableWidget extends WidgetType {
         return
     }
     this.writeModel()
+    this.rebuild({ focusRow, focusCol: Math.min(col, model.header.length - 1) })
+  }
+
+  /** 拖拽重排落点（tableDrag 松手时调一次，只产生一条撤销记录） */
+  move(kind, from, to) {
+    this.sync()
+    if (kind === 'col') moveColumn(this.model, from, to)
+    else moveRow(this.model, from, to)
+    this.activeCol = kind === 'col' ? to : this.activeCol
+    this.activeRow = kind === 'row' ? to : this.activeRow
+    this.writeModel()
+    this.rebuild({ focusRow: kind === 'row' ? to + 1 : this.activeRow + 1, focusCol: this.activeCol })
   }
 
   /** 拒绝操作时给一次短暂提示（不改文档），避免用户以为按钮坏了 */
@@ -180,21 +257,28 @@ export class TableWidget extends WidgetType {
   /** 把当前 model 写回文档（与 sync 同一套区间重定位保护） */
   writeModel() {
     const view = this.viewRef
-    if (!view || !this.dom) return
+    if (!view) return
     const text = serializeTable(this.model)
+    return this.dispatchText(text)
+  }
+
+  /** 区间保护 + 去重后写回：model 与文档一致的序列化产物绝不产生多余事务 */
+  dispatchText(text) {
+    const view = this.viewRef
     const state = view.state
     let { from, to } = this
     if (state.doc.sliceString(from, to) !== this.source) {
       const found = locateTable(state, from)
-      if (!found) return
+      if (!found) return false
       ;({ from, to } = found)
     }
-    if (text === state.doc.sliceString(from, to)) return
+    if (text === state.doc.sliceString(from, to)) return false
     view.dispatch({ changes: { from, to, insert: text }, annotations: selfSync.of(true) })
     this.from = from
     this.to = from + text.length
     this.source = text
     this.key = text
+    return true
   }
 
   destroy() {
@@ -206,24 +290,12 @@ export class TableWidget extends WidgetType {
   sync() {
     const view = this.viewRef
     if (!view || !this.dom || view.composing || this.composing) return
-    const table = this.dom.querySelector('table')
+    const table = this.table
     if (!table) return
     const grid = [...table.rows].map((tr) => [...tr.cells].map((td) => td.textContent))
     const model = { header: grid[0], aligns: this.model.aligns, delimRaw: this.model.delimRaw, rows: grid.slice(1) }
     const text = serializeTable(model)
-    const state = view.state
-    let { from, to } = this
-    if (state.doc.sliceString(from, to) !== this.source) {
-      const found = locateTable(state, from)
-      if (!found) return
-      ;({ from, to } = found)
-    }
-    if (text === state.doc.sliceString(from, to)) return
-    view.dispatch({ changes: { from, to, insert: text }, annotations: selfSync.of(true) })
-    this.from = from
-    this.to = from + text.length
-    this.source = text
-    this.model = model
+    if (this.dispatchText(text)) this.model = model
   }
 
   onKeydown(e) {
@@ -239,10 +311,14 @@ export class TableWidget extends WidgetType {
       return
     }
     if (e.altKey || e.metaKey || e.ctrlKey) return
-    const table = this.dom.querySelector('table')
+    const table = this.table
     if (e.key === 'Tab') {
       e.preventDefault()
-      if (!this.stepCell(table, cell, e.shiftKey ? -1 : 1)) this.appendRow(table, e.shiftKey ? -1 : 0)
+      if (!this.stepCell(cell, e.shiftKey ? -1 : 1)) {
+        // 正向越界才补行；反向越界（首格 Shift+Tab）什么都不做 ——
+        // 曾经在这里无条件 appendRow，导致「想退出去」反而多出一行
+        if (!e.shiftKey) this.appendRow(table, 0)
+      }
     } else if (e.key === 'Enter') {
       e.preventDefault() // Enter 不得在单元格里造 <div>；语义 = 下一行同列（末行则加行）
       const rowsArr = [...table.rows]
@@ -258,8 +334,8 @@ export class TableWidget extends WidgetType {
     }
   }
 
-  stepCell(table, cell, delta) {
-    const cells = [...table.querySelectorAll('th,td')]
+  stepCell(cell, delta) {
+    const cells = [...this.table.querySelectorAll('th,td')]
     const j = cells.indexOf(cell) + delta
     if (j < 0 || j >= cells.length) return false
     focusEnd(cells[j])
@@ -274,13 +350,14 @@ export class TableWidget extends WidgetType {
     for (let i = 0; i < n; i++) {
       const td = document.createElement('td')
       td.contentEditable = 'true'
-      if (aligns[i] === 'center') td.style.textAlign = 'center'
-      else if (aligns[i] === 'right') td.style.textAlign = 'right'
+      td.style.textAlign = aligns[i] ?? 'left'
       tr.appendChild(td)
       tds.push(td)
     }
     table.tBodies[0].appendChild(tr)
     focusEnd(tds[Math.min(Math.max(focusCol, 0), n - 1)])
+    this.activeRow = table.rows.length - 2
+    this.drag?.refresh?.()
     this.sync()
   }
 

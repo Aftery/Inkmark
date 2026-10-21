@@ -119,6 +119,76 @@
   font-weight: var(--weight-emphasize);
   background: var(--surface-warm);
 }
+
+/* ---- 行列拖拽手柄（editor/tableDrag.js）----
+   默认隐藏，鼠标进入表格（.is-hover）或正在拖拽时显形 —— 常驻会干扰写作。
+   视觉：一条 --border-strong 的抓握条，零阴影、零新色。 */
+.cm-md-table-handles {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity var(--motion-fast) var(--ease-standard);
+}
+.cm-md-table.is-hover .cm-md-table-handles,
+.cm-md-table.is-dragging .cm-md-table-handles { opacity: 1; }
+.cm-md-table-handle {
+  position: absolute;
+  pointer-events: auto;
+  cursor: grab;
+  z-index: 2;
+}
+.cm-md-table-handle[data-kind='col'] { top: 0; height: 10px; }
+.cm-md-table-handle[data-kind='col']::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: 2px;
+  width: 16px;
+  height: 4px;
+  margin-left: -8px;
+  border-radius: var(--radius-pill);
+  background: var(--border-strong);
+}
+.cm-md-table-handle[data-kind='row'] { left: 0; width: 12px; }
+.cm-md-table-handle[data-kind='row']::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 2px;
+  width: 4px;
+  height: 14px;
+  margin-top: -7px;
+  border-radius: var(--radius-pill);
+  background: var(--border-strong);
+}
+.cm-md-table.is-dragging .cm-md-table-handle { cursor: grabbing; }
+/* 拖拽期间禁用文本选择，避免整屏文字被高亮 */
+.cm-md-table.is-dragging table { user-select: none; }
+
+/* 落点指示线：拖拽过程中唯一的位置反馈（2px accent，其余零装饰） */
+.cm-md-table-drop {
+  position: absolute;
+  display: none;
+  background: var(--accent);
+  border-radius: var(--radius-pill);
+  pointer-events: none;
+  z-index: 3;
+}
+.cm-md-table-drop.is-col,
+.cm-md-table-drop.is-row { display: block; }
+
+/* ---- 对齐按钮：三档用「文字的落位」表达自身含义，当前档反色 ----
+   glyph 相同（≡），靠 text-align + 反色区分，零新增图标（P0-1 / 图标白名单）。 */
+.cm-md-align-btn[data-align='left'] { text-align: left; }
+.cm-md-align-btn[data-align='center'] { text-align: center; }
+.cm-md-align-btn[data-align='right'] { text-align: right; }
+.cm-md-align-btn[aria-pressed='true'],
+.cm-md-align-btn[aria-pressed='true']:hover {
+  background: var(--accent);
+  color: var(--accent-on);
+}
+
 /* ---- 代码块行号（editor/codeBlock.js 加 .cm-md-codeline 类）----
    编号由 JS 按块算好后经行装饰的 data-line 属性下发，由 CSS attr() 渲染成
    伪元素 —— **不进文档、也不进 DOM 文本**（塞进文本会被复制/编辑带出去）。

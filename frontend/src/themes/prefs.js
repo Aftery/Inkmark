@@ -32,6 +32,15 @@ export const PREFS_DEFAULTS = {
   autosave: 800, // 0(关) | 800 | 2000 | 5000（ms）
   snapshot: 180000, // 0(关) | 180000 | 600000 | 1800000（ms）
   locale: 'zh-CN', // zh-CN | en-US | ja-JP（界面语言；取值真源见 PREF_OPTIONS.locale）
+  // 智能符号补全（成对闭合 * _ ` [ ( " ）。默认开启：这是「写作器」的通行预期，
+  // 且三条 Markdown 专属守卫（词内 `_`/`'`、行首列表标记、代码块）都已内建，
+  // 误伤面很小（见 editor/smartInput.js 文件头）。
+  smartPair: 'on', // on | off
+  // 智能标点（中文全角标点 + 引号形态）。**默认关闭**：它会改写用户敲下的
+  // 字符，属「显式授权才启用」的强干预（与产品裁决「可选启用」一致）。
+  // 三档而不是两档：引号形态是排版偏好（弯引号 “” vs 直角引号 「」），
+  // 用户明确点名了直角引号，不能只给一个「开」然后替他决定形态。
+  smartPunct: 'off', // off | curly | corner
 }
 
 /** 每项的合法取值白名单（校验 + 面板控件的取值来源） */
@@ -47,6 +56,11 @@ export const PREF_OPTIONS = {
   // 两处各写一份的话，加第四种语言时会漏改其中一处，而漏改的那处
   // 会表现为「面板里选得到、但setPref 静默忽略」。
   locale: ['zh-CN', 'en-US', 'ja-JP'],
+  // 两个开关型偏好用 'on'/'off' 而不是布尔值：面板控件（SegmentedControl）
+  // 的 modelValue 类型是 String | Number，布尔值会撞 prop 校验；
+  // 且字典/持久化里 'on'/'off' 可读性更好（localStorage 里是给人看的）。
+  smartPair: ['on', 'off'],
+  smartPunct: ['off', 'curly', 'corner'],
 }
 
 /**

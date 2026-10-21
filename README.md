@@ -27,9 +27,15 @@
 | **图片粘贴 / 拖拽插入** | 编辑器内粘贴或拖入图片 → 写入文档同级 `assets/`（`img-<时间戳>-<随机>.<ext>`），并插入 `![](assets/xxx)`；三条输入通道归一（`useFileAssets`）：① `clipboardData` 图片数据 → `SaveImage`；② `file://` URI → `SaveImageFromPath`；③ **系统剪贴板兜底**（WKWebView 不把剪贴板图片暴露给 `clipboardData`，由 Go 侧 `SaveImageFromClipboard` 读原生剪贴板、按魔数嗅探格式）；文档未落盘时提示先保存；图片**显示**走 `/doc-assets/` 资源服务（Go `docassets.go` 按当前文档目录读盘，前端 `editor/assetUrl.js` 唯一改写口；预览改写、导出保真） |
 | **自绘标题栏（跨平台）** | `src/components/TitleBar.vue`：拖拽区 + 下拉菜单（结构由命令表派生，点击外部自动关闭）+ 居中文件名 / 脏圆点 + 窗口按钮；darwin 隐藏自绘按钮、菜单左移约 70px 给红绿灯留白；其余平台无边框 + 自绘三按钮 |
 | **斜杠命令面板** | `src/components/SlashCommand.vue` + `editor/slashCommand.js`：新行行首输入 `/` 在光标下方面板弹出，`↑↓` 切换、`Enter` 插入（自动删除 `/`）、`Esc` 关闭；支持代码块 / 表格 / 待办 / 引用 |
+| **表格真渲染 + 行列操作** | `editor/tableRender.js` 把 GFM 表格渲染成可编辑 `<table>`（单元格直接打字，`Tab`/`Enter` 换格并在末格自动补行）；悬停操作条含 `+/-` 增删行列与**左/中/右对齐**三档（对齐写回 GFM 分隔行）；表头/行首手柄可**拖拽整列/整行重排**（落点高亮，`Esc` 取消，松手才落一条撤销记录）——`editor/tableWidget.js` + `tableOps.js` + `tableDrag.js` |
+| **智能符号补全** | 键入 `*` `_` `` ` `` `[` `(` `"` `'` 自动补右半并把光标放中间；再键入闭合符**越过**而非重复；选中文字后键入自动**包裹选区**；空配对中间退格**一次删两侧**；行首三连反引号展开成围栏代码块。三条 Markdown 守卫：行首裸 `*`（列表标记）、词内 `_`/`'`（`snake_case` / `don't`）、代码上下文一律不干预（`editor/smartInput.js`） |
+| **智能标点（可选）** | 设置 → 编辑器：`关` / `弯引号 “”` / `直角引号 「」` 三档。开启后中文语境的半角标点转全角、直引号按**行内就近配平**转形态；英文语境（`Hello, world` / `It's`）与代码块内**一律不动**（`editor/smartPunct.js`） |
+| **选区粘贴 URL 转链接** | 选中一段文字后 `⌘V` 粘贴 URL，自动变成 `[选中文字](url)`；无选区时仍是纯文本；选区已是链接或跨行时不叠加（`editor/pasteCommand.js`） |
+| **标题定级与升降** | `⌘1`~`⌘6` 直接定级（同级再按还原正文）、`⌘⌥0` 正文、`⌘⌥↑`/`⌘⌥↓` 逐级升降（正文 → h6 → … → h1，两端停住不循环）；选区跨行时按首行级数**整块统一**（`editor/headingLevel.js`） |
+| **列表智能缩进** | 有序/无序/任务列表里 `Tab` 缩进（+2 空格）、`Shift+Tab` 反缩进（**吸附父级缩进**）；缩进后**有序列表序号自动重排**，父级断号一并接上；非列表行与代码块里仍走通用缩进（`editor/listIndent.js`） |
 | **表格未渲染提示** | 写成管道行却缺 GFM 分隔行时，状态栏**常驻**提示「第 N 行像表格但未渲染：缺分隔行，请在表头下加一行 `\| --- \|`」，改对即消失（`editor/tableHint.js` + `composables/useTableHint.js`） |
 | **代码块 Enter 跳出** | 光标位于紧邻结束围栏的空行时按 Enter，跳到围栏之后另起一行（`createEditor.js`） |
-| **设置面板** | `⌘,` 打开（`src/components/SettingsPanel.vue`）：外观 6 项（主题 / 正文字体 / 字号 / 行距 / 行宽 / 语言）+ 编辑器 2 项（自动保存间隔 / 快照间隔），全部**实时生效**（改完立刻落 CSS 变量，无需重启）、**刷新保持**（`localStorage` 持久化），另有「恢复默认」（二次确认，防误触） |
+| **设置面板** | `⌘,` 打开（`src/components/SettingsPanel.vue`）：外观 6 项（主题 / 正文字体 / 字号 / 行距 / 行宽 / 语言）+ 编辑器 4 项（自动保存间隔 / 快照间隔 / 智能符号 / 智能标点），全部**实时生效**（改完立刻落 CSS 变量，无需重启）、**刷新保持**（`localStorage` 持久化），另有「恢复默认」（二次确认，防误触） |
 | **三语国际化** | `src/i18n/`：简体中文 / English / 日本語 三档字典 + `t()`；标题栏菜单、设置面板、弹层、提示全量覆盖，语言偏好实时切换 |
 | **排版偏好** | 正文字体（系统 / 衬线 / 等宽）、字号（12–20px 六档，编辑区与预览区**成对同步**）、行距（紧凑 / 标准 / 宽松）、行宽（窄 / 标准 / 宽）——真源 `src/themes/prefs.js`，偏好走**文档作用域**变量 `--font-body-user`，不污染标题栏 / 侧栏等界面外壳 |
 | **打印** | `⌘P`：Wails 的 WKWebView **没有实现 `window.print()`**（调用即静默空操作，这正是「⌘P 没反应」的根因），故桌面端把「打印」实现为**生成 PDF**（`exportPdf`，保存对话框 + 路径提示），随后可在系统 PDF 阅读器里打印；非 darwin 桌面 / 浏览器预览下自动回退到 `window.print()`。`@media print` 已隐藏标题栏 / 侧栏 / 状态栏 / 各类遮罩，只输出正文 |
@@ -100,9 +106,14 @@
 | 删除线 | ⌘⇧X |
 | 行内代码 | ⌘` |
 | 链接 | ⌘K |
-| 标题一 | ⌘⌥1 |
-| 标题二 | ⌘⌥2 |
-| 标题三 | ⌘⌥3 |
+| 标题一 | ⌘1 |
+| 标题二 | ⌘2 |
+| 标题三 | ⌘3 |
+| 标题四 | ⌘4 |
+| 标题五 | ⌘5 |
+| 标题六 | ⌘6 |
+| 正文（去标题） | ⌘⌥0 |
+| 标题升级 / 降级 | ⌘⌥↑ / ⌘⌥↓ |
 | 无序列表 | ⌘⇧8 |
 | 有序列表 | ⌘⇧7 |
 | 任务列表 | ⌘⇧9 |
@@ -185,7 +196,7 @@ inkmark/
     │   └── themes/          # tokens/design-tokens.css（Token 唯一真源）+ index.css（唯一样式入口）
     │                        #   + app-shell.css / platform-darwin.css / editor-wysiwyg.css
     │                        #   + theme.js（主题解析）/ prefs.js（偏好唯一真源）
-    ├── tests/           # node:test 测试网（274 条测试 / 57 个 suite，零第三方依赖），需 Node ≥22
+    ├── tests/           # node:test 测试网（368 条测试 / 82 个 suite，零第三方依赖），需 Node ≥22
     └── wailsjs/         # Wails 自动生成的 IPC 绑定（勿手改）
 ```
 
@@ -219,7 +230,7 @@ npm install
 
 npm run dev      # 本地开发服务器
 npm run build    # 生产构建 → frontend/dist
-npm test         # 测试网（274 条测试，零第三方依赖），【需 Node ≥22】
+npm test         # 测试网（368 条测试，零第三方依赖），【需 Node ≥22】
 ```
 
 > - `npm test` 用的是 Node **内置** `node:test`（无第三方测试依赖），因此**必须 Node ≥22**；低版本会报 `node --test` 不可用。
@@ -230,7 +241,7 @@ npm test         # 测试网（274 条测试，零第三方依赖），【需 No
 ### 门禁脚本（与 CI 同口径）
 
 ```bash
-cd frontend && npm test                                    # 测试网，期望 274/274
+cd frontend && npm test                                    # 测试网，期望 368/368
 node scripts/verify/verify-readme-claims.mjs               # README 数字声明 ↔ 实测（自己会再跑一遍测试网；退出码 1=漂移 / 2=测量失效）
 node scripts/verify/verify-shortcuts.mjs                   # 快捷键三方对齐（README ↔ 速查表 ↔ COMMANDS）
 node scripts/verify/scan-i18n-residue.mjs                  # i18n 文案残留

@@ -25,6 +25,9 @@ import { codeLinePlugin, codeCopyPlugin } from './codeBlock.js'
 import { tableRenderField, tableScanKick } from './tableRender'
 import { slashCommandExtension } from './slashCommand'
 import { imageDropHandlers } from './imageDrop'
+import { smartInputExtension } from './smartInput.js'
+import { listIndentExtension } from './listIndentKeymap.js'
+import { getPrefs } from '../themes/prefs.js'
 
 // 围栏代码块内按 Enter 跳出（真机反馈：光标在代码块内按 Enter 跳不出围栏）。
 // 规则：光标位于「紧邻结束围栏的空行」时，在结束围栏之后另起一行并把光标移过去。
@@ -231,6 +234,11 @@ export function createEditor(parent, { doc = '', onDocChange, onScroll, onUpdate
       // searchKeymap：⌘F 查找面板（darwin 无菜单入口，按键直达 WebView）+ Esc 关闭。
       // 行操作键位沿用 VS Code 惯例（⌥↑↓ 移动行、⇧⌥↑↓ 复制行、⌘⇧K 删除行）——
       // darwin 端「编辑」菜单是硬编码 Role，这些能力只能靠键位 + 快捷键速查暴露。
+      // 列表智能缩进（Tab / Shift+Tab）。
+      // 【顺序契约】必须排在下面的 keymap.of 之前：CM 的 keymap 按扩展**声明
+      // 顺序**决定优先级（越靠前越先拿到按键），而 indentWithTab 就在下面那个
+      // keymap 里 —— 放到它后面，Tab 永远轮不到列表缩进（静默失效）。
+      listIndentExtension(),
       keymap.of([
         { key: 'Enter', run: exitCodeBlockOnEnter },
         { key: 'Mod-Alt-f', run: openSearchPanel },
@@ -244,6 +252,9 @@ export function createEditor(parent, { doc = '', onDocChange, onScroll, onUpdate
         ...searchKeymap,
         indentWithTab,
       ]),
+      // 智能符号补全（成对闭合 / 越过 / 成对退格）+ 可选智能标点。
+      // inputHandler 每次按键现读 prefs，设置面板切换开关后立即生效。
+      smartInputExtension(() => getPrefs()),
       // 图片粘贴 / 拖拽：仅在拿到图片（数据 / file URL）且注册了对应回调时拦截，其余放行。
       // 通道③ 可选：未注册时行为与加通道③之前完全一致。
       EditorView.domEventHandlers(imageDropHandlers(onImageFile, onClipboardImage)),

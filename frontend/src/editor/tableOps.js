@@ -69,7 +69,76 @@ export function removeRow(model, idx) {
   return model
 }
 
+/**
+ * 把第 from 列移动到第 to 列（拖拽排序列的落点）。
+ *
+ * 【为什么是「移动」不是「交换」】拖拽的直觉是插入：把 a 拖到 c 右侧，
+ * 结果应是 b c a（a 插到目标位置），而不是 a 与 c 互换。交换会让「拖一下
+ * 顺序全乱」，是这个交互最容易踩的语义坑。
+ *
+ * to 的下标语义：**目标位置**（移动后该列的最终下标）。内部先把元素抽出
+ * 再插入，故 to > from 时不需要手动 -1（抽出后目标位自然前移一位）。
+ */
+export function moveColumn(model, from, to) {
+  const n = model.header.length
+  const a = Math.max(0, Math.min(from, n - 1))
+  const b = Math.max(0, Math.min(to, n - 1))
+  if (a === b) return model
+  const moveIn = (arr) => {
+    const [v] = arr.splice(a, 1)
+    arr.splice(b, 0, v)
+  }
+  for (const cells of [model.header, ...model.rows]) moveIn(cells)
+  moveIn(model.aligns)
+  rebuildDelim(model)
+  return model
+}
+
+/** 把第 from 行移动到第 to 行（表体 0 基；表头不参与，列序不受影响）。 */
+export function moveRow(model, from, to) {
+  const n = model.rows.length
+  const a = Math.max(0, Math.min(from, n - 1))
+  const b = Math.max(0, Math.min(to, n - 1))
+  if (a === b) return model
+  const [v] = model.rows.splice(a, 1)
+  model.rows.splice(b, 0, v)
+  return model
+}
+
+// ---------------- 对齐 ----------------
+
+/** 对齐枚举的循环顺序：左 → 中 → 右 → 左（按钮单击一轮换一遍） */
+export const ALIGN_CYCLE = ['left', 'center', 'right']
+
+/** 下一个对齐档（未知值一律回到 left，避免历史脏数据让按钮卡死） */
+export function nextAlign(align) {
+  const i = ALIGN_CYCLE.indexOf(align)
+  return ALIGN_CYCLE[(i + 1) % ALIGN_CYCLE.length]
+}
+
+/**
+ * 设置第 idx 列的对齐，并重建分隔行。
+ *
+ * 【为什么改完必须重建 delimRaw】GFM 的对齐信息**只存在于分隔行**（`:---:`），
+ * 只改内存里的 aligns 而不改分隔行，写回文档后对齐会立刻丢失 —— 用户看到的
+ * 是「点了按钮，表头变了一下，一切回去又没了」。
+ */
+export function setColumnAlign(model, idx, align) {
+  const n = model.header.length
+  const at = Math.max(0, Math.min(idx, n - 1))
+  model.aligns[at] = ALIGN_CYCLE.includes(align) ? align : 'left'
+  rebuildDelim(model)
+  return model
+}
+
 // ---------------- 操作条 DOM ----------------
+
+/** 对齐按钮的三种形态（图标用字符而非 SVG：与既有 +/- 按钮同一套视觉策略） */
+const ALIGN_BUTTONS = [
+  { align: 'left', glyph: '\u2261', labelKey: 'table.alignLeft' },
+  { align: 'center', glyph: '\u2261', labelKey: 'table.alignCenter' },
+  { align: 'right', glyph: '\u2261', labelKey: 'table.alignRight' },
+]
 
 /** 操作条上的一组按钮：action 名 → [显示字符, i18n key, 是否破坏性] */
 const ACTIONS = [
@@ -98,6 +167,24 @@ export function createActionBar(onAction, signal) {
   // 用户可见文案（屏幕阅读器会读），必须走 i18n
   bar.setAttribute('aria-label', t('table.actions'))
 
+  // 对齐段：三档按钮，当前列的对齐档由调用方经 setAlignIndicator 高亮
+  ALIGN_BUTTONS.forEach(({ align, glyph, labelKey }) => {
+    const btn = document.createElement('button')
+    btn.type = 'button'
+    btn.className = 'cm-md-table-btn cm-md-align-btn'
+    btn.dataset.align = align
+    btn.textContent = glyph
+    btn.title = t(labelKey)
+    btn.setAttribute('aria-label', t(labelKey))
+    // 三个按钮用同一个 glyph 时视觉不可分辨 —— 由 CSS 按 data-align 换字重/对齐
+    bar.appendChild(btn)
+  })
+
+  const sep0 = document.createElement('span')
+  sep0.className = 'cm-md-table-sep'
+  sep0.setAttribute('aria-hidden', 'true')
+  bar.appendChild(sep0)
+
   ACTIONS.forEach(({ action, glyph, labelKey }, i) => {
     // 行操作与列操作之间插一条分隔线（纯装饰，对读屏隐藏）
     if (i === 2) {
@@ -123,10 +210,23 @@ export function createActionBar(onAction, signal) {
       if (!btn) return
       e.preventDefault() // 保住单元格焦点（见上）
       e.stopPropagation() // 别让编辑器把这次按下当成点击文档
-      onAction(btn.dataset.action)
+      if (btn.dataset.align) onAction(`align:${btn.dataset.align}`)
+      else onAction(btn.dataset.action)
     },
     { signal },
   )
 
   return bar
+}
+
+/**
+ * 刷新对齐按钮的高亮：当前列的 align（left/center/right）落在哪个档，
+ * 哪个按钮就带 aria-pressed。视觉由 CSS 的 [aria-pressed='true'] 接管。
+ */
+export function setAlignIndicator(bar, align) {
+  if (!bar) return
+  for (const btn of bar.querySelectorAll('.cm-md-align-btn')) {
+    const on = btn.dataset.align === align
+    btn.setAttribute('aria-pressed', on ? 'true' : 'false')
+  }
 }

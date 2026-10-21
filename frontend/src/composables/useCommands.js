@@ -25,6 +25,7 @@ import {
   toggleCodeBlock, insertTable, insertHr, insertToc, clearFormatting,
 } from '../editor/commands.js'
 import { pasteIntoView } from '../editor/pasteCommand.js'
+import { promoteHeading, demoteHeading } from '../editor/headingLevel.js'
 import { SYNTAX_DOC } from '../editor/sampleDocs.js'
 import {
   commandsByGroup, fmtAccel, onCommand, installGlobalShortcuts,
@@ -242,6 +243,12 @@ export function useCommands(deps) {
       'format.h1': () => execCmd(toggleHeading(1)),
       'format.h2': () => execCmd(toggleHeading(2)),
       'format.h3': () => execCmd(toggleHeading(3)),
+      'format.h4': () => execCmd(toggleHeading(4)),
+      'format.h5': () => execCmd(toggleHeading(5)),
+      'format.h6': () => execCmd(toggleHeading(6)),
+      'format.body': () => execCmd(toggleHeading(0)),
+      'format.headingUp': () => execCmd(promoteHeading),
+      'format.headingDown': () => execCmd(demoteHeading),
       'format.bulletList': () => execCmd(toggleBulletList),
       'format.orderedList': () => execCmd(toggleOrderedList),
       'format.todoList': () => execCmd(toggleTaskList),

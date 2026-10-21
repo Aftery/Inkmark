@@ -79,6 +79,19 @@ const SNAPSHOT_OPTIONS = [
   { value: 600000, key: 'settings.snapshot.minutes', params: { n: 10 } },
   { value: 1800000, key: 'settings.snapshot.minutes', params: { n: 30 } },
 ]
+// 智能输入开关：取值 'on'/'off'，与 prefs.js 的白名单一致。
+// 用字符串而不是布尔：SegmentedControl 的 modelValue 类型是 String|Number。
+const SMART_PAIR_OPTIONS = [
+  { value: 'on', key: 'settings.smartPair.on' },
+  { value: 'off', key: 'settings.smartPair.off' },
+]
+// 三档：关闭 / 弯引号 / 直角引号。引号形态是排版偏好，不能只给一个「开」
+// 然后替用户决定用哪种（用户明确点名了直角引号 「」）。
+const SMART_PUNCT_OPTIONS = [
+  { value: 'off', key: 'settings.smartPunct.off' },
+  { value: 'curly', key: 'settings.smartPunct.curly' },
+  { value: 'corner', key: 'settings.smartPunct.corner' },
+]
 
 /** 把 { value, key, params? } 选项表补上译好的 label（无 key 的项自带 label，如字号数字） */
 function withLabels(options) {
@@ -105,6 +118,10 @@ const ROWS = computed(() => ({
   editor: [
     { key: 'autosave', labelKey: 'settings.autosave.label', descKey: 'settings.autosave.desc', options: withLabels(AUTOSAVE_OPTIONS), get: () => prefs.value.autosave, set: (v) => setPref('autosave', v) },
     { key: 'snapshot', labelKey: 'settings.snapshot.label', descKey: 'settings.snapshot.desc', options: withLabels(SNAPSHOT_OPTIONS), get: () => prefs.value.snapshot, set: (v) => setPref('snapshot', v) },
+    // 智能输入两项：补全与标点各自独立 —— 它们是两种不同强度的干预，
+    // 绑成一个开关会让「想补括号但不想被改标点」的用户无路可走。
+    { key: 'smartPair', labelKey: 'settings.smartPair.label', descKey: 'settings.smartPair.desc', options: withLabels(SMART_PAIR_OPTIONS), get: () => prefs.value.smartPair, set: (v) => setPref('smartPair', v) },
+    { key: 'smartPunct', labelKey: 'settings.smartPunct.label', descKey: 'settings.smartPunct.desc', options: withLabels(SMART_PUNCT_OPTIONS), get: () => prefs.value.smartPunct, set: (v) => setPref('smartPunct', v) },
   ],
 }))
 const rows = computed(() =>

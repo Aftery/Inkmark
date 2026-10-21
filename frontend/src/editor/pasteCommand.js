@@ -17,7 +17,54 @@
 import { t } from '../i18n/index.js'
 
 /**
+ * 粘贴内容是否「像单个 URL」：是则可以把已有选区变成链接。
+ *
+ * 口径与 @codemirror/lang-markdown 的 pasteURLAsLink 一致（协议白名单 + 无空白），
+ * 但**不能复用它**：那条实现挂在 DOM 的 paste 事件上，而 ⌘V 已被全局分发
+ * preventDefault（第十四轮根因，见文件头）—— 它在本仓永远不会触发。
+ */
+const URL_RE = /^(?:https?:\/\/|mailto:|xmpp:|www\.)\S+$/i
+
+/** 纯文本是否是单个 URL（导出供测试） */
+export function looksLikeUrl(text) {
+  if (typeof text !== 'string') return false
+  const s = text.trim()
+  return s.length > 0 && !s.includes('\n') && URL_RE.test(s)
+}
+
+/**
+ * 把「选中文字 + 粘贴 URL」变成 `[选中文字](url)`。
+ *
+ * @returns {{snippet: string}|null} 需要转换时返回插入片段，否则 null
+ */
+export function linkifySelection(url, selected) {
+  if (!looksLikeUrl(url) || !selected) return null
+  // 选区本身已经是链接/图片时不叠加（否则粘出 `[[](u)](u)` 这种产物）
+  if (/^\s*!?\[[^\]]*\]\([^)]*\)\s*$/.test(selected)) return null
+  // 跨行选区不转链接：`[...]` 里含换行不会被渲染成链接，产物只会是源码噪音
+  if (selected.includes('\n')) return null
+  const target = /^www\./i.test(url.trim()) ? `https://${url.trim()}` : url.trim()
+  return { snippet: `[${selected}](${target})` }
+}
+
+/**
+ * 读取一段文档文本（同步快照用）。
+ *
+ * 【为什么两条路都留着】真实 EditorState 有 sliceDoc()，而测试/外部注入的同形
+ * stub 往往只给 doc.sliceString()（本仓 paste-image.test.mjs 即如此）。这里按
+ * 「能力探测」读，而不是强制调用方补方法 —— 少一个「测试桩与真实现接口不一致」
+ * 的隐式契约，同时保住「await 之前取快照」这条真正重要的顺序约定。
+ */
+function readSlice(state, from, to) {
+  if (typeof state.sliceDoc === 'function') return state.sliceDoc(from, to)
+  const doc = state.doc
+  if (doc && typeof doc.sliceString === 'function') return doc.sliceString(from, to)
+  return ''
+}
+
+/**
  * 把系统剪贴板的内容插入 view：有图片插 `![](assets/…)`，否则插文本。
+ * 文本路径上若「有选区 + 内容是 URL」则转成 Markdown 链接（见 linkifySelection）。
  *
  * @param {object} view CodeMirror EditorView（测试可注入同形 stub）
  * @param {Object} io
@@ -30,6 +77,8 @@ import { t } from '../i18n/index.js'
  */
 export async function pasteIntoView(view, { getClipboardImage, getText, notify }) {
   const { from, to } = view.state.selection.main // 快照：异步期间选区可能变
+  // 选区文字也在 await 前取（同一快照语义）：链接化要用它当链接文本
+  const selected = from === to ? '' : readSlice(view.state, from, to)
   try {
     const url = await getClipboardImage()
     if (url) {
@@ -56,9 +105,12 @@ export async function pasteIntoView(view, { getClipboardImage, getText, notify }
     notify?.(t('toast.clipboardEmpty'))
     return false
   }
+  // 选中文字 + 粘贴 URL → [选中文字](url)；选区为空时保持原样直接插入文本
+  const link = linkifySelection(text, selected)
+  const insert = link ? link.snippet : text
   view.dispatch({
-    changes: { from, to, insert: text },
-    selection: { anchor: from + text.length },
+    changes: { from, to, insert },
+    selection: { anchor: from + insert.length },
   })
   view.focus()
   return true

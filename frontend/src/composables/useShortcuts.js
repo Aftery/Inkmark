@@ -78,9 +78,20 @@ export const COMMANDS = [
   { id: 'format.strike', group: 'format', labelKey: 'menu.strike', accel: '⌘⇧X', descKey: null },
   { id: 'format.inlineCode', group: 'format', labelKey: 'menu.inlineCode', accel: '⌘`', descKey: null },
   { id: 'format.link', group: 'format', labelKey: 'menu.link', accel: '⌘K', descKey: 'shortcuts.insertLink' },
-  { id: 'format.h1', group: 'format', labelKey: 'menu.h1', accel: '⌘⌥1', descKey: null },
-  { id: 'format.h2', group: 'format', labelKey: 'menu.h2', accel: '⌘⌥2', descKey: null },
-  { id: 'format.h3', group: 'format', labelKey: 'menu.h3', accel: '⌘⌥3', descKey: null },
+  // 标题定级：⌘1~⌘6（Typora 惯例）。原 ⌘⌥1~⌘⌥3 迁到 ⌘1~⌘3 并扩到 6 级 ——
+  // 用户明确要求「Cmd/Ctrl + 1/2/3… 快速切换标题层级」；⌘1~⌘3 原本归视图三态，
+  // 而三态随阅读态于 2026-10-14 整体移除，键位自那以后一直空着，无冲突。
+  { id: 'format.h1', group: 'format', labelKey: 'menu.h1', accel: '⌘1', descKey: 'shortcuts.heading' },
+  { id: 'format.h2', group: 'format', labelKey: 'menu.h2', accel: '⌘2', descKey: null },
+  { id: 'format.h3', group: 'format', labelKey: 'menu.h3', accel: '⌘3', descKey: null },
+  { id: 'format.h4', group: 'format', labelKey: 'menu.h4', accel: '⌘4', descKey: null },
+  { id: 'format.h5', group: 'format', labelKey: 'menu.h5', accel: '⌘5', descKey: null },
+  { id: 'format.h6', group: 'format', labelKey: 'menu.h6', accel: '⌘6', descKey: null },
+  // 正文（去标题）：⌘⌥0 —— 不能是 ⌘0，那是「重置缩放」的既有契约
+  { id: 'format.body', group: 'format', labelKey: 'menu.paragraph', accel: '⌘⌥0', descKey: null },
+  // 标题逐级升降：⌘⌥↑ / ⌘⌥↓（⌘= / ⌘- 是视图缩放的既有契约，两者正交）
+  { id: 'format.headingUp', group: 'format', labelKey: 'menu.headingUp', accel: '⌘⌥↑', descKey: 'shortcuts.headingLevel' },
+  { id: 'format.headingDown', group: 'format', labelKey: 'menu.headingDown', accel: '⌘⌥↓', descKey: null },
   { id: 'format.bulletList', group: 'format', labelKey: 'menu.bulletList', accel: '⌘⇧8', descKey: null },
   { id: 'format.orderedList', group: 'format', labelKey: 'menu.orderedList', accel: '⌘⇧7', descKey: null },
   { id: 'format.todoList', group: 'format', labelKey: 'menu.todoList', accel: '⌘⇧9', descKey: null },
