@@ -139,6 +139,7 @@ export default {
   'about.tagline': '一个安静的跨平台 Markdown 写作工具。',
   'about.version': '版本 {version}',
   'about.checkUpdate': '检查更新',
+  'about.checking': '检查中…',
   'about.repo': '打开仓库',
 
   // ---- 设置面板 ----
@@ -206,6 +207,11 @@ export default {
   'toast.newVersion': '发现新版本 {version}，正在打开下载页…',
   'toast.alreadyLatest': '已是最新版本（{version}）',
   'toast.updateUnavailable': '无法检查更新',
+  'toast.updateNoRelease': '无法检查更新：暂无已发布的版本（仓库还没打 Release）',
+  'toast.updateNetwork': '无法检查更新：网络连接失败，请检查网络后重试',
+  'toast.updateServer': '无法检查更新：服务暂时不可用，请稍后重试',
+  'toast.updateParse': '无法检查更新：返回内容无法解析',
+  'toast.updateBadVersion': '无法检查更新：版本号格式无法比较',
   'toast.syntaxLoaded': '已载入语法示例（⌘S 可另存）',
   'toast.newFile': '已新建文件，⌘S 保存到磁盘',
   'toast.saveBeforeRename': '请先保存文档（⌘S）再重命名',

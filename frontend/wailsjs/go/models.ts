@@ -43,6 +43,7 @@ export namespace main {
 	    hasUpdate: boolean;
 	    url: string;
 	    note: string;
+	    reason: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new UpdateInfo(source);
@@ -56,6 +57,7 @@ export namespace main {
 	        this.hasUpdate = source["hasUpdate"];
 	        this.url = source["url"];
 	        this.note = source["note"];
+	        this.reason = source["reason"];
 	    }
 	}
 

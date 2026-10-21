@@ -123,6 +123,7 @@ export default {
   'about.tagline': 'A quiet cross-platform Markdown writing tool.',
   'about.version': 'Version {version}',
   'about.checkUpdate': 'Check for updates',
+  'about.checking': 'Checking…',
   'about.repo': 'Open repository',
 
   // ---- Settings panel ----
@@ -190,6 +191,11 @@ export default {
   'toast.newVersion': 'Version {version} available — opening the download page…',
   'toast.alreadyLatest': 'Already up to date ({version})',
   'toast.updateUnavailable': 'Could not check for updates',
+  'toast.updateNoRelease': 'No published release yet — nothing to compare against',
+  'toast.updateNetwork': 'Network error — check your connection and try again',
+  'toast.updateServer': 'The update service is unavailable right now — try again later',
+  'toast.updateParse': 'The update response could not be parsed',
+  'toast.updateBadVersion': 'Version numbers are not comparable',
   'toast.syntaxLoaded': 'Syntax sample loaded (⌘S to save a copy)',
   'toast.newFile': 'New file created — ⌘S to save it to disk',
   'toast.saveBeforeRename': 'Save the document (⌘S) before renaming',

@@ -522,6 +522,14 @@ type UpdateInfo struct {
 	HasUpdate bool   `json:"hasUpdate"`
 	URL       string `json:"url"`
 	Note      string `json:"note"`
+	// Reason 是**稳定的失败原因代码**，供前端选本地化文案。
+	//
+	// 【为什么不能只给 Note】Note 是中文硬编码，界面直接显示它会让 English /
+	// 日本語 用户在这一条上看到中文（与 SPEC-i18n-v1 的「用户可见文案一律走
+	// t()」冲突）。故界面文案按 Reason 在前端字典里取，Note 降级为
+	// 「未知 Reason 时的兜底」与日志线索。
+	// 取值：no_release | network | server | parse | version | ""（成功）
+	Reason string `json:"reason"`
 }
 
 // semver 只保留比较所需的 major.minor.patch（预发布/构建后缀在解析时丢弃）。
@@ -580,6 +588,7 @@ func (a *App) CheckUpdate() UpdateInfo {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, latestReleaseAPI, nil)
 	if err != nil {
 		info.Note = "无法检查更新：请求构造失败"
+		info.Reason = "parse"
 		return info
 	}
 	// GitHub API 要求带 User-Agent，缺失会被 403。
@@ -589,6 +598,7 @@ func (a *App) CheckUpdate() UpdateInfo {
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		info.Note = "无法检查更新：网络连接失败"
+		info.Reason = "network"
 		return info
 	}
 	defer resp.Body.Close()
@@ -596,9 +606,11 @@ func (a *App) CheckUpdate() UpdateInfo {
 	switch {
 	case resp.StatusCode == http.StatusNotFound:
 		info.Note = "无法检查更新：暂无已发布的版本"
+		info.Reason = "no_release"
 		return info
 	case resp.StatusCode != http.StatusOK:
 		info.Note = fmt.Sprintf("无法检查更新：服务返回 %d", resp.StatusCode)
+		info.Reason = "server"
 		return info
 	}
 
@@ -609,11 +621,13 @@ func (a *App) CheckUpdate() UpdateInfo {
 	// 限长读取，避免异常响应体撑爆内存。
 	if err := json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&release); err != nil {
 		info.Note = "无法检查更新：返回内容无法解析"
+		info.Reason = "parse"
 		return info
 	}
 	latest := strings.TrimSpace(release.TagName)
 	if latest == "" {
 		info.Note = "无法检查更新：发布信息缺少版本号"
+		info.Reason = "parse"
 		return info
 	}
 	if release.HTMLURL != "" {
@@ -625,6 +639,7 @@ func (a *App) CheckUpdate() UpdateInfo {
 	lat, latOK := parseSemver(latest)
 	if !curOK || !latOK {
 		info.Note = "无法检查更新：版本号格式无法比较"
+		info.Reason = "version"
 		return info
 	}
 

@@ -124,6 +124,7 @@ export default {
   'about.tagline': '静かに書けるクロスプラットフォームの Markdown 執筆ツール。',
   'about.version': 'バージョン {version}',
   'about.checkUpdate': '更新を確認',
+  'about.checking': '確認中…',
   'about.repo': 'リポジトリを開く',
 
   // ---- 設定パネル ----
@@ -191,6 +192,11 @@ export default {
   'toast.newVersion': 'バージョン {version} が利用できます。ダウンロードページを開きます…',
   'toast.alreadyLatest': 'すでに最新です（{version}）',
   'toast.updateUnavailable': '更新を確認できませんでした',
+  'toast.updateNoRelease': '公開済みのリリースがまだありません（比較対象なし）',
+  'toast.updateNetwork': 'ネットワークに接続できません。接続を確認して再試行してください',
+  'toast.updateServer': '更新サービスが一時的に利用できません。しばらくしてから再試行してください',
+  'toast.updateParse': '更新情報を解析できませんでした',
+  'toast.updateBadVersion': 'バージョン番号を比較できませんでした',
   'toast.syntaxLoaded': '記法のサンプルを読み込みました（⌘S で別保存）',
   'toast.newFile': '新しいファイルを作成しました（⌘S で保存）',
   'toast.saveBeforeRename': '名前を変更する前にドキュメントを保存してください（⌘S）',

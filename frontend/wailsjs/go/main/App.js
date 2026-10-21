@@ -70,6 +70,10 @@ export function SetDocDir(arg1) {
   return window['go']['main']['App']['SetDocDir'](arg1);
 }
 
+export function SetLocale(arg1) {
+  return window['go']['main']['App']['SetLocale'](arg1);
+}
+
 export function SnapshotDocKey(arg1) {
   return window['go']['main']['App']['SnapshotDocKey'](arg1);
 }
@@ -96,8 +100,4 @@ export function WatchDir(arg1) {
 
 export function WriteFile(arg1, arg2) {
   return window['go']['main']['App']['WriteFile'](arg1, arg2);
-}
-
-export function SetLocale(arg1) {
-  return window['go']['main']['App']['SetLocale'](arg1);
 }

@@ -37,6 +37,8 @@ export function SetDirty(arg1:boolean):Promise<void>;
 
 export function SetDocDir(arg1:string):Promise<void>;
 
+export function SetLocale(arg1:string):Promise<void>;
+
 export function SnapshotDocKey(arg1:string):Promise<string>;
 
 export function SnapshotList(arg1:string):Promise<Array<main.SnapshotMeta>>;
@@ -50,4 +52,3 @@ export function Version():Promise<string>;
 export function WatchDir(arg1:string):Promise<void>;
 
 export function WriteFile(arg1:string,arg2:string):Promise<void>;
-export function SetLocale(arg1:string):Promise<void>;
