@@ -194,12 +194,22 @@
    伪元素 —— **不进文档、也不进 DOM 文本**（塞进文本会被复制/编辑带出去）。
    为什么不用 CSS counter：CM6 的行装饰不提供块级容器，counter 无法「按代码块
    重置」，第二个块的行号会接着第一个累加，行号就此失去定位意义。 */
-.cm-md-codeline {
+/* 【选择器必须是双类 —— 这里踩过一次「注释说谎」】
+   CodeMirror 的 EditorView.theme 把 '.cm-line' 渲染成 **后代**选择器
+   `.ͼ5 .cm-line`（buildTheme 用 `main + " " + sel` 拼接），特异性 = (0,2,0)。
+   原先这里写单类 `.cm-md-codeline` = (0,1,0)，**输给了** theme 的
+   `padding: 0 var(--space-6)` —— 于是 padding-left 恒为 24px，而
+   `.cm-md-codeline::before` 的行号绝对定位就压在这 24px 里，和代码文字
+   **重叠**（真机表现为 `co1nst a = 1`）。
+   写成 `.cm-line.cm-md-codeline`（同元素双类）=(0,2,0)，与 theme 打平；
+   同特异性下按来源顺序决胜，而 style-mod 把 style 标签插在
+   `head.firstChild`（即我们打包后的 CSS 之前），故本规则胜出。
+   注意：别把它改回单类 —— 单类一定输，重叠必然复现。 */
+.cm-line.cm-md-codeline {
   position: relative;
   /* 给行号腾出左侧空间：内容整体右移，行号绝对定位在留白里。
-     不用 !important —— .cm-line 的基础 padding 来自 createEditor 的
-     EditorView.theme，本项目 CSS 经 Vite 打包后顺序稳定且选择器更具体
-     （.cm-line.cm-md-codeline 双类 > 单类），足以胜出。 */
+     calc(24px + 2.2em) 在 15px 正文下 ≈ 57px，恰好容下 left:24px + width:1.6em
+     的行号且留一丝缝。 */
   padding-left: calc(var(--space-6) + 2.2em);
 }
 .cm-md-codeline::before {
@@ -217,7 +227,9 @@
 }
 
 /* ---- 代码块一键复制按钮（首行行尾 widget）----
-   常驻但低对比，悬停代码块时提亮：写作时不打扰，需要时一眼能找到。 */
+   常驻可见但低对比（muted），悬停代码块时提亮为可读对比度：写作时不打扰，
+   但用户能一眼找到入口 —— 之前是 opacity:0 仅靠 hover 才出现，在触控板 /
+   无显式悬停的设备上等同于「没有复制功能」（本仓最恨的「看不见的能力」）。 */
 .cm-md-copy {
   position: absolute;
   top: 2px;
@@ -231,7 +243,7 @@
   font-size: var(--text-xs);
   line-height: 1.6;
   cursor: pointer;
-  opacity: 0;
+  opacity: 0.55;
   transition: opacity var(--motion-fast) var(--ease-standard),
               color var(--motion-fast) var(--ease-standard),
               background-color var(--motion-fast) var(--ease-standard);

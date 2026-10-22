@@ -209,27 +209,140 @@ describe('模板传参 · 顶层 ref 解包', () => {
 })
 
 // ===========================================================================
-// 4) 暗色 chrome：毛玻璃层不透明度有下限
+// 4) 暗色 chrome：底色必须由主题决定，不得透出桌面壁纸
 // ===========================================================================
-describe('macOS 毛玻璃 · 暗色可读性', () => {
+describe('macOS 毛玻璃 · 暗色一致性', () => {
   const css = read('themes', 'platform-darwin.css')
 
-  test('侧栏 / 标题栏 / 状态栏底色不透明度不得低于 88%', () => {
-    // 真机截图实测：78% 时暗色主题下 chrome 透出桌面壁纸，整片被冲淡成
-    // 浅灰，表现为「暗色模式下大纲颜色没变」（正文深色、侧栏浅色）。
-    const m = css.match(/\.main \.sidebar\s*\{[^}]*?(\d+)%\s*,?\s*transparent/s)
-    assert.ok(m, '未找到侧栏的 color-mix 规则')
+  test('侧栏 / 标题栏 / 状态栏必须是主题实色（不透明，不透壁纸）', () => {
+    // 真机截图实测：chrome 层半透明（曾用 92% / 55%）在暗色主题下会透出桌面
+    // 壁纸 —— 壁纸若是浅色，整片 chrome 被冲淡成浅灰，而正文是深色，同一屏
+    // 两种明暗，表现为用户报告的「窗口颜色不一致」。故 chrome 层必须回到
+    // 主题实色（--surface / --bg，alpha 100%），材质感只留给 .app 正文面。
+    const targets = ['.main .sidebar', '.app > .statusbar', '.app > .titlebar']
+    for (const sel of targets) {
+      // 取出该选择器对应的 { ... } 规则块（非贪婪，截止到第一个 }）
+      const re = new RegExp(escapeSel(sel).replace(/\\s\+/g, '\\s*') + '\\s*\\{([^}]*)\\}')
+      const block = css.match(re)
+      assert.ok(block, `未找到 ${sel} 的规则块`)
+      const body = block[1]
+      // 不得再出现「color-mix(... transparent)」——那是透壁纸的半透明写法
+      assert.ok(
+        !/color-mix\([^)]*transparent\)/.test(body),
+        `${sel} 仍含 color-mix(... transparent) —— 暗色下会透出壁纸导致颜色不一致`,
+      )
+      // 必须用主题实色变量
+      assert.ok(
+        /var\(--(?:surface|bg)\)/.test(body),
+        `${sel} 未使用主题实色变量（--surface / --bg）`,
+      )
+    }
+  })
+
+  test('.app 正文面保留材质感（可半透明）', () => {
+    const m = css.match(/\.app\s*\{[^}]*?(\d+)%\s*,?\s*transparent/s)
+    assert.ok(m, '未找到 .app 的 color-mix 规则（正文面应保留一丝材质感）')
     const pct = Number(m[1])
-    assert.ok(
-      pct >= 88,
-      `侧栏底色不透明度 ${pct}% 过低 —— 暗色主题下会透出桌面壁纸被冲淡为浅色（真机实测 78% 即出问题）`,
+    assert.ok(pct >= 90, `.app 底色不透明度 ${pct}% 过低（正文写作面须由主题决定明暗）`)
+  })
+})
+
+// 把「.main .sidebar」「.app > .statusbar」这类选择器转成可匹配的正则片段
+// （转义 . > 等元字符，空白归一为 \s+）
+function escapeSel(sel) {
+  return sel.replace(/[.[>]/g, (c) => '\\' + c).replace(/\s+/g, '\\s+')
+}
+// ===========================================================================
+// 5) 代码块行号：选择器特异性必须压过 CodeMirror theme 的基础 padding
+// ===========================================================================
+/**
+ * 【这条守的是一个真机可见的缺陷，且属于「注释说谎」型】
+ *
+ * CodeMirror 的 EditorView.theme 把 '.cm-line' 渲染成**后代**选择器
+ * `.ͼ5 .cm-line`（buildTheme 用 `main + " " + sel` 拼），特异性 (0,2,0)。
+ * `editor-wysiwyg.css` 里给代码块行号留白的规则原先是**单类**
+ * `.cm-md-codeline` = (0,1,0)，**输给了** theme 的 `padding: 0 var(--space-6)`：
+ * 实际 padding-left 恒为 24px，而行号伪元素绝对定位在 left:24px、宽 1.6em，
+ * 正好压在这 24px 里 —— 行号数字与代码文字**重叠**，真机显示成
+ * `co1nst a = 1` 这种鬼样子。
+ *
+ * 【为什么这条必须机检】它在 CSS 里完全合法（没有语法错误、没有 warning），
+ * 构建通过、测试通过，只有肉眼盯着代码块才看得见。而且当时那段注释还写着
+ * 「双类 > 单类，足以胜出」—— 注释描述的意图是对的，代码却没照做。
+ * 正则断言是唯一能在 CI 里拦住「改回单类」的手段。
+ */
+describe('代码块行号 · 选择器特异性', () => {
+  const css = read('themes', 'editor-wysiwyg.css')
+
+  /** 剥掉 CSS 注释（否则注释里的中文会污染选择器匹配，见下） */
+  function stripCssComments(cssText) {
+    return cssText.replace(/\/\*[\s\S]*?\*\//g, '')
+  }
+
+  /**
+   * 取出包含指定声明的规则块（返回 { selector, body } 列表）。
+   *
+   * [注意] 必须先剥注释：本文件在规则前有整段中文说明，注释里也出现了
+   * `.cm-md-codeline` 字样；不剥的话 `([^{}]+)\{` 会把注释吞进 selector，
+   * 于是「选择器是不是单类」永远判不出（变异体杀不掉 → 假绿）。
+   */
+  function rulesWithDeclaration(cssText, prop) {
+    const out = []
+    const clean = stripCssComments(cssText)
+    const re = /([^{}]+)\{([^{}]*)\}/g
+    for (const m of clean.matchAll(re)) {
+      const selector = m[1].trim()
+      const body = m[2]
+      if (new RegExp(`(^|[;{\\s])${prop}\\s*:`).test(body)) out.push({ selector, body })
+    }
+    return out
+  }
+
+  test('留白规则必须是双类 .cm-line.cm-md-codeline（单类必输给 theme 的 padding）', () => {
+    const rules = rulesWithDeclaration(css, 'padding-left')
+      .filter((r) => r.selector.includes('cm-md-codeline'))
+    assert.ok(rules.length > 0, '未找到给代码块行号留白的 padding-left 规则（判据可能失效）')
+
+    for (const r of rules) {
+      assert.ok(
+        /\.cm-line\.cm-md-codeline/.test(r.selector),
+        `留白规则的选择器是「${r.selector}」—— 必须是同元素双类 .cm-line.cm-md-codeline。\n` +
+          '单类 (0,1,0) 会输给 CodeMirror theme 生成的 `.ͼ5 .cm-line` (0,2,0)，' +
+          '导致 padding-left 恒为 24px、行号与代码文字重叠（真机表现为 co1nst a = 1）。',
+      )
+    }
+  })
+
+  test('不得出现单类 .cm-md-codeline 的 padding 规则（改回单类即回归）', () => {
+    // 单独成选择器（前面不是 .cm-line）的 padding-left 规则一律不允许
+    const bad = rulesWithDeclaration(css, 'padding-left').filter((r) => {
+      const first = r.selector.split(',')[0].trim()
+      return first === '.cm-md-codeline'
+    })
+    assert.deepEqual(
+      bad.map((r) => r.selector),
+      [],
+      '出现了单类 .cm-md-codeline 的 padding 规则 —— 特异性 (0,1,0) 不足，行号会与代码文字重叠',
     )
   })
 
-  test('.app 底色不透明度不得低于 90%', () => {
-    const m = css.match(/\.app\s*\{[^}]*?(\d+)%\s*,?\s*transparent/s)
-    assert.ok(m, '未找到 .app 的 color-mix 规则')
-    const pct = Number(m[1])
-    assert.ok(pct >= 90, `.app 底色不透明度 ${pct}% 过低（正文写作面须由主题决定明暗）`)
+  test('前提核实：CM theme 确实把 .cm-line 渲染成后代选择器 (0,2,0)', () => {
+    // 若哪天 CM 改了渲染方式（例如改成同元素双类），上面两条的结论要复核。
+    // 这里直接读 CM 源码里的 buildTheme，断言它用的是「前缀 + 空格 + 选择器」。
+    const cm = readFileSync(
+      join(dirname(fileURLToPath(import.meta.url)), '..', 'node_modules', '@codemirror', 'view', 'dist', 'index.js'),
+      'utf8',
+    )
+    assert.match(
+      cm,
+      /function buildTheme\(main, spec, scopes\)/,
+      '前提核实失败：找不到 buildTheme，CM 可能已重构 —— 请复核特异性断言是否仍成立',
+    )
+    assert.match(
+      cm,
+      /main \+ " " \+ sel/,
+      '前提核实失败：buildTheme 已不再用「前缀 + 空格 + 选择器」拼接 —— ' +
+        '若 CM 改成同元素双类，本组断言的结论需要重新评估',
+    )
   })
 })

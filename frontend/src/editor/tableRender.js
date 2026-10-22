@@ -53,9 +53,18 @@ export function splitCells(line) {
 /**
  * 解析表格源码 → { header, aligns, delimRaw, rows }；不合法返回 null。
  * delimRaw 原样保留分隔行（:---: 的写法不在回写时被改写）。
+ *
+ * 【换行符必须按「行」归一，不能只 split('\n')】CRLF 文档里按 '\n' 切完，
+ * 每行尾部都残留一个 '\r'：delimRaw 会变成 `"| --- |\r"`，回写时与
+ * serializeTable 的换行符拼成 `"\r\r\n"`（多一个控制字符混进文档）；
+ * 表头 / 单元格也会带上 '\r'。CM 默认不配置 lineSeparator，所以文档里
+ * 只有用户自己写的、或外部编辑器/Go 侧读进来的 CRLF 才会出现这种内容，
+ * 而它一旦被写回就把「表格行数与字符偏移」搞乱 —— 用户侧就是「输入会跑行」。
+ * 故统一剥掉行尾的 '\r'（splitCells 对每行 trim，这里只修 delimRaw 与切分口径）。
  */
 export function parseTable(text) {
-  const lines = text.split('\n')
+  // \r\n 与孤立 \r 都当行边界；结果行内不再含 \r
+  const lines = text.split(/\r\n|\r|\n/)
   if (lines.length < 2) return null
   const delim = splitCells(lines[1])
   if (!delim.length || !delim.every((c) => /^:?-+:?$/.test(c))) return null
@@ -65,19 +74,25 @@ export function parseTable(text) {
   return {
     header: splitCells(lines[0]),
     aligns,
-    delimRaw: lines[1],
+    // delimRaw 是「回写时原样保留」的载体，绝不能带行尾 \r（否则序列化时叠出 \r\r\n）
+    delimRaw: lines[1].replace(/\r$/, ''),
     rows: lines.slice(2).map(splitCells),
   }
 }
 
 const escCell = (s) => s.replace(/\|/g, '\\|')
 
-/** 模型 → 源码。行内标记原样透传；单元格内的 `|` 转义，杜绝列错位 */
-export function serializeTable(m) {
+/** 模型 → 源码。行内标记原样透传；单元格内的 `|` 转义，杜绝列错位。
+ * @param {object} m 表格模型 {header, aligns, delimRaw, rows}
+ * @param {string} [lineBreak='\n'] 行分隔符。**必须**与文档当前主换行符一致：
+ *   文档是 CRLF 时若硬编码 '\n'，回写会把表格各行改成 LF，而原文档其余行仍是
+ *   CRLF —— 差异使 CM 重渲染时表格与相邻行错位，用户侧表现为「输着输着跑行」。
+ *   故 tableWidget 回写前从文档推断主换行符传入（见 tableWidget.js）。 */
+export function serializeTable(m, lineBreak = '\n') {
   const n = m.header.length
   const row = (cells) =>
     '| ' + Array.from({ length: n }, (_, i) => escCell(cells[i] ?? '')).join(' | ') + ' |'
-  return [row(m.header), m.delimRaw, ...m.rows.map(row)].join('\n')
+  return [row(m.header), m.delimRaw, ...m.rows.map(row)].join(lineBreak)
 }
 
 // ---------------- 语法树扫描 ----------------

@@ -215,3 +215,65 @@ describe('代码块 · 接线契约', () => {
     assert.match(src, /attributes: \{ 'data-line'/, '行号经装饰属性交给 CSS')
   })
 })
+
+// ---------------------------------------------------------------------------
+// 5. 剪贴板通道优先级（「代码块无法复制」回归）
+// ---------------------------------------------------------------------------
+/**
+ * 【用户报的原话】「代码块无法复制」。根因不是按钮没渲染，而是**通道选错了**：
+ * 本应用由 Wails 的 AssetServer 以 wails:// 加载，属于**非安全上下文** ——
+ * `navigator.clipboard` 在此要么 undefined、要么 writeText 直接 reject；
+ * execCommand('copy') 在 WKWebView 里也常静默返回 false。用户点了却有反应
+ * 没有，看着就是「功能不存在」。
+ *
+ * 正解是走 Go 侧 App.ClipboardSet（Wails runtime.ClipboardSetText），它不经
+ * web 安全上下文。这里钉三件事，都是「写错了不会报错」的形态：
+ *   ① Go 通道必须在最前（否则永远轮不到它）；
+ *   ② Go 通道必须被真的 await（漏 await → 复制是异步的，失败永远看不见）；
+ *   ③ 三级兜底一个都不能少（web API 在 https 预览下仍可能更合适；execCommand
+ *      是最后的救命通道）。
+ */
+describe('代码块复制 · 通道优先级', () => {
+  const src = read(join('editor', 'codeBlock.js'))
+
+  test('必须引入 Go 侧 ClipboardSet，且是顶层 import（不是函数内 require）', () => {
+    assert.match(
+      src,
+      /^import \{[^}]*\bClipboardSet\b[^}]*\} from '\.\.\/\.\.\/wailsjs\/go\/main\/App\.js'/m,
+      'codeBlock.js 必须在顶层 import Go 侧 ClipboardSet（wails:// 下 web 剪贴板 API 不可用）',
+    )
+  })
+
+  test('Go 通道必须排在 navigator.clipboard 之前', () => {
+    // 只在**函数体内**比位置：上面的说明注释里也提到 navigator.clipboard，
+    // 整文件 indexOf 会命中注释、把断言打偏（本仓反复记录过「判据打错位置」）。
+    const body = src.slice(src.indexOf('export async function copyText'))
+    const iGo = body.indexOf('ClipboardSet(text)')
+    const iWeb = body.indexOf('navigator.clipboard')
+    assert.ok(iGo > -1, 'copyText 函数体内必须真的调用 ClipboardSet(text)')
+    assert.ok(iWeb > -1, 'web 兜底通道不得被删掉')
+    assert.ok(
+      iGo < iWeb,
+      `Go 通道必须在 web 通道之前（实测：wails:// 下 navigator.clipboard 不可用）。` +
+        `当前位置 Go=${iGo} / web=${iWeb}`,
+    )
+  })
+
+  test('Go 通道必须 await，且失败要落到下一级兜底（不得吞掉整条链）', () => {
+    // await ClipboardSet(...) —— 漏 await 会让失败变成 unhandled rejection，
+    // 用户界面上永远停在「没反应」，与本次缺陷的观感完全一样
+    assert.match(src, /await\s+ClipboardSet\(text\)/, '必须 await ClipboardSet（否则失败不可观测）')
+    // Go 通道和 web 通道各自都在 try 里（一级失败必须能落到下一级）
+    const goBlock = src.slice(src.indexOf('ClipboardSet(text)') - 400, src.indexOf('ClipboardSet(text)'))
+    assert.match(goBlock, /try\s*\{/, 'Go 通道必须包在 try 里，失败才能落到下一级')
+  })
+
+  test('三级兜底齐全：Go → navigator.clipboard → execCommand', () => {
+    assert.match(src, /navigator\.clipboard\?*\.writeText/, '缺 navigator.clipboard 兜底')
+    assert.match(src, /execCommand\('copy'\)/, '缺 execCommand 兜底（WKWebView 最后的救命通道）')
+  })
+
+  test('复制失败必须可见（静默失败＝本次缺陷复现）', () => {
+    assert.match(src, /is-failed|copyFailed/, '复制失败必须有可见反馈')
+  })
+})

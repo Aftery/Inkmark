@@ -22,6 +22,11 @@
 import { Decoration, WidgetType, ViewPlugin } from '@codemirror/view'
 import { syntaxTree } from '@codemirror/language'
 import { t } from '../i18n/index.js'
+// Go 侧剪贴板通道：走 Wails runtime.ClipboardSetText，绕过 wails:// 的非安全
+// 上下文限制（navigator.clipboard 在此上下文里不可用）。顶层 import 是硬要求：
+// 放进函数体内会让本模块的静态依赖图看不出它依赖 Go 绑定，也会踩到 TDZ 守卫的
+// 「模块级 import 必须在顶层」约定。见 copyText 的通道说明。
+import { ClipboardSet } from '../../wailsjs/go/main/App.js'
 
 /** 代码块行的类名（行号由 CSS counter 渲染，见 editor-wysiwyg.css） */
 export const CODE_LINE_CLASS = 'cm-md-codeline'
@@ -177,17 +182,33 @@ class CopyButtonWidget extends WidgetType {
 /**
  * 写入系统剪贴板。
  *
- * 优先 navigator.clipboard（异步 API，需要安全上下文）；WKWebView 的
- * wails:// 页面通常满足条件。失败时退回 execCommand('copy') —— 它在
- * contenteditable 场景仍被 WebKit 支持，是唯一可用的兜底。
+ * 通道优先级（按可靠性从高到低）：
+ *   1) Go 侧 App.ClipboardSet —— 走 Wails runtime.ClipboardSetText，
+ *      **绕过 web 安全上下文限制**。本应用是 wails:// 加载（AssetServer），
+ *      navigator.clipboard 在非 https 安全上下文里要么 undefined 要么被拒，
+ *      execCommand 兜底在 WKWebView 里也常静默失败 —— 用户侧就是「点了复制没反应」。
+ *      这是唯一稳定可用的通道，故列为首选。
+ *   2) navigator.clipboard.writeText —— 理论上 https 下可用，wails:// 下基本拿不到。
+ *   3) execCommand('copy') —— 最后兜底，contenteditable 场景 WebKit 仍支持。
  */
 export async function copyText(text) {
+  // 1) Go 桌面通道（首选）
+  try {
+    if (typeof ClipboardSet === 'function') {
+      await ClipboardSet(text)
+      return true
+    }
+  } catch { /* 落到 web API 兜底 */ }
+
+  // 2) Web 安全上下文 API
   try {
     if (navigator.clipboard?.writeText) {
       await navigator.clipboard.writeText(text)
       return true
     }
   } catch { /* 落到 execCommand 兜底 */ }
+
+  // 3) 程序化复制兜底
   try {
     const ta = document.createElement('textarea')
     ta.value = text

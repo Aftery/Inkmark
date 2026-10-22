@@ -4,14 +4,14 @@
 // 解析 / 序列化往返、StateField 的渲染判定（界内源码 / 界外渲染）、
 // 以及 createEditor 的接线与 wysiwyg 的退位契约。
 
-import { test } from 'node:test'
+import { describe, test } from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { dirname, join } from 'node:path'
 import { EditorState } from '@codemirror/state'
 import { markdown, markdownLanguage } from '@codemirror/lang-markdown'
-import { parseTable, serializeTable, tableRenderField } from '../src/editor/tableRender.js'
+import { parseTable, serializeTable, splitCells, tableRenderField } from '../src/editor/tableRender.js'
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..')
 const src = (p) => readFileSync(join(root, 'src', p), 'utf8')
@@ -54,6 +54,132 @@ test('serializeTable：往返一致 + 单元格内竖线转义还原', () => {
   const aligned = parseTable('| a |\n| :-: |\n| 1 |')
   assert.equal(serializeTable(aligned), '| a |\n| :-: |\n| 1 |')
 })
+
+test('serializeTable：支持文档主换行符（CRLF 不跑行）', () => {
+  // 直接构造 model（parseTable 按 \n 切，不处理 \r；这里测序列化侧）
+  const m = { header: ['a', 'b'], aligns: ['left', 'left'], delimRaw: '| --- | --- |', rows: [['1', '2']] }
+  // 默认 \n：与现有行为契约一致（旧测试依赖它）
+  assert.equal(serializeTable(m), '| a | b |\n| --- | --- |\n| 1 | 2 |')
+  // 传入 \r\n：回写文档时必须保持与相邻行一致的换行符，否则 CM 重渲染错位
+  // （用户侧「输着输着跑行」的根因之一）
+  assert.equal(serializeTable(m, '\r\n'), '| a | b |\r\n| --- | --- |\r\n| 1 | 2 |')
+})
+
+// ---------------------------------------------------------------------------
+// 解析 / 序列化的边界往返
+// ---------------------------------------------------------------------------
+/**
+ * 【为什么这些边界必须逐个钉】serializeTable 是「模型 → 文档」的唯一出口，
+ * 它在每次按键后都会被调用一次。任何一条边界写错（漏转义、丢空格、混进 \r），
+ * 都会把**看起来对的表格**写成**结构不同的表格**：GFM 一旦列数不一致，
+ * 整张表就退化成普通段落 —— 用户看到的是「表格突然没了」，而控制台没有任何
+ * 报错。往返（parse → serialize → parse）是这个函数唯一可靠的验收口径。
+ */
+describe('表格往返 · 边界单元格', () => {
+  const f = (cells, delim = null) => {
+    const d = delim ?? `| ${cells.map(() => '---').join(' | ')} |`
+    return [`| ${cells.join(' | ')} |`, d, `| ${cells.map((_, i) => `v${i}`).join(' | ')} |`].join('\n')
+  }
+
+  // 每个用例：原文 —— 期望 parse 出的单元格 —— 期望「序列化再解析」稳定
+  const CASES = [
+    { name: '单元格含反斜杠', line: '| a\\b | c |', header: ['a\\b', 'c'] },
+    { name: '单元格含反引号', line: '| `code` | c |', header: ['`code`', 'c'] },
+    { name: '单元格含中文', line: '| 中文列 | 第二列 |', header: ['中文列', '第二列'] },
+    { name: '空单元格', line: '|  | c |', header: ['', 'c'] },
+    { name: '首尾空格被规整', line: '|  a  |   b |', header: ['a', 'b'] },
+    { name: '转义竖线还原为字面竖线', line: '| a\\|b | c |', header: ['a|b', 'c'] },
+    { name: '行内标记原样保留', line: '| **粗** | [l](u) |', header: ['**粗**', '[l](u)'] },
+    { name: '模板占位符不被当语法', line: '| ${x} | %s |', header: ['${x}', '%s'] },
+  ]
+
+  for (const c of CASES) {
+    test(`${c.name}：parse 正确且往返稳定`, () => {
+      const src = c.line + '\n| --- | --- |\n| 1 | 2 |'
+      const m = parseTable(src)
+      assert.deepEqual(m.header, c.header, `${c.name} 的表头解析不对`)
+      // 往返：序列化再解析，表头必须一模一样（否则每次按键都在悄悄改内容）
+      const back = parseTable(serializeTable(m))
+      assert.deepEqual(back.header, c.header, `${c.name} 往返后表头变了`)
+      // 第二遍必须完全稳定（幂等：第 N 次按键不能和第 1 次产出不同文本）
+      assert.equal(serializeTable(back), serializeTable(m), `${c.name} 序列化不幂等`)
+    })
+  }
+
+  test('单元格里的竖线必须转义，否则会把一列劈成两列', () => {
+    const m = parseTable(f(['a', 'b']))
+    m.header[0] = 'x|y'
+    const out = serializeTable(m)
+    assert.ok(out.includes('x\\|y'), `竖线未转义：${out}`)
+    // 转义后重新解析必须还是 2 列 —— 这是「列错位」的直接判据
+    assert.equal(parseTable(out).header.length, 2, '转义失效会导致列数变化')
+  })
+
+  test('空单元格与空格单元格不得被写成 undefined 或丢列', () => {
+    const m = parseTable('| a | b | c |\n| --- | --- | --- |\n|  |  |  |')
+    const out = serializeTable(m)
+    assert.equal(parseTable(out).header.length, 3, '列数必须保持 3')
+    assert.ok(!out.includes('undefined'), `不得写出 undefined：${out}`)
+  })
+
+  test('缺列的行按表头列数补齐（GFM 要求列数一致，否则整表退化成段落）', () => {
+    const m = parseTable('| a | b | c |\n| --- | --- | --- |\n| 1 |')
+    const out = serializeTable(m)
+    for (const line of out.split('\n')) {
+      assert.equal(splitCells(line).length, 3, `每一行的列数都必须是 3：${line}`)
+    }
+  })
+})
+
+// ---------------------------------------------------------------------------
+// CRLF：解析侧不得把 \r 漏进模型
+// ---------------------------------------------------------------------------
+/**
+ * 【这条守的是一个「修了一半」的真坑】上一轮只改了 serializeTable 支持
+ * lineBreak 参数，但 parseTable 仍是 `text.split('\n')` —— CRLF 文档切完，
+ * 分隔行尾部剩下一个 '\r'，于是 `delimRaw === "| --- | --- |\r"`，
+ * 回写时与换行符拼成 `"\r\r\n"`：多出一个控制字符混进用户文档，且
+ * 「行数 / 字符偏移」从此对不上。序列化侧再正确也救不回来。
+ */
+describe('表格解析 · CRLF 不得污染模型', () => {
+  const CRLF_TABLE = '| a | b |\r\n| --- | --- |\r\n| 1 | 2 |'
+
+  test('delimRaw 不得含 \\r', () => {
+    const m = parseTable(CRLF_TABLE)
+    assert.ok(!m.delimRaw.includes('\r'), `delimRaw 含 \\r：${JSON.stringify(m.delimRaw)}`)
+    assert.equal(m.delimRaw, '| --- | --- |')
+  })
+
+  test('表头 / 表体单元格不得含 \\r', () => {
+    const m = parseTable(CRLF_TABLE)
+    assert.deepEqual(m.header, ['a', 'b'])
+    assert.deepEqual(m.rows, [['1', '2']])
+    for (const row of [m.header, ...m.rows]) {
+      for (const cell of row) assert.ok(!cell.includes('\r'), `单元格含 \\r：${JSON.stringify(cell)}`)
+    }
+  })
+
+  test('CRLF 原文 → 解析 → 以 \\r\\n 序列化，必须逐字还原', () => {
+    const m = parseTable(CRLF_TABLE)
+    assert.equal(
+      serializeTable(m, '\r\n'),
+      CRLF_TABLE,
+      'CRLF 文档往返不一致 —— 回写会把表格写成两种换行符混排',
+    )
+  })
+
+  test('CRLF 文档里不得叠出 \\r\\r\\n', () => {
+    const out = serializeTable(parseTable(CRLF_TABLE), '\r\n')
+    assert.ok(!out.includes('\r\r'), `序列化结果出现 \\r\\r（delimRaw 带 \\r 的典型症状）：${JSON.stringify(out)}`)
+  })
+
+  test('孤立 \\r（老 Mac 换行）也被当行边界', () => {
+    const m = parseTable('| a | b |\r| --- | --- |\r| 1 | 2 |')
+    assert.deepEqual(m.header, ['a', 'b'], '孤立 \\r 也应切行')
+    assert.deepEqual(m.rows, [['1', '2']])
+  })
+})
+
 
 test('StateField：界外渲染 / 界内源码 / 边界算界外', () => {
   const doc = `前文\n\n${TABLE}\n\n后文`

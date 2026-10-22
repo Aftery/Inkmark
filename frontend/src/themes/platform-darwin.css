@@ -26,27 +26,28 @@ html[data-platform='darwin'] .app {
   background: color-mix(in srgb, var(--bg) 94%, transparent);
 }
 
-/* 【不透明度取值：真机截图实测后从 78% 提到 92%】
-   原值 78% 时，暗色主题下侧栏 / 标题栏 / 状态栏会透出 macOS 桌面壁纸，
-   在浅色壁纸上整片 chrome 被冲淡成浅灰 —— 表现为「暗色模式下大纲颜色没变」
-   （正文是深色、侧栏却是浅色，同一屏两种明暗）。
-   78% 是「材质感」与「色彩正确」的折中，但实测证明该折中在暗色下不可接受：
-   chrome 的底色必须**由主题说了算**，材质只透一点点。
-   92% 保留一丝通透感（壁纸的色相仍能隐约影响 chrome），同时保证暗色下
-   --surface 的深色成立、--fg-2 的浅色文字有足够对比度。 */
+/* 【chrome 层必须回到实色：修正「暗色下标题栏 / 侧栏是浅色」】
+   早期这层用 92% / 55% 的半透明想「保留材质感」，但实测（真机截图）证明：
+   chrome（标题栏 / 侧栏 / 状态栏）的半透明在暗色主题下会透出 macOS 桌面
+   壁纸 —— 壁纸若是浅色，整片 chrome 被冲淡成浅灰，而正文是深色，
+   同一屏出现两种明暗，表现为用户报告的「窗口颜色不一致」。
+   结论：chrome 的底色必须**由主题说了算**，材质感只留给正文写作面（.app 层）。
+   故侧栏 / 状态栏 / 标题栏一律回到 --surface 实色（alpha 100%），
+   暗色下 --surface 是深色、--fg-2 是浅色，对比度稳定。
+   代价是 chrome 失去那点通透感，但换来「颜色永远正确」—— 这是正确取舍。 */
 html[data-platform='darwin'] .main .sidebar {
-  background: color-mix(in srgb, var(--surface) 92%, transparent);
+  background: var(--surface);
 }
 
 html[data-platform='darwin'] .app > .statusbar {
-  background: color-mix(in srgb, var(--surface) 92%, transparent);
+  background: var(--surface);
 }
 
-/* 标题栏：给一层极淡的主题底 —— 纯 transparent 时桌面壁纸会直接透上来，
-   同样造成「暗色下标题栏是浅色」。这一层几乎不可见，但让 chrome 与主题同源。 */
+/* 标题栏：回到主题实色（同源 chrome），不再透壁纸。
+   border-bottom 用实色边框，避免 55% 半透明边框在暗色下变成「灰蒙蒙一条」。 */
 html[data-platform='darwin'] .app > .titlebar {
-  background: color-mix(in srgb, var(--surface) 55%, transparent);
-  border-bottom-color: color-mix(in srgb, var(--border) 55%, transparent);
+  background: var(--surface);
+  border-bottom-color: var(--border);
 }
 
 /* 弹层需要不透明底：浮层压在材质上再透字会难以辨读，故显式回到实色 */

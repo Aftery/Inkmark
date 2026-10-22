@@ -58,8 +58,39 @@ export class TableWidget extends WidgetType {
 
   eq(other) {
     const editing = currentEditingWidget()
-    if (editing && editing.dom?.isConnected && (editing === this || editing === other)) return true
-    return other.key === this.key
+    const reuse = (editing && editing.dom?.isConnected && (editing === this || editing === other)) ||
+      other.key === this.key
+    // 只在「同一个表格」时接区间：key 不同意味着源码变了、而 model 仍是旧的，
+    // 此时把新 source 塞进来会造成「新 source + 旧 model」错配 —— 随后 sync()
+    // 会用旧 DOM 序列化出的内容覆盖掉新内容（数据丢失）。故保守跳过。
+    if (reuse && other.key === this.key) this.adoptRange(other)
+    return !!reuse
+  }
+
+  /**
+   * 复用 DOM 时把「区间记账」接过来 —— CM 的复用语义有个不对称：
+   *
+   *   findWidget() 命中 eq() 之后返回的是 `new WidgetTile(tile.dom, …, widget)`
+   *   ——**旧 DOM 配新实例**。新实例带的是刚解析出的最新 from/to，却因为 toDOM
+   *   从未被调用而没有 dom / table / viewRef，是个空壳；真正挂着 input 监听、
+   *   真正在收键盘事件的是**旧实例**。于是旧实例成了唯一活着的编辑者，而它的
+   *   from/to 永远停在第一次渲染时的位置（CM 从不回写它）。
+   *
+   * 只要表格上方/下方被插入过文字（写正文、撤销、外部改动都会），旧实例的区间
+   * 就整体偏移。此后再在单元格里打字，dispatchText() 拿过期区间去 sliceString，
+   * 对不上 source 就转 locateTable —— 而过期位置常常已经不在任何 Table 节点里
+   * （落在上方段落中），locateTable 返回 null，sync() 静默放弃：用户敲的字没进
+   * 文档，光标却还在单元格里。这是「输入会跑行」里最容易被当成玄学的那一半。
+   *
+   * 修法：既然复用是「旧 DOM 继续用」，就把新实例的位置基准交给旧实例。只在
+   * key（表格源码）一致时发生，故 model 内容必然一致，不动 model。
+   */
+  adoptRange(other) {
+    if (other === this) return
+    this.from = other.from
+    this.to = other.to
+    this.source = other.source
+    this.key = other.key
   }
 
   // 事件全部由 widget 自己处理（Tab/Enter 导航、Esc 退出、粘贴转纯文本），
@@ -258,24 +289,52 @@ export class TableWidget extends WidgetType {
   writeModel() {
     const view = this.viewRef
     if (!view) return
-    const text = serializeTable(this.model)
+    // 用文档主换行符序列化：文档是 CRLF 时若硬编码 '\n'，回写会让表格行变 LF
+    // 而相邻行仍是 CRLF，重渲染错位（用户侧「输着输着跑行」）。见 tableRender.js。
+    const text = serializeTable(this.model, view.state.lineBreak)
     return this.dispatchText(text)
   }
 
-  /** 区间保护 + 去重后写回：model 与文档一致的序列化产物绝不产生多余事务 */
+  /**
+   * 区间保护 + 去重后写回。
+   *
+   * 返回值 = **文档此刻是否已等于 `text`**（不是「有没有产生事务」）：
+   * true 表示已一致（刚写进去或本就一致），false 表示区间定位失败、什么都没做
+   * （宁可不同步，也绝不猜区间）。
+   *
+   * 【为什么是这个语义】`sync()` 拿它决定要不要把 model 升级成刚从 DOM 读出的
+   * 那份。若把「文本本就一致」报成 false，model 会停在旧值而 DOM 已是新值 ——
+   * model / source / key 脱节，下次 eq() 的比较基准就错了（表现为内容滞后、
+   * 错位）。故成功路径**一律**同步更新 from / to / source / key，维持不变量：
+   * `state.sliceDoc(from, to) === source === key === serializeTable(model)`
+   *
+   * [注意] 读回必须用 `state.sliceDoc` 而不是 `state.doc.sliceString`：后者恒按
+   * '\n' 拼接，前者按 `state.lineBreak`。两者在默认配置下相等（生产即是如此，
+   * 全仓未配置 lineSeparator facet），但一旦文档配了 CRLF，混用会让「刚写进去的
+   * 文本」与「读回来的文本」永远不等 —— 去重失效，每敲一个字都多一笔事务。
+   */
   dispatchText(text) {
     const view = this.viewRef
     const state = view.state
     let { from, to } = this
-    if (state.doc.sliceString(from, to) !== this.source) {
+    if (state.sliceDoc(from, to) !== this.source) {
       const found = locateTable(state, from)
       if (!found) return false
       ;({ from, to } = found)
     }
-    if (text === state.doc.sliceString(from, to)) return false
-    view.dispatch({ changes: { from, to, insert: text }, annotations: selfSync.of(true) })
+    // 文本已一致：不产生多余事务，但记账仍要对齐（见上）
+    if (text !== state.sliceDoc(from, to)) {
+      const tr = state.update({ changes: { from, to, insert: text }, annotations: selfSync.of(true) })
+      view.dispatch(tr)
+      // 【为什么不能写 from + text.length】CM 按 lineSeparator facet 切行，换行符
+      // 被归一化（\r\n → 单个位置）：文档是 CRLF 时 text.length 比真实增量多出
+      // 「换行个数」个字符。用 text.length 记账会让 this.to 越过表格末尾，下一次
+      // sliceString(from, to) 会把表格后的一行正文一起圈进来 —— 用户侧就是
+      // 「输着输着跑行 / 旁边的段落被吃掉」。以真实新文档长度为准。
+      to = from + (tr.newDoc.length - (state.doc.length - (to - from)))
+    }
     this.from = from
-    this.to = from + text.length
+    this.to = to
     this.source = text
     this.key = text
     return true
@@ -286,7 +345,14 @@ export class TableWidget extends WidgetType {
     if (currentEditingWidget() === this) setEditingWidget(null)
   }
 
-  /** 单元格 DOM → serializeTable → 文档。定位失败宁可不同步，绝不猜区间 */
+  /**
+   * 单元格 DOM → serializeTable → 文档。定位失败宁可不同步，绝不猜区间。
+   *
+   * 【不变量】成功时 model / source / key / from / to **必须一起更新**（source/key/
+   * from/to 在 dispatchText 里，model 在这里）。任何一半落单，下一次 eq() 或
+   * dispatchText() 的比较基准就错了，DOM 与文档开始各说各话 —— 用户侧表现为
+   * 内容滞后、错位。tests/table-sync-invariant.test.mjs 钉死这条不变量。
+   */
   sync() {
     const view = this.viewRef
     if (!view || !this.dom || view.composing || this.composing) return
@@ -294,7 +360,7 @@ export class TableWidget extends WidgetType {
     if (!table) return
     const grid = [...table.rows].map((tr) => [...tr.cells].map((td) => td.textContent))
     const model = { header: grid[0], aligns: this.model.aligns, delimRaw: this.model.delimRaw, rows: grid.slice(1) }
-    const text = serializeTable(model)
+    const text = serializeTable(model, view.state.lineBreak)
     if (this.dispatchText(text)) this.model = model
   }
 
