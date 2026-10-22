@@ -30,6 +30,7 @@ export default {
   'sidebar.tab.outline': 'アウトライン',
   'sidebar.empty.hint': 'フォルダを開くと、ここでファイルを一覧できます',
   'sidebar.empty.cta': 'フォルダを開く',
+  'sidebar.collapse': 'サイドバーを閉じる',
 
   // ---- 仕切りバー（ドラッグで幅調整）----
   'divider.ariaLabel': 'エディタの幅',
@@ -43,6 +44,12 @@ export default {
   'statusbar.words': '{count} 文字',
   'statusbar.zoomTitle': 'ズームを切り替え（90 / 100 / 110 / 125%）',
   'statusbar.tableHint': '{line} 行目はテーブルのように見えますが未描画です：ヘッダーの下に区切り行 | --- | を追加してください',
+  // 表示切り替え（既定は非表示 = Typora 流のステータスバーなし。入口は「表示」メニューと本バー内）
+  'statusbar.menu': 'ステータスバー',
+  'statusbar.pin': 'ステータスバーを常に表示（行・列と文字数）',
+  'statusbar.unpin': 'ステータスバーを必要時のみ表示（保存エラー / 表のヒント）',
+  'statusbar.always': '常時',
+  'statusbar.auto': '必要時',
 
   // ---- ツールバー ----
   'toolbar.label': '書式ツールバー',
@@ -109,6 +116,7 @@ export default {
   'shortcuts.zoom': '拡大 / 縮小 / リセット',
   'shortcuts.theme': 'テーマを切り替え',
   'shortcuts.settings': '設定',
+  'shortcuts.commandPalette': 'コマンドパレット（任意のコマンドを検索・実行）',
   'shortcuts.list': 'ショートカット一覧',
 
   // ---- 入力ダイアログ（行へ移動 / 名前の変更で共用）----
@@ -257,6 +265,9 @@ export default {
   'slash.table': '表',
   'slash.todo': 'タスクリスト',
   'slash.quote': '引用',
+  'palette.title': 'コマンドパレット',
+  'palette.placeholder': 'コマンドを検索…（中国語 / 英語 / キー）',
+  'palette.empty': '一致するコマンドがありません',
   'slash.empty': '一致するコマンドがありません',
 
   // ---- 菜单项（自 useShortcuts.js 命令表引用；文案沿用原 Go 侧 locales.go）----
@@ -309,6 +320,7 @@ export default {
   'menu.zoomReset': 'ズームをリセット',
   'menu.theme': 'テーマを切り替え',
   'menu.typewriter': 'タイプライターモード',
+  'menu.commandPalette': 'コマンドパレット',
   'menu.alwaysOnTop': '常に手前に表示',
   'menu.minimize': '最小化',
   'menu.zoom': '拡大',

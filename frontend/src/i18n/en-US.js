@@ -30,6 +30,7 @@ export default {
   'sidebar.tab.outline': 'Outline',
   'sidebar.empty.hint': 'Open a folder to browse its files here',
   'sidebar.empty.cta': 'Open Folder',
+  'sidebar.collapse': 'Collapse sidebar',
 
   // ---- Divider (drag to resize) ----
   'divider.ariaLabel': 'Editor width',
@@ -43,6 +44,12 @@ export default {
   'statusbar.words': '{count} words',
   'statusbar.zoomTitle': 'Cycle zoom (90 / 100 / 110 / 125%)',
   'statusbar.tableHint': 'Line {line} looks like a table but is not rendered: add a delimiter row | --- | under the header',
+  // Visibility toggle (hidden by default = Typora-style no status bar; entry in the View menu and in the bar)
+  'statusbar.menu': 'Status Bar',
+  'statusbar.pin': 'Always show status bar (line/column and word count)',
+  'statusbar.unpin': 'Show status bar only when needed (save errors / table hints)',
+  'statusbar.always': 'Always',
+  'statusbar.auto': 'On demand',
 
   'toolbar.label': 'Formatting toolbar',
   'toolbar.undo': 'Undo',
@@ -108,6 +115,7 @@ export default {
   'shortcuts.zoom': 'Zoom in / out / reset',
   'shortcuts.theme': 'Switch theme',
   'shortcuts.settings': 'Settings',
+  'shortcuts.commandPalette': 'Command palette (search and run any command)',
   'shortcuts.list': 'Keyboard shortcuts',
 
   // ---- Input dialog (go-to-line / rename) ----
@@ -256,6 +264,9 @@ export default {
   'slash.table': 'Table',
   'slash.todo': 'To-do List',
   'slash.quote': 'Quote',
+  'palette.title': 'Command Palette',
+  'palette.placeholder': 'Search commands… (Chinese / English / key binding)',
+  'palette.empty': 'No matching command',
   'slash.empty': 'No matching command',
 
   // ---- 菜单项（自 useShortcuts.js 命令表引用；文案沿用原 Go 侧 locales.go）----
@@ -308,6 +319,7 @@ export default {
   'menu.zoomReset': 'Reset Zoom',
   'menu.theme': 'Toggle Theme',
   'menu.typewriter': 'Typewriter Mode',
+  'menu.commandPalette': 'Command Palette',
   'menu.alwaysOnTop': 'Always on Top',
   'menu.minimize': 'Minimize',
   'menu.zoom': 'Zoom',

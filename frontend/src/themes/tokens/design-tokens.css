@@ -208,11 +208,17 @@
 
 /* ======================= 三、与主题无关的结构尺度（A1-structure / A2） ======================= */
 :root {
-  /* ---- 字号阶梯（基准 16px root）—— 编辑区与预览区正文统一 15px ---- */
+  /* ---- 字号阶梯（基准 16px root）—— 编辑区与预览区正文统一 16px ----
+   * 【2026-10-22 Typora 化】正文默认 15px → 16px（=1rem，无换算误差）。
+   * 这两个值必须与 themes/prefs.js 的 PREFS_DEFAULTS.fontSize(16) 保持一致：
+   * 运行时 prefs.js 会把同值内联写到 <html>，但样式表这里是**兜底**——
+   * ① 首帧内联尚未落地时用它（防字号跳变）；② 设置面板「恢复默认」走
+   * resetPrefs() 的 removeProperty，删掉内联后回落的正是这里。
+   * 若只改 prefs.js 而不改这里，点「恢复默认」字号会掉回 15px。 */
   --text-xs:   0.75rem;    /* 12px 行号 / 徽标 */
   --text-sm:   0.8125rem;  /* 13px 工具栏 / 树节点 / 状态 */
-  --text-base: 0.9375rem;  /* 15px 编辑区正文（基准） */
-  --text-md:   0.9375rem;  /* 15px 预览区正文（与编辑区一致，保证左右对齐） */
+  --text-base: 1rem;       /* 16px 编辑区正文（基准） */
+  --text-md:   1rem;       /* 16px 预览区正文（与编辑区一致，保证左右对齐） */
   --text-lg:   1.125rem;   /* 18px */
   --text-xl:   1.25rem;    /* 20px 预览 h3 */
   --text-2xl:  1.5rem;     /* 24px 预览 h2 */
@@ -322,6 +328,12 @@
   --preview-h6-size: 0.9375rem;  --preview-h6-weight: 600;   /* 15px，用 --muted 弱化 */
 
   /* ---- 预览阅读行宽 / 内边距 ---- */
+  /* 【编辑区也用这一条】createEditor.js 的 .cm-content 直接引用 --preview-measure
+   * 做 max-width + 居中（2026-10-22 Typora 化），与 preview.css 的 .preview-body
+   * 同源同值 —— 编辑区与预览区的正文列宽逐像素一致。复用而不是另造编辑区专属
+   * 变量，是为了让设置面板的「行宽」偏好（prefs.js 写 --preview-measure 内联）
+   * 一处生效、两边同步；否则用户的窄/宽档位只会改预览、不改编辑区，
+   * 左右不一致又回来了。 */
   --preview-measure:   46rem;   /* ≈736px，长文舒适行宽（编辑/预览/阅读三态共用的常规行宽） */
   --preview-padding-y: 40px;
 

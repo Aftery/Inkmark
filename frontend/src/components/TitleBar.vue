@@ -3,6 +3,22 @@
   职责边界：本组件【不含任何业务逻辑】。菜单项一律 emit 给 App.vue 接线，
   与原先「Go 菜单 → EventsEmit → App.vue」的链路终点一致，只是省掉了 Go 那一跳。
 
+  【Typora 化 · chrome 降噪（本轮）】目标：一条很细的标题栏，**文件名是主角**。
+  全部落在视觉层，不动结构：
+    - 高度按 --titlebar-height 派生一个更薄的 --tb-h（见 <style> 里的注释）；
+    - 菜单字号降到 --text-xs、颜色降到 --muted，hover 才回到 --fg（菜单退成背景）；
+    - 文件名字号 --text-sm + 强调字重 + --fg（全条唯一的视觉焦点）；
+    - 底边从 --border 降到 --border-soft（发丝线，不再是一条明显的分界）。
+
+  【两个 chrome 开关的入口（默认隐藏的能力必须可找回）】
+    1) 侧栏：默认收起（useWorkspace 的 sidebarOpen 初值 false）。入口 = ⌘B
+       + 本条的侧栏图标按钮（复用既有命令 view.outline，见 SIDEBAR_COMMAND 注释）。
+    2) 状态栏：默认隐藏（composables/useChrome.js）。入口 = 「视图」下拉里的
+       一行 chrome 开关（下方 chromeItem 计算）+ 状态栏可见时它自己的档位按钮。
+       为什么放进既有下拉而不是再加一个标题栏图标：标题栏是 1fr auto 1fr 网格，
+       左侧每加一个控件都从文件名那里偷宽度（最小窗口 800px 时尤其紧）。
+       放进「视图」也正好是用户的直觉位置（与「专注模式 / 显示大綱」同一组）。
+
   跨平台（数据源 composables/usePlatform.js：Environment() 权威 + navigator 同步初判）：
   - darwin：main.go 用 Frameless:false + mac.TitleBarHidden()，原生红绿灯仍在左上角。
     故【隐藏右侧自绘窗口按钮】（与红绿灯重复），且左侧菜单整体右移 70px 给红绿灯留白。
@@ -21,6 +37,8 @@
 import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
 import { t, getLocale } from '../i18n/index.js'
 import { isDarwin } from '../composables/usePlatform.js'
+import { statusbarPinned, toggleStatusbarPinned } from '../composables/useChrome.js'
+import AppIcon from './icons/AppIcon.vue'
 import { WindowMinimise, WindowToggleMaximise } from '../../wailsjs/runtime/runtime'
 import { CloseWindow } from '../../wailsjs/go/main/App'
 
@@ -39,6 +57,47 @@ const props = defineProps({
 const emit = defineEmits(['command'])
 
 const title = computed(() => props.filename || t('titlebar.untitled'))
+
+/**
+ * chrome（界面元素）开关项 —— 本组件自有的、**非命令**的一行菜单。
+ *
+ * 【为什么它可以由本组件补，而不违反「菜单结构只有命令表一个真源」】
+ * 上面那条纪律约束的是**命令**（可 emit 给 App.vue、有快捷键、要在速查表里
+ * 出现的东西）。状态栏显隐是一个**纯视图开关**：不进命令表、没有快捷键、
+ * 不派发到命令总线，改它也不会让「菜单与快捷键两份事实」分裂。
+ * 因此它走 `local: true` 分支，由本组件直接消费。
+ *
+ * 【为什么不给它一条真命令（view.statusbar）】那要同时改 useShortcuts.js 的
+ * COMMANDS 与 useCommands.js 的处理器注册 —— 两者都不在本任务的写入范围
+ * （且契约 1 会强制两边同步，改一半必红）。留作后续归并：把它升格为真命令后，
+ * 这一行删掉、走通用 emit 即可，行为不变。
+ *
+ * 【状态怎么表达】菜单项没有图标位（tb-item 只有 label + kbd），而本仓
+ * P0-1 禁止字符符号（不写对勾符）。故把档位写进 label（「状态栏」），
+ * 右端用 kbd 位放当前档位（「自动」/「常显」），读屏与肉眼都读得出来。
+ */
+const chromeItem = computed(() => ({
+  id: 'chrome.statusbar',
+  local: true,
+  label: t('statusbar.menu'),
+  kbd: t(statusbarPinned.value ? 'statusbar.always' : 'statusbar.auto'),
+}))
+
+/** 把 chrome 开关附到「视图」分组末尾；该分组不存在时（防御）不附，不新建分组 */
+const menuGroups = computed(() =>
+  props.groups.map((g) =>
+    g.id === 'view' ? { ...g, items: [...g.items, chromeItem.value] } : g
+  )
+)
+
+/**
+ * 侧栏开关复用既有命令 view.outline。
+ * 【为什么不新增 view.sidebar】侧栏本来就是「一个面板、两个 tab」，命令表里的
+ * view.outline 就是它的开关（⌘B）。新增一条语义重叠的命令，会连带要求同步
+ * README 键位节 + 应用内速查表（verify-shortcuts.mjs 三方比对），换来零行为
+ * 差异 —— 不划算。故本按钮只负责「把这条既有命令点出来」。
+ */
+const SIDEBAR_COMMAND = 'view.outline'
 
 // ---- 菜单开合 ----
 // pointerdown 用 capture 阶段监听：必须早于子元素的 click 语义，
@@ -76,8 +135,16 @@ onBeforeUnmount(() => {
 })
 
 function onItem(item) {
+  // chrome 开关是**就地生效**的：不关菜单反而让用户看不清档位变化，
+  // 故先执行再收起（两个动作都极轻，无闪烁）。
+  if (item.local) toggleStatusbarPinned()
   openMenu.value = null
-  emit('command', item.id)
+  if (!item.local) emit('command', item.id)
+}
+
+function toggleSidebar() {
+  openMenu.value = null
+  emit('command', SIDEBAR_COMMAND)
 }
 
 // ---- 窗口控制 ----
@@ -113,9 +180,9 @@ const close = async () => {
 
 <template>
   <div ref="rootRef" class="titlebar" style="--wails-draggable: drag">
-    <!-- 左：自绘菜单栏。darwin 下右移 70px 给原生红绿灯留白 -->
+    <!-- 左：自绘菜单栏 + 侧栏开关。darwin 下整体右移 70px 给原生红绿灯留白 -->
     <div class="tb-left" :class="{ 'tb-left-mac': isDarwin }">
-      <div v-for="g in groups" :key="g.id" class="tb-menu">
+      <div v-for="g in menuGroups" :key="g.id" class="tb-menu">
         <button
           class="tb-menu-btn"
           :class="{ active: openMenu === g.id }"
@@ -131,6 +198,7 @@ const close = async () => {
             v-for="item in g.items"
             :key="item.id"
             class="tb-item"
+            :class="{ 'tb-item-chrome': item.local }"
             type="button"
             role="menuitem"
             @click="onItem(item)"
@@ -140,9 +208,20 @@ const close = async () => {
           </button>
         </div>
       </div>
+
+      <!-- 侧栏开关：侧栏默认收起，这是标题栏上唯一的常驻入口（与 ⌘B 同一命令） -->
+      <button
+        class="tb-icon-btn"
+        type="button"
+        :title="t('menu.outline')"
+        :aria-label="t('menu.outline')"
+        @click="toggleSidebar"
+      >
+        <AppIcon name="sidebar-expand" size="inline" />
+      </button>
     </div>
 
-    <!-- 中：文件名 + 脏状态圆点；双击标题区切换最大化（桌面惯例） -->
+    <!-- 中：文件名（视觉主角）+ 脏状态圆点；双击标题区切换最大化（桌面惯例） -->
     <div class="tb-center" @dblclick="toggleMaximise">
       <span v-if="isDirty" class="tb-dirty" :title="t('doc.unsaved')" />
       <span class="tb-title" :title="title">{{ title }}</span>
@@ -172,36 +251,60 @@ const close = async () => {
 
 <style scoped>
 .titlebar {
+  /* 【更细的标题栏】从 token 派生而不是另写死一个数：--titlebar-height 仍是
+     唯一真源（design-tokens.css，非本任务写入范围），这里只做「-4px」的收薄。
+     34px 的边界：非 darwin 的自绘窗口按钮是 28px 见方，34px 仍能容下且留 3px
+     呼吸；darwin 的原生红绿灯约在 14~16px 处垂直居中，34px 的高比 38px
+     更贴近系统标题栏的视觉重心（不再比红绿灯低一截）。 */
+  --tb-h: calc(var(--titlebar-height) - 4px);
   display: grid;
   grid-template-columns: 1fr auto 1fr;
   align-items: center;
-  height: var(--titlebar-height);
+  height: var(--tb-h);
   flex-shrink: 0;
   padding: 0 var(--space-2) 0 var(--space-3);
   background: var(--surface);
-  border-bottom: 1px solid var(--border);
+  border-bottom: 1px solid var(--border-soft);
   font-family: var(--font-ui);
-  font-size: var(--text-sm);
-  color: var(--fg-2);
+  /* 菜单退成背景：字号降一档 + --muted（--fg 只留给文件名） */
+  font-size: var(--text-xs);
+  color: var(--muted);
   user-select: none;
 }
 
-.tb-left { display: flex; gap: var(--space-1); }
+.tb-left { display: flex; align-items: center; gap: var(--space-1); min-width: 0; }
 /* macOS 红绿灯留白：三颗按钮约 70px 宽，压在菜单上会点不中 */
 .tb-left-mac { padding-left: 70px; }
 .tb-menu { position: relative; }
 .tb-menu-btn {
-  padding: var(--space-1) var(--space-3);
+  padding: var(--space-1) var(--space-2);
   border: none;
   border-radius: var(--radius-sm);
   background: transparent;
   color: inherit;
   font: inherit;
   cursor: default;
+  white-space: nowrap;
 }
 .tb-menu-btn:hover,
 .tb-menu-btn.active { background: var(--surface-2); color: var(--fg); }
 .tb-menu-btn:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+
+/* 侧栏开关：24px 见方，不把标题栏撑回原高度（与 .tb-win 的 28px 同理） */
+.tb-icon-btn {
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  margin-left: var(--space-1);
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--muted);
+  cursor: default;
+}
+.tb-icon-btn:hover { background: var(--surface-2); color: var(--fg); }
+.tb-icon-btn:focus-visible { outline: none; box-shadow: var(--focus-ring); }
 
 .tb-dropdown {
   position: absolute;
@@ -227,23 +330,32 @@ const close = async () => {
   background: transparent;
   color: var(--fg);
   font: inherit;
+  font-size: var(--text-sm);
   text-align: left;
   cursor: default;
 }
 .tb-item:hover { background: var(--accent-soft); }
 .tb-item:focus-visible { outline: none; box-shadow: var(--focus-ring); }
 .tb-kbd { color: var(--meta); font-size: var(--text-xs); }
-.tb-sep { height: 1px; margin: var(--space-1) var(--space-2); background: var(--border-soft); }
+/* chrome 开关：与命令项之间用一条发丝线隔开，暗示「这是界面设置，不是命令」 */
+.tb-item-chrome { margin-top: var(--space-1); border-top: 1px solid var(--border-soft); }
 
 .tb-center {
   display: flex;
   align-items: center;
   gap: var(--space-2);
-  max-width: 50%;
+  max-width: 60%;
   overflow: hidden;
   white-space: nowrap;
 }
-.tb-title { overflow: hidden; text-overflow: ellipsis; }
+/* 文件名是主角：唯一的 --fg + 强调字重，菜单与窗口按钮都退到它之后 */
+.tb-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: var(--text-sm);
+  font-weight: var(--weight-emphasize);
+  color: var(--fg);
+}
 /* 未保存标记：纯 CSS 圆点，不使用任何符号字形（P0 零 emoji / 零字符图标） */
 .tb-dirty {
   flex: none;
@@ -274,6 +386,7 @@ const close = async () => {
    仅可点元素逐个覆盖回 no-drag。绝不下放到 .tb-left/.tb-right 容器
    （容器有自己的 1fr 空白区，下放即整片拖不动）。 */
 .tb-menu-btn,
+.tb-icon-btn,
 .tb-dropdown,
 .tb-item,
 .tb-win { --wails-draggable: no-drag; }

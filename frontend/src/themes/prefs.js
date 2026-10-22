@@ -26,7 +26,15 @@ const STORAGE_KEY = 'inkmark-prefs'
 /** 出厂默认值（唯一真源，getPrefs / resetPrefs 均以此为基准） */
 export const PREFS_DEFAULTS = {
   fontFamily: 'system', // system | serif | mono
-  fontSize: 15, // 12 | 14 | 15 | 16 | 18 | 20（px 数值）
+  // 【默认字号 15 → 16px（2026-10-22 Typora 化 · 产品裁决）】
+  // 为什么改：① Typora 的默认正文字号就是 16px，本产品向它靠拢；
+  // ② 16px 恰好 = 1rem，而 15px(0.9375rem) 是个要换算的中间值 —— 更要紧的是
+  //    编辑器标题阶梯用 em（相对正文），预览区标题用固定 rem，两者**只在正文
+  //    恰好 15px 时**数值吻合。默认改 16px 后，编辑器那套 em 阶梯已按 16px 重基
+  //    （见 createEditor.js 的 mdHighlight 注释），两侧重新逐级对齐。
+  // ③ 15px 是历史遗留快照，不是产品契约。
+  // 注意：这里只改「默认档」；FONT_SIZE_REM 里的 15 仍是合法可选档位，不得删除。
+  fontSize: 16, // 12 | 14 | 15 | 16 | 18 | 20（px 数值）
   lineHeight: 'standard', // compact | standard | loose
   measure: 'standard', // narrow | standard | wide
   autosave: 800, // 0(关) | 800 | 2000 | 5000（ms）

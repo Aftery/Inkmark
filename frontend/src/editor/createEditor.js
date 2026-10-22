@@ -55,13 +55,25 @@ function exitCodeBlockOnEnter(view) {
 
 // 语法着色：Markdown 结构 + 围栏代码
 const mdHighlight = HighlightStyle.define([
-  /* ---- Markdown 结构：字号对齐预览区标题阶梯，保证左右视觉一致 ---- */
-  { tag: t.heading1, fontSize: '2em',     fontWeight: '590', lineHeight: '1.3' },
-  { tag: t.heading2, fontSize: '1.6em',   fontWeight: '590', lineHeight: '1.3' },
-  { tag: t.heading3, fontSize: '1.333em', fontWeight: '510', lineHeight: '1.3' },
-  { tag: t.heading4, fontSize: '1.133em', fontWeight: '510', lineHeight: '1.3' },
-  { tag: t.heading5, fontSize: '1.067em', fontWeight: '510', lineHeight: '1.3' },
-  { tag: t.heading6, fontSize: '1em',     fontWeight: '510', color: 'var(--muted)' },
+  /* ---- Markdown 结构：字号对齐预览区标题阶梯，保证左右视觉一致 ----
+   * 【为什么是 em，以及为什么必须按 16px 基准换算】
+   * 这里的字号要跟着用户的正文字号缩放（18px 档位下 h1 该更大），所以用 em（相对
+   * .cm-line 的 font-size），而不是预览区那种固定 rem。代价是：**预览区的标题阶梯
+   * （--preview-h*-size，rem 固定值）不随正文字号变**，两侧只在某个正文基准下才吻合。
+   * 2026-10-22 默认正文 15px → 16px 时实测发现：旧 em 值（2/1.6/1.333/1.133/1.067/1）
+   * 是按 15px 反推的，16px 下 h1 变 32px 而预览仍是 30px，逐级偏大 2.0/1.6/1.3/1.1/1.1/1.0px。
+   * 故按下式重基到 16px：em = 预览 px / 16
+   *   h1 30/16=1.875  h2 24/16=1.5   h3 20/16=1.25
+   *   h4 17/16=1.0625 h5 16/16=1    h6 15/16=0.9375
+   * 实测验证：默认 16px 下 h1..h6 与预览区逐级差值均为 0.0px（修复前 16px 下最大偏 2px）。
+   * 非默认档位（12/14/18/20px）两侧必然仍有偏差 —— 那是「em 跟随 vs rem 固定」的
+   * 固有取舍，不是本处能修的；默认档位对齐是本次的验收标准。 */
+  { tag: t.heading1, fontSize: '1.875em',  fontWeight: '590', lineHeight: '1.3' },
+  { tag: t.heading2, fontSize: '1.5em',    fontWeight: '590', lineHeight: '1.3' },
+  { tag: t.heading3, fontSize: '1.25em',   fontWeight: '510', lineHeight: '1.3' },
+  { tag: t.heading4, fontSize: '1.0625em', fontWeight: '510', lineHeight: '1.3' },
+  { tag: t.heading5, fontSize: '1em',      fontWeight: '510', lineHeight: '1.3' },
+  { tag: t.heading6, fontSize: '0.9375em', fontWeight: '510', color: 'var(--muted)' },
   { tag: t.emphasis, fontStyle: 'italic' },
   { tag: t.strong, fontWeight: '510' },
   { tag: t.strikethrough, textDecoration: 'line-through' },
@@ -272,6 +284,15 @@ export function createEditor(parent, { doc = '', onDocChange, onScroll, onUpdate
       syntaxHighlighting(mdHighlight),
       // 查找/替换面板（⌘F / ⌘⌥F）：面板停靠编辑区顶部
       search({ top: true }),
+      // 【软换行：居中定宽的前置条件，不是可选项】
+      // 实测：未启用时 .cm-content 的计算样式是 white-space:pre（CM6 baseTheme），
+      // 长段落**不换行**而是横向溢出 —— 1600px 视口下一段长中文实测把内容撑到
+      // 6798px、横向可滚 5198px。若只给 .cm-content 加 max-width 而不换行，长段落
+      // 会变成「在 736px 窄栏里横向滚动」，比现状更难用（实测溢出仍有 5606px）。
+      // 必须用官方 lineWrapping 而不是自己写 CSS 换行：CM6 的 heightOracle 靠
+      // 内容属性里的 cm-lineWrapping 类名来「预判换行」，自己写 CSS 会让行高测量
+      // 走错分支，表现为上下方向键的光标纵向位置漂移（静默、难查）。
+      EditorView.lineWrapping,
       EditorView.theme({
         '&': {
           height: '100%',
@@ -290,9 +311,32 @@ export function createEditor(parent, { doc = '', onDocChange, onScroll, onUpdate
           lineHeight: 'var(--leading-body)',
           caretColor: 'var(--accent)',
           padding: 'var(--preview-padding-y) 0 var(--space-16)',  /* 与预览区上下留白一致，比例映射才准 */
+          /* 【居中定宽：编辑区与预览区共用同一个行宽 token】
+           * 此前 .cm-content 铺满整个滚动容器（实测 1600px 视口下内容宽 1590px），
+           * 长屏写作时一行长到肉眼难以换行追踪 —— 这是与 Typora 最直观的差距。
+           * 这里直接引用 --preview-measure（与 preview.css 的 .preview-body 同一个
+           * 变量），而不是另造一个编辑区专属行宽：两者同源，改一处即两边同步，
+           * 用户的「行宽」偏好（prefs 写 --preview-measure 内联）也自动同时生效。
+           * box-sizing 是 border-box（base.css 全局重置），故 46rem 是含 .cm-line
+           * 左右各 24px 内边距的外框宽 —— 与 .preview-body 的 46rem（同为 border-box，
+           * 同样含 24px 内边距）逐像素对齐，正文文字列宽两边都是 688px。 */
+          maxWidth: 'var(--preview-measure)',
+          margin: '0 auto',   /* 定宽后左右均分剩余空间 = 居中 */
         },
         '.cm-line': {
           padding: '0 var(--space-6)',
+          /* 【必须 relative：.cm-md-copy / .cm-md-table-bar 的绝对定位锚点】
+           * 代码块复制按钮与表格操作条都是 position:absolute，锚点取「最近的已定位
+           * 祖先」。CM6 给 .cm-scroller 设了 position:relative，而 .cm-line 一直是
+           * static —— 于是这两个浮层实际锚在**整个滚动容器**上，不是各自那一行。
+           * 实测取证（1000px 高视口、代码块位于文档 2183px 处）：
+           *   修复前 按钮 top=40（贴视口顶），距所在行 -2142px，横向落在栏外 416px；
+           *   修复后 按钮 top=2185（距所在行 +2px），横向回到栏内。
+           * 也就是说「复制按钮飘在窗口右上角、跟代码块无关」是**改动前就存在**的缺陷，
+           * 只是当时正文铺满整宽，横向错位不明显；居中定宽后必须一并修掉，否则
+           * 浮层会落在栏外，正是本任务点名要避免的「widget 错位」。
+           * 加 relative 不改变文档流（line 本来就是 display:block），无副作用。 */
+          position: 'relative',
           transition: 'opacity var(--motion-base) var(--ease-standard)',
         },
         '.cm-focus-dim': { opacity: '0.4' },

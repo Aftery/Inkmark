@@ -65,8 +65,14 @@ describe('组 1 · 默认态：出厂默认落到内联变量的形态', () => {
       'C2：编辑区与预览区字号必须同值，否则左右两栏文字错位'
     )
     // 期望值来自源码里的默认档位换算表，不来自本次运行结果
-    assert.equal(PREFS_DEFAULTS.fontSize, 15)
-    assert.equal(base[0].value, '0.9375rem', '15px = 0.9375rem（1rem=16px 基准）')
+    // [2026-10-22 Typora 化 · 产品裁决] 默认字号 15 → 16px。理由：
+    // ① Typora 默认正文即 16px，本产品向它靠拢；② 16px = 1rem，无换算误差
+    // （15px 的 0.9375rem 是个需要心算的中间值）；③ 15px 是历史遗留快照，非产品契约。
+    // 连带改动：编辑器标题阶梯由 em(@15px 基准) 重基为 em(@16px 基准)，使默认档位下
+    // 编辑区与预览区标题逐级对齐（改动前的 16px 下 h1 会偏大 2px）。
+    // 注意：FONT_SIZE_REM 映射表里的 15 仍是合法可选档位，不受本次默认值调整影响。
+    assert.equal(PREFS_DEFAULTS.fontSize, 16)
+    assert.equal(base[0].value, '1rem', '16px = 1rem（1rem=16px 基准）')
   })
 
   test('默认态 --leading-* / --preview-measure / --reading-measure 走 remove（交还主题）', async () => {

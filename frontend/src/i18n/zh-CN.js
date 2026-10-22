@@ -45,6 +45,7 @@ export default {
   'sidebar.tab.outline': '大纲',
   'sidebar.empty.hint': '打开一个文件夹，在侧栏浏览文件',
   'sidebar.empty.cta': '打开文件夹',
+  'sidebar.collapse': '收起侧栏',
 
   // ---- 分隔条（拖动调宽）----
   'divider.ariaLabel': '编辑区宽度',
@@ -58,6 +59,12 @@ export default {
   'statusbar.words': '{count} 字',
   'statusbar.zoomTitle': '切换缩放（90 / 100 / 110 / 125%）',
   'statusbar.tableHint': '第 {line} 行像表格但未渲染：缺分隔行，请在表头下加一行 | --- |',
+  // 显隐开关（默认隐藏 = Typora 式无状态栏；入口在标题栏「视图」菜单与本栏内）
+  'statusbar.menu': '状态栏',
+  'statusbar.pin': '状态栏常显（总是显示行列与字数）',
+  'statusbar.unpin': '状态栏按需浮现（仅在保存出错 / 表格提示时出现）',
+  'statusbar.always': '常显',
+  'statusbar.auto': '按需',
 
   // ---- 工具条 ----
   'toolbar.label': '格式化工具条',
@@ -124,6 +131,7 @@ export default {
   'shortcuts.zoom': '放大 / 缩小 / 重置缩放',
   'shortcuts.theme': '切换主题',
   'shortcuts.settings': '设置',
+  'shortcuts.commandPalette': '命令面板（搜索并执行任意命令）',
   'shortcuts.list': '快捷键速查',
 
   // ---- 输入对话框（跳转到行 / 重命名共用）----
@@ -273,6 +281,9 @@ export default {
   'slash.table': '表格',
   'slash.todo': '待办列表',
   'slash.quote': '引用',
+  'palette.title': '命令面板',
+  'palette.placeholder': '搜索命令…（支持中文 / 英文 / 键位）',
+  'palette.empty': '没有匹配的命令',
   'slash.empty': '无匹配命令',
 
   // ---- 菜单项（自 useShortcuts.js 命令表引用；文案沿用原 Go 侧 locales.go）----
@@ -325,6 +336,7 @@ export default {
   'menu.zoomReset': '重置缩放',
   'menu.theme': '切换主题',
   'menu.typewriter': '打字机模式',
+  'menu.commandPalette': '命令面板',
   'menu.alwaysOnTop': '窗口置顶',
   'menu.minimize': '最小化',
   'menu.zoom': '缩放',
