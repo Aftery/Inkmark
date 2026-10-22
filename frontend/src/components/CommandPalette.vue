@@ -258,7 +258,11 @@ defineExpose({ show, close, isOpen: () => open.value })
 .palette-mask {
   position: fixed;
   inset: 0;
-  z-index: 200;
+  /* 模态覆盖层：必须压过 toast(1300) 与 history(1200)，否则保存失败 toast
+     会浮在面板之上挡住输入框；与 dialog(1400) 同档略高，确保「在面板里搜到
+     '设置'回车打开设置面板」时设置面板盖在面板之上（正确的层叠），而面板自身
+     不被任何提示压住。App.vue 150 行铁律下无法用 prop 传层级，故在此固定。 */
+  z-index: 1500;
   display: flex;
   align-items: flex-start;
   justify-content: center;

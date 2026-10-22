@@ -143,3 +143,19 @@ describe('命令面板 · 选中下标导航', () => {
     assert.equal(moveIndex(-5, -1, 3), 2, '负下标须先夹回首项(0)，再 -1 循环到末项(2)')
   })
 })
+
+// ===========================================================================
+// 视觉层级契约（模态覆盖层必须压过提示与弹窗）
+// ===========================================================================
+import { readFileSync } from 'node:fs'
+describe('命令面板 · 视觉层级', () => {
+  const src = readFileSync(
+    new URL('../src/components/CommandPalette.vue', import.meta.url), 'utf8')
+
+  test('遮罩 z-index 必须高于 toast(1300) 与 dialog(1400)', () => {
+    const m = src.match(/z-index:\s*(\d+)/)
+    assert.ok(m, 'palette-mask 必须声明 z-index')
+    const z = Number(m[1])
+    assert.ok(z > 1400, `面板是模态覆盖层，z-index(${z}) 必须高于 toast/dialog(1300/1400)，否则保存失败 toast 会盖住输入框`)
+  })
+})

@@ -153,7 +153,11 @@ defineExpose({ openMenu, isOpen, move, confirm, close, syncFromDoc })
   font-family: var(--font-ui);
   font-size: var(--text-sm);
   color: var(--fg);
-  z-index: 200; /* 高于弹层（1400）之下、toast（1300）之上：面板是编辑器附属物 */
+  /* 200：SlashCommand 是编辑器内联面板（不 Teleport，随编辑区滚动），与全屏
+     模态的命令面板不同，层级只需高于正文内容即可；toast/dialog 出现时压过它
+     是可接受的（提示优先级高于内联输入辅助）。注：旧注释称「高于 toast(1300)」
+     是错误的 —— 200 实际低于 1300，此处层级语义本就不同，不再用更高值。 */
+  z-index: 200;
 }
 .slash-item {
   display: flex;
