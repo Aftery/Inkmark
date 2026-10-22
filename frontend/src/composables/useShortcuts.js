@@ -242,12 +242,28 @@ export function hasAccel(accel) {
  * 编辑器失焦时也能用；而 CodeMirror 的 keymap 只在编辑器聚焦时生效。
  * 编辑器内按下的组合键会被这里拦下并 preventDefault，
  * 不会同时触发浏览器默认行为。
+ *
+ * 【与 CommandPalette.vue 的分工：为什么这里要避让 view.commandPalette】
+ * CommandPalette.vue 在同一个 window 上装了 **capture 阶段** 的 keydown，
+ * 本函数装的是 bubble 阶段。view.commandPalette 的处理是「翻转开关」，
+ * 两边都分发就会翻转两次（2026-10 真机缺陷「⌘⇧A 按了没反应」的根因，
+ * 详见 CommandPalette.vue 打开分支的注释与头注）。
+ * 分工因此固定为：
+ *   面板关闭时 —— capture 先命中、stopPropagation() 切断本监听；
+ *   面板打开时 —— capture 主动放行（它转去接管 Esc/Enter/↑↓），
+ *                 此时必须由**本监听**避让，否则又变成一次多余的分发，
+ *                 把用户正看着的面板关掉。
+ * 判据用 uiState.paletteOpen 而不是「本监听自己记一份状态」：那是双真源，
+ * 正是这类「一处开了另一处不知道」缺陷的通用成因。
  */
 export function installGlobalShortcuts() {
   const onKeydown = (e) => {
     if (e.isComposing) return // 输入法组字中不拦截
     const id = matchCommand(e)
     if (!id) return
+    // 面板已打开时，命令面板键位的分发权归 CommandPalette.vue 的 capture
+    // 监听（它此时负责 Esc 关闭与列表导航），本监听避让以免重复翻转。
+    if (id === 'view.commandPalette' && uiState.paletteOpen.value) return
     e.preventDefault()
     emitCommand(id)
   }

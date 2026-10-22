@@ -170,6 +170,18 @@ function onKeydown(e) {
   if (!open.value) {
     if (cmd?.accel && accelFromEvent(e) === cmd.accel) {
       e.preventDefault()
+      // stopPropagation 是**本行存在的全部理由**，别当成冗余调用删掉：
+      // 本监听装在第 3 个参数为 true 的 capture 阶段，而 installGlobalShortcuts
+      // （useShortcuts.js）在同一 window 上装的是 bubble 阶段。两者都会命中
+      // ⌘⇧A 并各自 emitCommand('view.commandPalette')，而该处理器是「翻转」
+      // uiState.paletteOpen —— 于是同一次按键翻转两次：先 true 后 false，
+      // 用户看到的就是「按了没反应，面板闪一下就没了」。
+      // 只调 preventDefault() **不**阻止事件传播（它只取消浏览器默认行为），
+      // 必须 stopPropagation() 才能让同一事件的 bubble 阶段整体跳过。
+      // 放在这个 if 里而不是无条件调用：Esc/Enter/↑↓ 是「面板开着时」的分支，
+      // 无条件拦死会让它们到不了该到的监听器（已用 tests/command-palette.test.mjs
+      // 的键位作用域用例钉住）。
+      e.stopPropagation()
       emitCommand(PALETTE_ID)
     }
     return
@@ -201,6 +213,14 @@ function onKeydown(e) {
 // capture 阶段监听：必须早于编辑器的 keymap，否则 ⌘⇧A 会被 CM 先吃掉。
 // 该监听只负责「打开」（走 emitCommand 统一总线）与「开着时接管按键」；
 // 命令处理器本身注册在 useCommands.js（契约 1 要求集中在那里）。
+//
+// 【双监听时序契约：本监听命中打开键位时必须 stopPropagation()】
+// installGlobalShortcuts()（useShortcuts.js）在同一个 window 上装了 bubble
+// 阶段的 keydown，它看到同一个 ⌘⇧A 也会 emitCommand('view.commandPalette')。
+// 该处理器做的是「翻转」而不是「置真」：两个阶段各 emit 一次 = 翻转两次
+// = 打开后立刻关闭，症状是「按了没反应」。故命中分支里必须
+// stopPropagation() 切断 bubble 阶段。这是 2026-10 真机缺陷
+// 「⌘⇧A 命令面板快捷键没用」的根因与修法，勿回退。
 onMounted(() => window.addEventListener('keydown', onKeydown, true))
 onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown, true))
 
