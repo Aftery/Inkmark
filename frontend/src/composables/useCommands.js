@@ -28,7 +28,7 @@ import { pasteIntoView } from '../editor/pasteCommand.js'
 import { promoteHeading, demoteHeading } from '../editor/headingLevel.js'
 import { SYNTAX_DOC } from '../editor/sampleDocs.js'
 import {
-  commandsByGroup, fmtAccel, onCommand, installGlobalShortcuts,
+  commandsByGroup, fmtAccel, onCommand, installGlobalShortcuts, uiState,
 } from './useShortcuts.js'
 import { WindowMinimise, WindowToggleMaximise } from '../../wailsjs/runtime/runtime.js'
 import { ClipboardGet, ClipboardSet, Version } from '../../wailsjs/go/main/App.js'
@@ -260,6 +260,11 @@ export function useCommands(deps) {
       'format.insertToc': () => execCmd(insertToc),
       'format.clear': () => execCmd(clearFormatting),
       // 视图
+      // 命令面板：翻转 uiState.paletteOpen（模块级 ref）。真正的面板渲染与键位
+      // 处理在 CommandPalette.vue，但**处理器必须注册在这里** —— 契约 1
+      // （contracts.test.mjs）只扫 useCommands.js，且「命令有登记但无处理器」
+      // 正是它要挡的静默失败：菜单里点了没反应、还不报错。
+      'view.commandPalette': () => { uiState.paletteOpen.value = !uiState.paletteOpen.value },
       'view.focus': workspace.toggleFocus,
       'view.outline': toggleOutline,
       'view.zoomIn': () => prefs.changeZoom(10),

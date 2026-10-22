@@ -10,6 +10,7 @@ import { extractOutline } from './editor/outline'
 import TitleBar from './components/TitleBar.vue'
 import Sidebar from './components/Sidebar.vue'
 import StatusBar from './components/StatusBar.vue'
+import CommandPalette from './components/CommandPalette.vue'
 import SlashCommand from './components/SlashCommand.vue'
 import HistoryPanel from './components/HistoryPanel.vue'
 import SettingsPanel from './components/SettingsPanel.vue'
@@ -122,7 +123,7 @@ function onDocChange() {
       :line="caret.line" :col="caret.col" :words="wordCount" :zoom="zoom"
       @zoom="prefs.changeZoom(10)" />
 
-    <SlashCommand ref="slashRef" />
+    <CommandPalette /><SlashCommand ref="slashRef" />
     <HistoryPanel v-if="showHistory" :file-path="filePath" :snapshots="snapshots"
       :loading="historyLoading" @close="showHistory = false"
       @snapshot-now="docState.snapshotNow" @restore="docState.restoreSnapshot" />

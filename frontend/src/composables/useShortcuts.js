@@ -104,6 +104,11 @@ export const COMMANDS = [
   { id: 'format.clear', group: 'format', labelKey: 'menu.clearFormat', accel: null, descKey: null },
 
   // ---- 视图（只剩「专注 / 大纲 / 缩放 / 主题」；阅读态已于 2026-10-14 移除）----
+  // 【命令面板为何是 ⌘⇧A 而不是 ⌘K】⌘K 在本应用已绑给「插入链接」（沿用 Typora
+  // 的肌肉记忆，不能抢）；⌘⇧P 也已绑给导出 PDF。⌘⇧A 是当时唯一空闲、且不与
+  // 系统保留键（⌘⇧3/4/5 截图、⌘⇧Q 注销）冲突的组合。
+  // 改键位只改这一行即可 —— CommandPalette.vue 从本表读取键位，不硬编码。
+  { id: 'view.commandPalette', group: 'view', labelKey: 'menu.commandPalette', accel: '⌘⇧A', descKey: 'shortcuts.commandPalette' },
   { id: 'view.focus', group: 'view', labelKey: 'menu.focus', accel: '⌘⇧F', descKey: 'shortcuts.focus' },
   { id: 'view.outline', group: 'view', labelKey: 'menu.outline', accel: '⌘B', descKey: 'shortcuts.outline' },
   { id: 'view.zoomIn', group: 'view', labelKey: 'menu.zoomIn', accel: '⌘=', descKey: 'shortcuts.zoom' },
@@ -250,11 +255,16 @@ export function installGlobalShortcuts() {
   return () => window.removeEventListener('keydown', onKeydown)
 }
 
-// 兼容旧引用：视图模式 / 设置 / 关于的可见态统一放这里，供 TitleBar 与快捷键共用
+// 兼容旧引用：视图模式 / 设置 / 关于 / 命令面板的可见态统一放这里，
+// 供 TitleBar、快捷键总线与对应组件共用（模块级 ref = 跨组件的单一真源）。
 export const uiState = {
   settingsOpen: ref(false),
   shortcutsOpen: ref(false),
   aboutOpen: ref(false),
+  // 命令面板开合：useCommands 注册同名命令去翻转它（契约 1 要求每条命令都有
+  // 处理器，且处理器必须集中在 useCommands.js），CommandPalette.vue 监听它渲染。
+  // 这样「菜单点 / 按 ⌘⇧A / 面板内执行」三条路径都收敛到同一个开关。
+  paletteOpen: ref(false),
 }
 
 export const settingsOpen = computed(() => uiState.settingsOpen.value)
