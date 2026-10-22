@@ -1856,6 +1856,29 @@ than being linked (12.0)`，本机 SDK 与部署目标不一致导致，与本�
 （含 7 条真实驱动）；`watcher.go` 顺带修了去抖回调陈旧 payload 缺陷。
 **剩余：`wails dev` 真机确认三场景**（§7 treeSignal 行）。
 
+### ✅ 已完成 · Typora 化三套改动叠加的视觉审计（2026-10-22，lead 兜底）
+三套并行改动（A 排版 / B chrome / C 缺陷修复 / lead 命令面板）合并后，审计员
+进程意外退出未交报告，lead 用静态核查兜底。结论：
+
+- **z-index 层级**：命令面板 mask 原 `z-index:200`，但 toast=1300、dialog=1400，
+  保存失败 toast 会浮在面板之上盖住输入框；已提到 1500（commit `e8e96a6`），并
+  补一条视觉层级契约测试。SlashCommand 的 `z-index:200` 注释称「高于 toast(1300)」
+  是**错误注释**（200 实际低于 1300），已修正注释但**不升层级**——它是编辑器内联
+  面板（不 Teleport），层级语义不同于全屏模态，保留 200 即可。
+- **居中定宽后浮层锚点**：`.cm-md-copy` / `.cm-md-table-bar` 锚在 `.cm-line`
+  （A 改 `position:relative`），`right: var(--space-4)` 落在栏内右侧，定宽后
+  不溢出（A 实测：修复前距行 -2142px，修复后 +2px）。OK。
+- **状态栏隐藏**：`.statusbar.is-veiled { display:none }`，`.app` 为 flex column，
+  子项 none 后 flex 自动让位给 `.main`，编辑区高度撑满。OK。
+- **颜色一致性**：darwin chrome 层已回 `--surface` 实色（C）；`platform-darwin.css:26`
+  的 `.app` 层 `color-mix(--bg 94% transparent)` 是**正文写作面**刻意留的材质感
+  （C 注释明确「chrome 实色、正文留材质」），非 bug，保留。组件内无裸 hex（token
+  定义本身的 hex 合法）。OK。
+
+**唯一仍待真机目视**：WKWebView 字体渲染 / 滚动惯性 / 三个真 bug 的肉眼观感，
+以及本审计未覆盖的交互态（输入法候选框期间表格不闪、居中后长文阅读手感）。
+已记入 §6 第 27/28/29 项「待真机确认」。
+
 ## 9. 契约文档索引
 
 | 文档 | 内容 |
