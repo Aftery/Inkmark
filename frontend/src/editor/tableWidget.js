@@ -26,16 +26,10 @@ import {
 } from './tableOps.js'
 import { attachTableDrag } from './tableDrag.js'
 import { t } from '../i18n/index.js'
-
-function focusEnd(el) {
-  el.focus()
-  const r = document.createRange()
-  r.selectNodeContents(el)
-  r.collapse(false)
-  const s = window.getSelection()
-  s.removeAllRanges()
-  s.addRange(r)
-}
+import { focusEnd, restoreCellFocus } from './tableFocus.js'
+import {
+  estimatedTableHeight, measureTableHeight, primeTableHeight,
+} from './tableHeight.js'
 
 export class TableWidget extends WidgetType {
   constructor(t) {
@@ -91,6 +85,22 @@ export class TableWidget extends WidgetType {
     this.to = other.to
     this.source = other.source
     this.key = other.key
+  }
+
+  /**
+   * CM 的高度预估。覆写理由见 tableHeight.js 的文件头。
+   *
+   * 返回 -1（不知）只在「这张表从来没被量过」时发生，CM 会退回
+   * oracle.lineHeight 并在下一帧 measure() 量回真值 —— 是安全的退化路径。
+   * 一旦量过（本表或同一 key 的表），就返回缓存值，让 HeightMapBlock
+   * 一开始就拿到接近真实的高度，不再每帧先塌回一行高再跳回来。
+   *
+   * [关键] 本 getter 在 NodeBuilder 里被同步调用，**早于** toDOM()，也早于
+   * dispatchText() 返回。所以它只能查模块级缓存，不能依赖 this.dom 之类
+   * 实例字段 —— 复用时 CM 给的是「旧 DOM + 新实例」，新实例是个空壳。
+   */
+  get estimatedHeight() {
+    return estimatedTableHeight(this.key)
   }
 
   // 事件全部由 widget 自己处理（Tab/Enter 导航、Esc 退出、粘贴转纯文本），
@@ -163,6 +173,10 @@ export class TableWidget extends WidgetType {
 
     this.dom = wrap
     this.refreshIndicators()
+    // 此处**不能**量高度：toDOM 的返回值还没被 CM 插进文档，
+    // getBoundingClientRect 恒为 0，量了只会写进一个假值。真实量取点在
+    // sync() / rebuild() 之后 —— 那时 DOM 已在文档里且完成布局。首帧由 CM 的
+    // measure() 兜底（estimatedHeight 报 -1，见 tableHeight.js 文件头）。
     return wrap
   }
 
@@ -199,12 +213,12 @@ export class TableWidget extends WidgetType {
     this.table = next
     this.drag?.refresh?.()
     this.refreshIndicators()
-    // 焦点还原：优先调用方指定，否则沿用操作前的活动单元格
-    const row = focusRow ?? (this.activeRow + 1)
-    const col = focusCol ?? this.activeCol
-    const tr = this.table.rows[Math.max(0, Math.min(row, this.table.rows.length - 1))]
-    const cell = tr?.cells?.[Math.max(0, Math.min(col, (tr?.cells?.length ?? 1) - 1))]
-    if (cell) focusEnd(cell)
+    // 焦点还原：优先调用方指定，否则沿用操作前的活动单元格（越界自动夹取）
+    restoreCellFocus(this.table, focusRow ?? (this.activeRow + 1), focusCol ?? this.activeCol)
+    // 结构变更（增删行列）后行数变了，高度必然变 —— 立刻重取缓存，否则下一轮
+    // NodeBuilder 拿到的还是旧行数的高度，一样会先跳一下再被 measure() 修正。
+    // 此处可以直接记到 this.key：结构变更的写入已经完成，不会再有新一轮 dispatch。
+    measureTableHeight(this)
   }
 
   /**
@@ -324,6 +338,13 @@ export class TableWidget extends WidgetType {
     }
     // 文本已一致：不产生多余事务，但记账仍要对齐（见上）
     if (text !== state.sliceDoc(from, to)) {
+      // 【必须在 dispatch 之前】这是「跑行」修复的真正落点，时序理由见
+      // tableHeight.js 文件头：state.update 会立刻 new 出带新 source 的
+      // TableWidget，view.dispatch 同步触发 NodeBuilder 读 estimatedHeight ——
+      // 读发生在 dispatch 返回之前。若在 dispatch 之后才写缓存，新实例这一轮
+      // 仍报 -1；而下一轮 source 又变了，上一轮存的键永远匹配不上，逐字输入时
+      // 命中率恒为 0，等于没修。此处 this.dom 仍是文档里正在显示的表格，高度可信。
+      primeTableHeight(text, this.dom)
       const tr = state.update({ changes: { from, to, insert: text }, annotations: selfSync.of(true) })
       view.dispatch(tr)
       // 【为什么不能写 from + text.length】CM 按 lineSeparator facet 切行，换行符
