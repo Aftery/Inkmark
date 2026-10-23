@@ -1709,7 +1709,33 @@ WebKit 的默认粘贴行为就是**把它当纯文本插入**（这就是「粘
     停在原处；③ 在表格**上方**段落里写几行，再回表格单元格继续打字 —— 输入必须
     仍然落进这张表格（这是「实例复用后区间过期」的真机路径）；④ Tab / Enter
     换格后继续输入不错位；⑤ 表格下方紧跟一行正文，反复编辑表格后该行仍在原处。
-    **根因（本轮修的两条，都在 `tableWidget.js`）**：
+    **根因（本轮修的第三条，2026-10-23，commit `aac6b5b`）**：
+    (c) CM 的**高度记账**。`TableWidget` 没覆写 `WidgetType.estimatedHeight`，
+    默认 -1（`@codemirror/view/dist/index.js:148`），于是
+    `NodeBuilder.point`（`index.js:6036-6044`）把整张表当成**一行**高 —— 3~4 行
+    表格 DOM 实测 100~170px，CM 只记约 27px（16px 字号 / 1.7 行高）。
+    落差本身不致命（`measure()` 下一帧用 `setMeasuredHeight` 量回真值，
+    `index.js:5689-5699`）。致命的是**每敲一个字都重演一次**：block 装饰的
+    `PointDecoration.heightRelevant` **恒为 true**（`index.js:352-354`），故新旧
+    装饰永不 equal → `DecorationComparator.comparePoint`（`index.js:6139-6142`）
+    必报一个 height change range → `ViewState.update`（`index.js:6318-6322`）→
+    `heightMap.applyChanges` 把 `HeightMapBlock` 重建、高度回落 `oracle.lineHeight`
+    → 等下一帧 `measure()` 才拉回。于是表格后续内容每帧先上跳约 120px 再回落，
+    连续打字时**每敲一个字跳一次**。这就是「打 2 个字符就跑行」的物理来源，也
+    解释了它为什么像玄学：取决于表格是否在视口内、`measure()` 是否及时。
+    **修法**：按表格源码 key 跨实例缓存实测高度，`estimatedHeight` 同步查表。
+    **时序是分水岭**：缓存必须在 **dispatch 之前**写 —— `dispatchText` 里
+    `state.update` 会同步 new 出带新 source 的 `TableWidget`，`view.dispatch`
+    同步触发 `NodeBuilder` 读 `estimatedHeight`，读发生在 dispatch **返回之前**。
+    写晚一步则这一轮仍报 -1，而下一轮 source 又变了，上一轮存的键永远匹配不上，
+    逐字输入命中率恒为 0。故 `primeTableHeight(nextSource, dom)` 在
+    `state.update` 之前登记。拆分：`editor/tableHeight.js`（高度缓存 + 时序论证）、
+    `editor/tableFocus.js`（`focusEnd` / `restoreCellFocus`）。
+    **自动化守到**：`tests/table-widget-height.test.mjs`（17 条，真 EditorState
+    驱动真 widget；第 3 组专钉「dispatch 期间新源码已能查到高度」）。
+    **自动化守不到的**：真机上「跳」是否真的消失 —— 单元层只能证明 CM 记账不再
+    回落，观感必须肉眼逐字输入确认（见本节开头 ①~⑤）。
+    **根因（上一轮修的两条，都在 `tableWidget.js`）**：
     (a) `dispatchText()` 原来写 `this.to = from + text.length` —— CM 按
     `lineSeparator` facet 切行，`\r\n` 在文档里只占一个位置，故文档为 CRLF 时
     `text.length` 偏大，`to` 越过表格末尾，下一次读回就把**下方正文**当成表格
@@ -1737,6 +1763,7 @@ WebKit 的默认粘贴行为就是**把它当纯文本插入**（这就是「粘
 | **Linux（CachyOS）真机** | 无边框 + 自绘标题栏的 Linux 表现**从未在真机跑过**；窗口按钮对接的 `WindowMinimise/WindowToggleMaximise/CloseWindow` 在 Linux 后端的行为需目视 |
 | **「最近打开」功能整体下线** | 它的唯一消费方是原生菜单的子菜单；自绘标题栏未做该入口。若要恢复，需前端加列表 + 重新暴露 Go 的 `GetRecents`（`recents.json` 持久化逻辑仍在 `app.go` 的 `recentsPath` 等函数里，但 `AddRecent` 调用点已删） |
 | **表格真渲染待真机验收** | 2026-10-14 落地：编辑器内 StateField block 装饰渲染真表格（`src/editor/tableRender.js`），单元格可直接编辑并同步回 Markdown 源码；单元测试已过，光标进出切换渲染/源码、Tab 换格、IME 输入等真机路径待目视（见 §6 第 20 项）。原「`useOutline` 阅读态分支未验证」随阅读态 2026-10-14 整体移除而消失 |
+| **⌘⇧A 命令面板与表格高度记账的真机确认** | 2026-10-23 两个真机缺陷的代码修复已落地并提交：`669d476`（⌘⇧A —— `CommandPalette.vue` 的 capture 监听与 `installGlobalShortcuts` 的 bubble 监听都对同一个 toggle 命令分发，导致「开→立刻关」；已改为面板打开时 `stopPropagation` + 全局侧避让）与 `aac6b5b`（表格跑行 —— 补 `estimatedHeight`，见 §6 第 29 项 (c)）。两者**都只做到「静态验证通过」**：516/516 测试 + 6 个变异全部转红 + 构建通过。⚠️ **真机仍全部未验**：① ⌘⇧A 打开面板不闪退、面板打开时再按不关闭、Esc 关闭、↑↓/Enter 导航、菜单项「命令面板」仍可打开；② WKWebView 上 ⌘⇧A 实际报的 `e.key` 是大写还是小写（代码已用 `toLowerCase()` 归一，但真机未取证）；③ 表格逐字输入不再跑行、IME 候选框稳定、Tab/Enter 对齐、下方正文不被吞。在真机验过之前，两处**一律记「待真机确认」，不得写「已修复」** |
 | **通道③ 的 Linux / Windows 适配层未在真机验证** | 2026-10-15 落地：图片粘贴新增第三条通道（Go 侧读系统剪贴板）。**macOS 已用真实 NSPasteboard 端到端跑通两个场景**（复制的文件 / 纯图片数据），但 `clipboard_linux.go`（xclip / wl-paste）与 `clipboard_windows.go`（CF_DIBV5 / CF_DIB / CF_HDROP）**只做到「能交叉编译过」，剪贴板 IO 从未在真机跑过**。⚠️ 这正是本仓最熟悉的形态：**能编 ≠ 能用**。首次在Linux / Windows 真机上验过时，请更新本行。两处已知风险：① Linux 的剪贴板工具未装时静默返回空（图片插不进去，但不报错）；② Windows 的 CF_DIB 需补 `BITMAPFILEHEADER` 才被认成 BMP，若 alpha 处理不当可能得到黑底 |
 | ✅ **通道③ 的真机复验（#8）** | **已闭环（2026-10-16，跨四轮）**：通道② 错根因（§2 第十二轮）→ 通道③ Go 读剪贴板 → doc-assets 显示链路（第十三轮）→ **⌘V 命令通道（第十四轮，真正的最后一环）**。真机复验通过：复制图片 ⌘V 插入 `![](assets/…)` 且显示、Finder ⌘C ⌘V 同、拖拽同、普通中文粘贴不被吞（弱启发式门槛回归重点）。通道③ 前端入口现仅服务**拖拽与 paste 事件兜底**；⌘V / 菜单粘贴走 `pasteCommand.js` 的图片优先路径（见 §2 第十四轮） |
 | **关闭守卫待复验（§6 #4）** | 2026-10-15 `CloseWindow` 重构为带参（`CloseWindow(dirty)`，dirty 随关闭请求同一条 IPC 携带，消除 50ms sleep 时序补丁；判定本体抽 `confirmClose` 与红绿灯路径共用，见 ADR-005 §五）。**改动后未在真机复验**：脏文档点红绿灯 / 自绘 × 应弹「未保存的更改」，取消能留在应用。Linux/Windows 的自绘 × 路径本就未验 |
