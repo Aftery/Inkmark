@@ -25,7 +25,7 @@
 // 清单只重算可见性，widget 经 eq 命中，零 DOM 重建）。
 
 import { Decoration, EditorView, ViewPlugin } from '@codemirror/view'
-import { Annotation, RangeSetBuilder, StateEffect, StateField } from '@codemirror/state'
+import { Annotation, EditorSelection, EditorState, RangeSetBuilder, StateEffect, StateField } from '@codemirror/state'
 import { ensureSyntaxTree, syntaxTree, syntaxTreeAvailable } from '@codemirror/language'
 // 行列增删（纯 model 变换）与操作条 DOM —— 见该文件头注的职责切分
 import { TableWidget } from './tableWidget.js'
@@ -154,6 +154,39 @@ export function locateTable(state, pos) {
 
 /** 触发全量重扫的事务效果（树补齐后由 tableScanKick 发出） */
 export const rescanTables = StateEffect.define()
+
+/**
+ * 选区守卫（真机「表格输入几个字就失焦 + 表格变竖线」的第二道闸，2026-10-23）。
+ *
+ * 【要拦什么】CM 的 DOMObserver 把「单元格 DOM 选区」读回文档的路径不止打字事务：
+ * flush() 在 domChange.bounds 为 null（widget 内容变更覆盖不到）时仍可能走
+ * applyDOMChange 的 newSel-only 分支派发 {selection: 表内坐标}（view/dist/
+ * index.js:4329-4344）。触发条件是三重竞态（selectionChanged 残留 true +
+ * activeElement 恰好回到 contentDOM 使 hasFocus 为真 + 任一 flush），打字几秒
+ * 内随机命中 —— 命中后主选区进表格 range ⇒ selectionInside 翻真 ⇒ block widget
+ * 从装饰里撤下 = 表格瞬间退化为 Markdown 竖线行（用户眼里「变成列表」），焦点
+ * 随 widget DOM 摘除彻底丢失。
+ *
+ * 【为什么过滤掉是安全的】这笔事务唯一的内容就是「把主选区挪进表格内部」——
+ * 而单元格编辑期间主选区本应停在表外（widget 收点击，CM 选区从未跟进）；
+ * 把它改写到表格**起始边界**：仍算界外（selectionInside 的边界判定），渲染态
+ * 保持，同时给后续 flush 的 sameSelPos 一个同位锚点。携带文档变更或 userEvent
+ * 的正常选区事务（点击行号、⌘F 跳转、outline 跳转等）不受影响 —— 它们要么
+ * 目标不在表内，要么带着 selfSync（widget 的 Esc 退出本来就落在边界）。
+ */
+export const tableSelectionGuard = EditorState.transactionFilter.of((tr) => {
+  if (!tr.selection || tr.docChanged) return tr
+  const { tables } = tr.startState.field(tableRenderField, false) ?? { tables: [] }
+  if (!tables.length) return tr
+  // 逐 range 判定：只改写落在表格严格相交区间内的那个 range（同 selectionInside
+  // 口径，贴边界放行），其余 range 原样保留 —— 跨表的多光标/拖选不能被整体坍缩。
+  const ranges = tr.selection.ranges.map((r) => {
+    const hit = tables.some((t) => r.to > t.from && r.from < t.to)
+    return hit ? EditorSelection.cursor(Math.min(tr.startState.selection.main.from, r.from)) : r
+  })
+  if (ranges.every((r, i) => r === tr.selection.ranges[i])) return tr
+  return [{ selection: EditorSelection.create(ranges, tr.selection.mainIndex) }, { effects: tr.effects, annotations: tr.annotations }]
+})
 
 export const tableRenderField = StateField.define({
   create: (state) => {

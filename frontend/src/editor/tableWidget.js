@@ -105,6 +105,9 @@ export class TableWidget extends WidgetType {
 
   // 事件全部由 widget 自己处理（Tab/Enter 导航、Esc 退出、粘贴转纯文本），
   // CM 不参与 —— 否则点击单元格会被当作普通光标点击。
+  // 【另见 tableInputGate.js】CM 对单元格内容的默认读回事务由 inputHandler
+  // 全局拦截（拆到独立文件的原因与根因链见该文件头注）—— 不在这里注册，
+  // 因为 eq() 复用断掉的实例收不到任何 widget 方法，全局通道才可靠。
   ignoreEvent() { return true }
 
   /** 按 model 构建 <table>（重建与首次渲染共用，保证两条路径绝不会画出两种结构） */
@@ -345,7 +348,18 @@ export class TableWidget extends WidgetType {
       // 仍报 -1；而下一轮 source 又变了，上一轮存的键永远匹配不上，逐字输入时
       // 命中率恒为 0，等于没修。此处 this.dom 仍是文档里正在显示的表格，高度可信。
       primeTableHeight(text, this.dom)
-      const tr = state.update({ changes: { from, to, insert: text }, annotations: selfSync.of(true) })
+      const tr = state.update({
+        changes: { from, to, insert: text },
+        annotations: selfSync.of(true),
+        // 【选区守卫】主选区此刻多半停在表外旧位置（单元格收点击，CM 主选区
+        // 从未跟进）。这笔事务若不带 selection，flush/selectionchange 读到单元格
+        // DOM 选区后会把 CM 主选区「搬进」表格 range（applyDOMChange 的 newSel
+        // 派发 / applyDefaultInsert 的 mainSel 搬运）⇒ selectionInside 翻真 ⇒
+        // 下一帧 widget 从装饰里消失 = 表格瞬间源码化 + 焦点丢。这里把主选区
+        // 钉在表格**边界**（this.to，界外判定包含边界）：渲染态保持，flush 的
+        // newSel 与主选区同位 ⇒ sameSelPos 命中不再搬运。
+        selection: { anchor: Math.min(from, state.doc.length) },
+      })
       view.dispatch(tr)
       // 【为什么不能写 from + text.length】CM 按 lineSeparator facet 切行，换行符
       // 被归一化（\r\n → 单个位置）：文档是 CRLF 时 text.length 比真实增量多出
@@ -358,6 +372,15 @@ export class TableWidget extends WidgetType {
     this.to = to
     this.source = text
     this.key = text
+    // 【选区守卫的另一半】sync 可能因「文本已一致」而不发事务（上面 if 未进），
+    // 但 CM 主选区仍可能已被搬进表内（例如 flush 在 sync 之前先跑了一轮 newSel
+    // 派发）。只要发现主选区落在表格 range 内，立刻移到表格起始边界：既保持
+    // 渲染态（边界算界外），又给 flush 的 sameSelPos 一个可命中的同位锚点。
+    // dispatchText 成功 ⇒ 表格 range 就是 [from, to]，直接用。
+    const sel = view.state.selection.main
+    if (sel.to > from && sel.from < to) {
+      view.dispatch({ selection: { anchor: Math.min(from, view.state.doc.length) } })
+    }
     return true
   }
 

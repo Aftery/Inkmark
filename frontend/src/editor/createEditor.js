@@ -22,7 +22,8 @@ import { wysiwygField, wysiwygPlugin, wysiwygAtomicRanges } from './wysiwyg'
 import { taskToggleHandlers } from './taskToggle'
 import { codeLinePlugin, codeCopyPlugin } from './codeBlock.js'
 
-import { tableRenderField, tableScanKick } from './tableRender'
+import { tableRenderField, tableScanKick, tableSelectionGuard } from './tableRender'
+import { tableInputGate } from './tableInputGate'
 import { slashCommandExtension } from './slashCommand'
 import { imageDropHandlers } from './imageDrop'
 import { smartInputExtension } from './smartInput.js'
@@ -368,8 +369,13 @@ export function createEditor(parent, { doc = '', onDocChange, onScroll, onUpdate
       wysiwygField,
       wysiwygPlugin,
       wysiwygAtomicRanges,
-      // 表格真渲染（StateField block 装饰 + 可编辑单元格，见 tableRender.js 头注）
+      // 表格真渲染（StateField block 装饰 + 可编辑单元格，见 tableRender.js 头注）。
+      // tableSelectionGuard：拦「flush 把单元格 DOM 选区搬进主选区」的事务
+      // （表格退化成竖线 + 失焦的第二道闸，根因链见 tableRender.js 的守卫头注）。
       tableRenderField,
+      tableSelectionGuard,
+      // 拦 CM 对单元格内容的默认读回事务（失焦根因第一道闸，见 tableInputGate.js）
+      tableInputGate,
       // 语法树补齐后的初始重扫兜底（StateField.create 跑在树就绪之前）
       tableScanKick(),
       // 缩放（状态栏 90/100/110/125%）：Compartment 运行时重配，不重建编辑器
