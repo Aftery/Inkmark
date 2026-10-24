@@ -27,6 +27,9 @@ import { t } from '../i18n/index.js'
 // 图片 src 的文档相对路径 → /doc-assets/ 改写（唯一口径在 assetUrl.js）；
 // 不改写的话 src 会落到构建产物目录，图片永远是碎图占位
 import { resolveAssetSrc } from './assetUrl.js'
+// 改写口径的版本号：文档路径变化不产生事务，装饰必须靠它判「过期了」。
+// 同步点与版本号都在 assetContext.js（文件头有完整根因说明）。
+import { assetVersion } from './assetContext.js'
 
 // ---------- 开关：StateField + StateEffect（与 createEditor.js 的 setFocusMode 同构） ----------
 // 默认开启：即时模式是 D-2 的默认编辑形态。
@@ -89,31 +92,70 @@ class HrWidget extends WidgetType {
 }
 const hrDeco = Decoration.replace({ widget: new HrWidget() })
 
+/**
+ * 构建图片预览的 DOM（占位框态含在内）。
+ * 独立成导出函数的原因：ImageWidget 的 toDOM 要按「构造期 / 构建期」两个
+ * 时点解析 src（见 ImageWidget 头注的定格缺陷），测试也需要一个能注入
+ * document stub 直接驱动的入口 —— 它就是图片装饰的**唯一 DOM 组装点**。
+ *
+ * @param {string} rawSrc Markdown 里的原始 src（占位框文案用它，与旧实现一致）
+ * @param {string} resolved 已按 assetUrl 口径改写的 src（img 实际加载的地址）
+ * @param {string} alt
+ */
+export function buildImageDOM(rawSrc, resolved, alt) {
+  const wrap = document.createElement('span')
+  wrap.className = 'cm-md-img'
+  const img = document.createElement('img')
+  img.src = resolved
+  img.alt = alt
+  img.loading = 'lazy'
+  img.addEventListener('error', () => {
+    // 远程图常因离线 / 防盗链失败：留一个可读的占位而不是碎图标。
+    // tip 文案用**原始** src（用户写进 Markdown 的路径），不是改写后的
+    // /doc-assets/… —— 占位框是给「看 Markdown 的人」读的。
+    wrap.classList.add('is-broken')
+    img.remove()
+    const tip = document.createElement('span')
+    tip.className = 'cm-md-img-tip'
+    tip.textContent = alt || rawSrc
+    wrap.appendChild(tip)
+  })
+  wrap.appendChild(img)
+  return wrap
+}
+
 // ---------- 图片：`![alt](url)` 换成图片预览 ----------
 // 只在「非活跃行」替换（活跃行保持源码，见 §3.2 显形判定）：用户正在编辑
 // 那一行时把它变成图片反而挡路。加载失败不抛——onError 把 <img> 摘掉，
-// 由 CSS 的 .cm-md-img-broken 呈现占位框（并保留 alt 文本于 title）。
+// 由 CSS 的 .is-broken 呈现占位框（并保留 alt 文本于 title）。
+//
+// 【eq/toDOM 为什么带着 resolvedSrc —— 2026-10-23 真机回归「图片占位框显示
+// assets/ 路径而不是图片」的根因，勿回退】
+// 改写依赖 assetUrl 的模块级开关，而 widget 是**构造期快照**：插图时文档往往
+// 还没落盘（开关关着）⇒ toDOM 拿到未改写的 assets/… ⇒ 404 ⇒ 占位框。此后文档
+// 落盘、开关打开，但 eq() 只比 src/alt（两者不变）⇒ CM 复用旧 DOM ⇒ 破损态
+// 永久定格。另一条路径是跨目录切换，toDOM 读到的是上一个文档的开关状态。
+// 修法 = 让「改写口径」参与复用判定（构造期解析出的 resolvedSrc 进 eq）；但仅此
+// 不够 —— 路径变化**不产生 CM 事务**，装饰根本不会重算，故另需 assetContext.js
+// 的版本号与刷新信号（见该文件头与 shouldRebuildDecorations）。
 class ImageWidget extends WidgetType {
-  constructor(src, alt) { super(); this.src = src; this.alt = alt }
-  eq(other) { return other.src === this.src && other.alt === this.alt }
+  constructor(src, alt) {
+    super()
+    this.src = src
+    this.alt = alt
+    // eq 键带 resolvedSrc：否则文档路径状态变化时 widget 被判「没变」，
+    // 上一次按旧开关解析出的地址（多半是 404）会被一直复用（见上）。
+    this.resolvedSrc = resolveAssetSrc(src)
+  }
+  eq(other) {
+    return other.src === this.src && other.alt === this.alt
+      && other.resolvedSrc === this.resolvedSrc
+  }
   toDOM() {
-    const wrap = document.createElement('span')
-    wrap.className = 'cm-md-img'
-    const img = document.createElement('img')
-    img.src = resolveAssetSrc(this.src)
-    img.alt = this.alt
-    img.loading = 'lazy'
-    img.addEventListener('error', () => {
-      // 远程图常因离线/防盗链失败：留一个可读的占位而不是碎图标
-      wrap.classList.add('is-broken')
-      img.remove()
-      const tip = document.createElement('span')
-      tip.className = 'cm-md-img-tip'
-      tip.textContent = this.alt || this.src
-      wrap.appendChild(tip)
-    })
-    wrap.appendChild(img)
-    return wrap
+    // toDOM 可能在构造之后很久才被 CM 调用（视口外惰性构建），此时再读一次
+    // 当前开关；构造期已解析的 this.resolvedSrc 作为兜底 —— 两个时点都不漏。
+    const resolved = resolveAssetSrc(this.src) || this.resolvedSrc
+    return buildImageDOM(this.src, resolved, this.alt)
   }
   ignoreEvent() { return false }
 }
@@ -159,15 +201,45 @@ function urlOf(node, doc) {
   // URL 节点含尖括号包裹时 slice 出来是 <a.png>，去掉
   return doc.sliceString(url.from, url.to).replace(/^<|>$/g, '')
 }
+
+/**
+ * 取图片的 alt 文本。
+ *
+ * 【为什么不能只认 LinkLabel 子节点 —— 2026-10-24 实测】lezer 对**行内式**
+ * `![alt](url)` **不产出 LinkLabel 节点**（Image 的子节点只有
+ * LinkMark/LinkMark/LinkMark/URL/LinkMark），只有**引用式** `![alt][ref]` 才有。
+ * 旧实现只查后者 ⇒ 行内图片的 alt 恒为 ''：占位框丢掉用户写的说明、退化成裸
+ * 路径，eq 的 alt 项也永远不生效（两侧都是空串）。故行内式改从 Image 的**头两个
+ * LinkMark 之间**取（`![` 之后到 `]` 之前）—— 那就是 alt 的权威区间，比在
+ * `![]()` 上跑正则可靠（不误伤嵌套括号与转义）。
+ */
 function altOf(node, doc) {
   const label = findChild(node, 'LinkLabel')
-  if (!label) return null
-  return doc.sliceString(label.from, label.to).replace(/^\[|\]$/g, '')
+  if (label) return doc.sliceString(label.from, label.to).replace(/^\[|\]$/g, '')
+  const n = node.node
+  if (!n) return ''
+  // 第一个 LinkMark 是 `![`，第二个是 `]`；两者之间即 alt
+  const marks = []
+  for (let c = n.firstChild; c && marks.length < 2; c = c.nextSibling) {
+    if (c.name === 'LinkMark') marks.push(c)
+  }
+  if (marks.length < 2) return ''
+  return doc.sliceString(marks[0].to, marks[1].from)
 }
 
 // ---------- 装饰构建：只遍历 visibleRanges ----------
-function build(view) {
-  const state = view.state
+/**
+ * 构建整份装饰集（唯一构建入口）。
+ *
+ * 形参是 state + 可见区间而**不是** view：本函数只用到这两样，收窄签名后
+ * 「同一份文档 + 两种改写口径」可以在 node 里直接对比（见
+ * tests/image-asset-context.test.mjs —— 缺陷本体就是「两种口径下产出的装饰
+ * 应当不同」，而它此前完全没有覆盖）。
+ *
+ * @param {import('@codemirror/state').EditorState} state
+ * @param {readonly {from:number,to:number}[]} visibleRanges
+ */
+export function buildDecorations(state, visibleRanges) {
   if (!state.field(wysiwygField)) {
     return { deco: Decoration.none, atomic: Decoration.none }
   }
@@ -206,7 +278,7 @@ function build(view) {
     }
   }
 
-  for (const { from: visFrom, to: visTo } of view.visibleRanges) {
+  for (const { from: visFrom, to: visTo } of visibleRanges) {
     syntaxTree(state).iterate({
       from: visFrom,
       to: visTo,
@@ -332,27 +404,54 @@ function build(view) {
 }
 
 // ---------- ViewPlugin：函数式装饰提供者（视口计算之后调用，天然 O(可见行数)） ----------
+
+/**
+ * 是否需要重算装饰集。
+ *
+ * 【为什么单列成导出函数】「文档路径变化」这一类更新**不带任何 CM 可见信号**
+ * （docChanged / selectionSet / viewportChanged 全为 false），旧实现在这个
+ * 判据里就丢掉了它 —— 而这段逻辑无法靠目视验证：漏判的表现是「图片停在旧
+ * 地址」，装饰集本身完全合法。收窄成纯函数后可以拿真实 EditorState 逐条打靶
+ * （tests/image-asset-context.test.mjs）。
+ *
+ * @param {object} u ViewUpdate 形态（测试里用真实 Transaction 拼）
+ * @param {number} prevAssetVersion 上次构建时记下的改写口径版本
+ */
+export function shouldRebuildDecorations(u, prevAssetVersion) {
+  return (
+    // 改写口径变了（文档路径变了）：图片 src 的整体口径随之变化。
+    // 这一条必须排在最前 —— 它对应的更新里其余判据全为 false。
+    prevAssetVersion !== assetVersion() ||
+    u.docChanged ||
+    u.selectionSet ||
+    u.viewportChanged ||
+    u.startState.field(wysiwygField) !== u.state.field(wysiwygField)
+  )
+}
+
 export const wysiwygPlugin = ViewPlugin.fromClass(
   class {
     constructor(view) {
-      const built = build(view)
+      const built = buildDecorations(view.state, view.visibleRanges)
       this.decorations = built.deco
       this.atomic = built.atomic
+      // 装饰是按**当下**的改写口径构建的，把口径版本记下来（assetContext.js）。
+      // 构造期取版本而不是比较旧装饰里的 widget —— widget 的 resolvedSrc 只能
+      // 反映它自己那一次 resolve，判定「整个装饰集是否过期」还得看这个全局量。
+      this.assetVersion = assetVersion()
     }
     update(update) {
       // IME 保护（AC-04）：合成期间冻结装饰重算，沿用上一次装饰集。
       // 绝不在合成中途改动 DOM，否则候选窗/预编辑文本可能被清掉。
+      // 【注意本行必须在版本号判定之前】合成期整笔跳过 ⇒ this.assetVersion
+      // 保持旧值，合成结束后（下一笔事务）仍判定为过期、补一次重建 ——
+      // 过期信息不会因跳过而丢失（见 assetContext.js 文件头最后一段）。
       if (update.view.composing) return
-      if (
-        update.docChanged ||
-        update.selectionSet ||
-        update.viewportChanged ||
-        update.startState.field(wysiwygField) !== update.state.field(wysiwygField)
-      ) {
-        const built = build(update.view)
-        this.decorations = built.deco
-        this.atomic = built.atomic
-      }
+      if (!shouldRebuildDecorations(update, this.assetVersion)) return
+      const built = buildDecorations(update.view.state, update.view.visibleRanges)
+      this.decorations = built.deco
+      this.atomic = built.atomic
+      this.assetVersion = assetVersion()
     }
   },
   { decorations: (v) => v.decorations },

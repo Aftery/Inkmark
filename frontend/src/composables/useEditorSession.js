@@ -23,8 +23,7 @@ import { createRenderer, render } from '../preview/markdown'
 import { DEFAULT_DOC } from '../editor/sampleDocs'
 import { t } from '../i18n/index.js'
 import { checkTableHint, clearTableHint } from './useTableHint.js'
-import { setDocPath } from '../editor/assetUrl.js'
-import { SetDocDir } from '../../wailsjs/go/main/App'
+import { applyDocPath } from '../editor/assetContext.js'
 
 const PREVIEW_DEBOUNCE_MS = 120
 
@@ -87,16 +86,15 @@ export function useEditorSession({
   const previewHtml = computed(() => render(renderer, markdown.value, { resolveAssets: true }))
   const exportHtml = computed(() => render(renderer, markdown.value))
 
-  // 文档路径 → 两处消费：前端改写开关（assetUrl）+ Go 侧镜像（/doc-assets/ 读盘根，
-  // docassets.go）。flush:'sync' 在赋值同一行生效，不与随后的 setState / 装饰构建
-  // 竞速。try/catch 只兜「不在 Wails 环境」（浏览器预览无绑定），与 TitleBar 同款。
+  // 文档路径 → 三处消费：前端改写开关（assetUrl）+ Go 侧镜像（/doc-assets/ 读盘根，
+  // docassets.go）+ 图片装饰刷新信号（assetContext.js）。三件事必须一起做，
+  // 故统一走 applyDocPath 这个唯一同步点 —— 路径变化不产生事务，少一次通知就会
+  // 让已渲染的图片一直复用旧 DOM（破损态定格，见 assetContext.js 文件头）。
+  // flush:'sync' 在赋值同一行生效，不与随后的 setState / 装饰构建竞速。
   watch(
     filePath,
     (p) => {
-      setDocPath(p)
-      try {
-        SetDocDir(p)
-      } catch { /* 浏览器预览无绑定 */ }
+      applyDocPath(p, editorRef.value)
     },
     { flush: 'sync' }
   )

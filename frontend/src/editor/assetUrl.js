@@ -18,10 +18,23 @@
 // 赋值之后，装饰构建时状态已就位）。
 
 let hasDocDir = false
+// 上一次同步进来的路径：只用来判断「是否真的变了」。改写口径本身只取决于
+// hasDocDir（有目录 / 没目录），但「变了」这个事实是图片装饰的刷新依据 ——
+// 见 assetContext.js（路径变化不产生事务，装饰不会自己重算）。
+let docPath = ''
 
-/** 文档路径变化时由 useEditorSession 的同步 watch 调用；空串 = 未落盘 */
+/**
+ * 文档路径变化时由 assetContext.applyDocPath 调用（**唯一同步点**）；
+ * 空串 = 未落盘。
+ * @param {string} p
+ * @returns {boolean} 路径是否真的变了 —— 变了才需要重建图片装饰
+ */
 export function setDocPath(p) {
-  hasDocDir = Boolean(p)
+  const next = typeof p === 'string' ? p : ''
+  if (next === docPath) return false
+  docPath = next
+  hasDocDir = Boolean(next)
+  return true
 }
 
 /**
