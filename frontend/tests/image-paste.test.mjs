@@ -187,6 +187,66 @@ describe('imageDropHandlers · 拖拽', () => {
     handlers.dragover(textEvent)
     assert.equal(textEvent.calls.preventDefault, 0)
   })
+
+  // 【2026-10-25 真机】WebKitGTK 从文件管理器拖入的 File 常常**没有 MIME**
+  // （type === ''）。只认 image/* 会把真实拖拽判成非图片 → drop 被放行 →
+  // webview 导航到 file://（整页被图片顶掉）。扩展名必须作为第二判据。
+  test('File 没有 MIME（WebKitGTK 形态）但扩展名是图片 → 仍然收下', async () => {
+    const seen = []
+    const handlers = imageDropHandlers((src) => { seen.push(src); return Promise.resolve('assets/d.png') })
+    const noMime = new File([new Uint8Array([0x89, 0x50])], 'shot.png', { type: '' })
+    const event = stubEvent({ files: [noMime], types: ['Files'], getData: () => '' })
+    assert.equal(handlers.drop(event, stubView('hello', 0)), true)
+    assert.ok(seen[0] instanceof File)
+    await flush()
+  })
+
+  test('File 没有 MIME 且扩展名不是图片（.txt）→ 放行默认行为', () => {
+    const handlers = imageDropHandlers(() => Promise.resolve('x'))
+    const txt = new File([new Uint8Array([1])], 'notes.txt', { type: '' })
+    const event = stubEvent({ files: [txt], types: ['Files'], getData: () => '' })
+    assert.equal(handlers.drop(event, stubView()), false)
+  })
+
+  test('files 为空但 items 里有 file（部分 WebKit 形态）→ 从 items 取', async () => {
+    const seen = []
+    const handlers = imageDropHandlers((src) => { seen.push(src); return Promise.resolve('assets/e.png') })
+    const file = imageFile('from-items.png')
+    const event = stubEvent({ files: [], items: [{ kind: 'file', type: 'image/png', getAsFile: () => file }], types: ['Files'], getData: () => '' })
+    assert.equal(handlers.drop(event, stubView('hello', 0)), true)
+    assert.equal(seen[0], file)
+    await flush()
+  })
+
+  // 【2026-10-25 真机取证】WebKitGTK 从 Dolphin 拖文件进来时：
+  //   files = []、items 全是 kind:"string"、getData('text/uri-list') = ""，
+  //   唯一的 URI 在 text/html 的 <a> 文本里，且文件名可能没有扩展名。
+  test('WebKitGTK 真机形态：URI 只在 text/html 锚点文本里（无扩展名）', async () => {
+    const seen = []
+    const handlers = imageDropHandlers((src) => { seen.push(src); return Promise.resolve('assets/f.png') })
+    const html = '<a style="caret-color: rgb(0,0,0)">file:///home/me/Downloads/Wallpaper%20Alchemy%20-%20Arch%20Linux%204K%20%E5%A3%81%E7%BA%B8</a>'
+    const event = stubEvent({
+      files: [],
+      items: [{ kind: 'string', type: 'text/uri-list' }, { kind: 'string', type: 'text/html' }],
+      types: ['text/uri-list', 'text/html'],
+      getData: (t) => (t === 'text/html' ? html : ''),
+    })
+    assert.equal(handlers.drop(event, stubView('hello', 0)), true, '必须拦下并落盘（否则 webview 导航到 file://）')
+    assert.equal(seen[0], '/home/me/Downloads/Wallpaper Alchemy - Arch Linux 4K 壁纸')
+    await flush()
+  })
+
+  test('text/html 里的 http(s) 图片地址不得当成本地文件（只认 file://）', () => {
+    const seen = []
+    const handlers = imageDropHandlers((src) => { seen.push(src); return Promise.resolve('x') })
+    const html = '<img src="https://example.com/a.png">'
+    const event = stubEvent({
+      files: [], items: [], types: ['text/uri-list', 'text/html'],
+      getData: (t) => (t === 'text/html' ? html : ''),
+    })
+    assert.equal(handlers.drop(event, stubView()), false, '远程地址不是本地文件，放行默认行为')
+    assert.equal(seen.length, 0)
+  })
 })
 
 // ===========================================================================

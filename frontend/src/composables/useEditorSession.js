@@ -24,6 +24,7 @@ import { DEFAULT_DOC } from '../editor/sampleDocs'
 import { t } from '../i18n/index.js'
 import { checkTableHint, clearTableHint } from './useTableHint.js'
 import { applyDocPath } from '../editor/assetContext.js'
+import { installFileDropGuard } from '../editor/imageDrop.js'
 
 const PREVIEW_DEBOUNCE_MS = 120
 
@@ -75,6 +76,7 @@ export function useEditorSession({
   const markdown = ref('')
   const filePath = ref('')
   const folderPath = ref('')
+  let removeDropGuard = null
   // 标题 = 路径最后一段。**两种分隔符都要认**：Go 侧返回的是各平台原生路径，
   // Windows 上是 C:\dir\a.md —— 只按 "/" 切会把整条路径当成文件名显示。
   const title = computed(() => (filePath.value ? baseName(filePath.value) : t('common.untitled')))
@@ -192,6 +194,8 @@ export function useEditorSession({
       slashHost: () => slashRef.value,
     })
     editorRef.value = view
+    // 应用级拖拽兜底：文件落在编辑器外时不让 webview 导航到 file://（见 imageDrop.js）
+    removeDropGuard = installFileDropGuard(() => editorRef.value, onImageFile)
     markdown.value = DEFAULT_DOC
     onOutlineRefresh?.()
     // 编辑器此刻才存在：把持久化的缩放档位真正落到 Compartment 上
@@ -210,6 +214,8 @@ export function useEditorSession({
   onBeforeUnmount(() => {
     cancelPendingPreview()
     clearTableHint()
+    removeDropGuard?.()
+    removeDropGuard = null
     editorRef.value?.destroy()
     editorRef.value = null
   })

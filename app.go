@@ -410,17 +410,38 @@ func (a *App) SaveImage(docPath, dataBase64, ext string) (string, error) {
 // 为什么需要它：macOS 复制文件时剪贴板里只有 file URL（text/uri-list），
 // 图片数据并不在剪贴板里；而 webview 受跨源策略限制无法 fetch(file://)，
 // 读盘只能由 Go 侧完成（前端 imageDrop.js 的 onImagePath 通道）。
-// 扩展名从路径取，白名单/大小校验与 SaveImage 完全同一套（writeImageAsset）。
+//
+// 【2026-10-25 真机：扩展名不可信】WebKitGTK 从文件管理器拖入的路径常常**没有
+// 扩展名**（浏览器下载的图片就叫「Wallpaper Alchemy - Arch Linux 4K 壁纸」，
+// 实际是 PNG）。扩展名不在白名单时不再直接拒绝，而是读盘按字节嗅探
+// （sniffImageMagic）；不是图片就静默返回空串（调用方据此不插入、不提示），
+// 绝不把非图片写进 assets/。
 func (a *App) SaveImageFromPath(docPath, srcPath string) (string, error) {
 	ext := strings.ToLower(strings.TrimPrefix(filepath.Ext(srcPath), "."))
-	if !allowedImageExt[ext] {
-		return "", fmt.Errorf("不支持的图片类型: %s", ext)
+	known := allowedImageExt[ext]
+	st, err := os.Stat(srcPath)
+	if err != nil {
+		return "", fmt.Errorf("读取图片失败: %w", err)
+	}
+	if st.IsDir() {
+		return "", nil
+	}
+	// 未知扩展名才可能走嗅探：先按大小上限挡掉超大文件，避免整个读进内存
+	if !known && st.Size() > maxImageBytes {
+		return "", nil
 	}
 	raw, err := os.ReadFile(srcPath)
 	if err != nil {
 		return "", fmt.Errorf("读取图片失败: %w", err)
 	}
-	return writeImageAsset(docPath, raw, ext)
+	if known {
+		return writeImageAsset(docPath, raw, ext)
+	}
+	magic := sniffImageMagic(raw)
+	if magic == nil {
+		return "", nil
+	}
+	return writeImageAsset(docPath, magic.Data, magic.Ext)
 }
 
 // SaveImageFromClipboard 实现通道③：从**系统剪贴板**取图片并落盘，返回相对路径。
@@ -443,15 +464,12 @@ func (a *App) SaveImageFromClipboard(docPath string) (string, error) {
 	pngBytes, filePath := readClipboardImageRaw()
 
 	// ① 剪贴板里是「复制的文件」→ 与通道② 汇流（保留原始格式，不经重编码）
+	// 统一走 SaveImageFromPath：扩展名缺失时它按字节嗅探（同一套口径，见该函数）
 	if filePath != "" {
-		ext := strings.ToLower(strings.TrimPrefix(filepath.Ext(filePath), "."))
-		if allowedImageExt[ext] {
-			raw, err := os.ReadFile(filePath)
-			if err == nil {
-				return writeImageAsset(docPath, raw, ext)
-			}
-			// 读盘失败不直接返回错误：继续尝试图片数据分支（剪贴板可能两者都有）
+		if rel, err := a.SaveImageFromPath(docPath, filePath); err == nil && rel != "" {
+			return rel, nil
 		}
+		// 读盘失败 / 不是图片：继续尝试图片数据分支（剪贴板可能两者都有）
 	}
 
 	// ② 剪贴板里有图片数据 → 按魔数嗅探格式后落盘

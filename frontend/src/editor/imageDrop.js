@@ -94,11 +94,31 @@ export function looksLikeImageFilename(text) {
 
 /** 从 DataTransfer 里取第一个图片文件；没有则返回 null */
 function imageFileFromDataTransfer(dt) {
-  if (!dt || !dt.files || dt.files.length === 0) return null
-  for (const f of dt.files) {
-    if (f.type && f.type.startsWith('image/')) return f
+  if (!dt) return null
+  for (const f of Array.from(dt.files || [])) {
+    if (isImageFile(f)) return f
+  }
+  // items 兜底：某些 WebKit 形态 files 为空，但 items 里带着 file
+  for (const it of Array.from(dt.items || [])) {
+    if (it.kind === 'file' && typeof it.getAsFile === 'function') {
+      const f = it.getAsFile()
+      if (f && isImageFile(f)) return f
+    }
   }
   return null
+}
+
+/**
+ * 判断一个拖拽/粘贴来的 File 是不是图片。
+ *
+ * 【为什么 type 为空也要按扩展名认】WebKitGTK 从文件管理器拖入的文件常常
+ * **没有 MIME**（`type === ''`）。只认 `image/*` 会把真实拖拽判成「非图片」，
+ * 于是 drop 被放行 → webview 导航到 file://（2026-10-25 真机「拖进来的图片
+ * 直接占了整个应用」的另一半根因）。扩展名白名单与 Go 侧 allowedImageExt 同口径。
+ */
+function isImageFile(f) {
+  if (f.type && f.type.startsWith('image/')) return true
+  return !f.type && IMAGE_EXT_RE.test(f.name || '')
 }
 
 /**
@@ -149,6 +169,84 @@ function insertImageMarkdown(view, source, pos, onResolved) {
       })
     })
     .catch(() => { /* 插入失败静默：上层已给 toast */ })
+}
+
+/** 拖拽通道的统一取源：优先本地路径（读盘最可靠），退而求其次用 File 数据 */
+export function imageSourceFromDataTransfer(dt) {
+  const path = imagePathFromDataTransfer(dt)
+  if (path) return path
+  const file = imageFileFromDataTransfer(dt)
+  if (file) return file
+  // WebKitGTK 的真机形态（2026-10-25 取证）：文件拖拽时 files 为空、
+  // items 只有 string、text/uri-list 的 getData 是**空串**，URI 只出现在
+  // text/html 的 <a> 文本里，形如
+  //   <a style="…">file:///home/me/Downloads/foo%20bar</a>
+  // 且下载来的图片常常没有扩展名。这里只负责把「一个本地路径」交出去；
+  // 是否真是图片由 Go 按字节嗅探裁定（SaveImageFromPath），不是图片则静默忽略。
+  return filePathFromHtml(safeGetData(dt, 'text/html'))
+}
+
+/** 从 HTML 片段里挖出第一个 file:// URI 的本地路径（WebKitGTK 文件拖拽的载体） */
+function filePathFromHtml(html) {
+  if (!html) return null
+  // 先还原 HTML 实体：路径里的 & 在锚点文本里会变成 &amp;
+  const text = String(html).replace(/&amp;/gi, '&')
+  const m = /file:\/\/[^\s"'<>]+/i.exec(text)
+  if (!m) return null
+  let path = m[0].replace(/^file:\/\//i, '')
+  try {
+    path = decodeURIComponent(path)
+  } catch { /* % 后跟非十六进制：保留原样 */ }
+  return path || null
+}
+
+/**
+ * 应用级拖拽兜底（2026-10-25 真机反馈：「拖进来的图片直接占了整个应用」）。
+ *
+ * 【为什么编辑器自己的 drop 处理器不够】CM 的 domEventHandlers 只挂在编辑器
+ * DOM 上。文件落在**编辑器之外**（侧栏、预览面、标题栏、窗口留白）时事件不经过
+ * 它，WebKit 走默认行为 —— 而 Linux/GTK 下默认行为是**把整个 webview 导航到
+ * file:// 图片**：应用内容被一张图顶掉，看起来像「图片占满应用」，文档里却
+ * 什么都没插入（实测拖拽后的 md 文件确实没有该图片引用）。
+ *
+ * 【为什么在 window 上拦】这是「应用级不变量」：任何文件拖拽都不得触发导航。
+ * 编辑器内的投放由 CM 处理器先处理（冒泡顺序：contentDOM → … → window），
+ * 它已经 preventDefault 时这里只补一次 preventDefault，不再插第二张图。
+ *
+ * @param {() => ({state: any, dispatch: Function}|null)} getView 取当前编辑器
+ * @param {(source: File|string) => Promise<string|null>} onImageFile 落盘回调
+ * @param {EventTarget} [target] 注入点（测试用；默认 window）
+ * @returns {() => void} 卸载函数
+ */
+export function installFileDropGuard(getView, onImageFile, target = typeof window === 'undefined' ? null : window) {
+  if (!target) return () => {}
+  const isFileDrag = (dt) => {
+    const types = Array.from(dt?.types || [])
+    return types.includes('Files') || types.includes('text/uri-list')
+  }
+  // dragover 也必须拦：不 preventDefault 就不算合法投放区（光标还是「禁止」，
+  // 且 drop 可能压根不派发），编辑器内那条已由 CM 处理器拦过，这里重复无害。
+  const onDragOver = (e) => { if (isFileDrag(e.dataTransfer)) e.preventDefault() }
+  const onDrop = (e) => {
+    if (!isFileDrag(e.dataTransfer)) return
+    // 先读、后拦：CM 已处理时 defaultPrevented 为 true，再 preventDefault 一次
+    // 不会改变任何语义，但绝不能因此再插一张（一次拖拽 → 两张图）。
+    const handled = e.defaultPrevented === true
+    e.preventDefault()
+    if (handled || !onImageFile) return
+    const view = getView?.()
+    if (!view) return
+    const source = imageSourceFromDataTransfer(e.dataTransfer)
+    if (!source) return
+    // 落点不在编辑器里 → 插到当前光标处（用户意图就是「把图放进文档」）
+    insertImageMarkdown(view, source, view.state.selection.main.head, onImageFile)
+  }
+  target.addEventListener('dragover', onDragOver)
+  target.addEventListener('drop', onDrop)
+  return () => {
+    target.removeEventListener('dragover', onDragOver)
+    target.removeEventListener('drop', onDrop)
+  }
 }
 
 /**
@@ -218,26 +316,28 @@ export function imageDropHandlers(onImageFile, onClipboardImage) {
     },
     drop(event, view) {
       const dt = event.dataTransfer
-      const file = imageFileFromDataTransfer(dt)
-      if (file && onImageFile) {
+      const source = imageSourceFromDataTransfer(dt)
+      if (source && onImageFile) {
         event.preventDefault()
         const pos = view.posAtCoords({ x: event.clientX, y: event.clientY })
-        insertImageMarkdown(view, file, pos ?? view.state.selection.main.head, onImageFile)
-        return true
-      }
-      const path = imagePathFromDataTransfer(dt)
-      if (path && onImageFile) {
-        event.preventDefault()
-        const pos = view.posAtCoords({ x: event.clientX, y: event.clientY })
-        insertImageMarkdown(view, path, pos ?? view.state.selection.main.head, onImageFile)
+        insertImageMarkdown(view, source, pos ?? view.state.selection.main.head, onImageFile)
         return true
       }
       return false
     },
     dragover(event) {
-      // 文件拖拽需阻止默认，否则浏览器不会派发 drop
-      if (event.dataTransfer && Array.from(event.dataTransfer.types).includes('Files')) {
-        event.preventDefault()
+      // 文件拖拽需阻止默认，否则浏览器不会派发 drop。判据不能只认 'Files'：
+      // 那是 Chromium / WebKit(macOS) 的口径；**WebKitGTK（Linux）从文件管理器
+      // 拖文件时 types 里没有 'Files'**，只给 'text/uri-list' / 'text/plain'
+      // （2026-10-24 Linux 真机反馈：拖图片进来只插入 file:// URL 文本 ——
+      // dragover 未阻止默认 ⇒ drop 事件压根没派发，走的是浏览器默认插入文本）。
+      // 两者认其一即可；drop 里仍只拦截图片路径，非图片文件照旧放行默认行为。
+      const dt = event.dataTransfer
+      if (dt) {
+        const types = Array.from(dt.types || [])
+        if (types.includes('Files') || types.includes('text/uri-list')) {
+          event.preventDefault()
+        }
       }
       return false
     },
