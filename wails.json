@@ -8,6 +8,7 @@
     "copyright": "Copyright © 2026 aftery",
     "comments": "跨平台 Markdown 编辑器"
   },
+  "build:tags": "webkit2_41",
   "frontend:install": "npm install",
   "frontend:build": "npm run build",
   "frontend:dev:watcher": "npm run dev",

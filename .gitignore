@@ -3,6 +3,10 @@
 # build/darwin/ 是构建必需的，要提交，只忽略 bin 目录）
 build/bin/
 
+# 发布包（dist/inkmark 与 tar.gz）与前端测试缓存
+/dist/
+frontend/.vitest/
+
 # 前端构建产物，由 wails build 生成
 frontend/dist/*
 # 但保留占位文件：main.go 用 //go:embed all:frontend/dist 内嵌产物，
