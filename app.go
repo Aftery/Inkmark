@@ -111,11 +111,13 @@ func (a *App) CloseWindow(dirty bool, locale string) {
 // —— 于是必须在前端自行完成剪贴板读写。
 // 而 document.execCommand('paste') 被浏览器安全策略禁用（无用户手势 / 被 iframe
 // 与权限模型限制），所以粘贴只能走系统 API 再由前端插入文档。
+// 平台分发：Linux 走 wl-paste / xclip（GTK 剪贴板在 KDE Wayland 上会读出空串，
+// 见 clipboard_linux.go 文件头），其余平台直用 Wails 运行时。
 func (a *App) ClipboardGet() (string, error) {
 	if a.ctx == nil {
 		return "", fmt.Errorf("应用尚未初始化")
 	}
-	return runtime.ClipboardGetText(a.ctx)
+	return platformClipboardGetText(a.ctx)
 }
 
 // ClipboardSet 写入系统剪贴板纯文本（剪切 / 拷贝走它）。
@@ -123,7 +125,7 @@ func (a *App) ClipboardSet(text string) error {
 	if a.ctx == nil {
 		return fmt.Errorf("应用尚未初始化")
 	}
-	return runtime.ClipboardSetText(a.ctx, text)
+	return platformClipboardSetText(a.ctx, text)
 }
 
 // DirEntry 是文件树的一个节点（只展开一层，前端点击目录时再懒加载）
