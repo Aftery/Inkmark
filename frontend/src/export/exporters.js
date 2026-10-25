@@ -110,8 +110,8 @@ blockquote p{margin:4px 0}
 ul,ol{padding-left:1.5em;margin:12px 0}
 li{margin:4px 0}
 li::marker{color:var(--muted)}
-table{border-collapse:collapse;width:100%;margin:16px 0;font-size:.9375em}
-th,td{border:1px solid var(--border);padding:8px 12px;text-align:left}
+table{border-collapse:collapse;width:100%;max-width:100%;margin:16px 0;font-size:.9375em}
+th,td{border:1px solid var(--border);padding:10px 14px;text-align:left;vertical-align:top;white-space:normal;word-break:normal;overflow-wrap:break-word}
 th{font-weight:510;background:var(--surface-warm)}
 hr{border:none;border-top:1px solid var(--border);margin:32px 0}
 img{max-width:100%;border-radius:6px}

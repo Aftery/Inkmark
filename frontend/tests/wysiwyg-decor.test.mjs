@@ -182,6 +182,125 @@ describe('wysiwyg 装饰 · 表格 / 分割线 / 图片', () => {
 })
 
 // ===========================================================================
+// 2b) 间距几何：分割线不「飘远」、表格单元格不「挤成一团」
+// ===========================================================================
+/**
+ * 【这两条为什么会静默劣化】它们都是**纯观感**缺陷：不报错、不抛异常，
+ * 只有用户截图才暴露。2026-10-25 用户反馈「分割线和下面内容太远」
+ * 「表格里面内容太挤」，实测根因（1440×1100、正文 15px/1.7）：
+ *
+ *   ① 分割线：`.cm-md-hr` 曾是 `display:block` + `margin:16px 0`。
+ *      block 级 child 的上下 margin 会**实打实加进** `.cm-line` 行盒
+ *      （.cm-line 是普通块级盒，不像相邻兄弟那样发生 margin 合并），
+ *      行盒实测 87.4px；叠加正文半行距后，分割线上下各约 43px 空白。
+ *      改成 inline-block + margin:0 后行盒回落到 27.2px（= 一行 line-height），
+ *      上下各约 14/12px。
+ *
+ *   ② 表格单元格：`white-space` / `word-break` 都是**继承属性**，而 CM6 给
+ *      `.cm-lineWrapping` 写的是 `white-space: break-spaces` +
+ *      `word-break: break-word`。单元格没显式复位 ⇒ 单词中间也会断行，
+ *      真机实测「Markdown」被拆成「Markdow / n」，首列被压到 88.9px。
+ *      复位成 normal + overflow-wrap:break-word 后首列 124.9px、不再拆词，
+ *      同时长 URL 仍不会撑破正文栏。
+ *
+ *      【overflow-wrap 必须是 break-word，不能是 anywhere —— 本轮踩过】
+ *      第一版写的是 anywhere，断言也照着写，结果**功能其实是坏的**：
+ *      anywhere 把每个字都算作合法断点 ⇒ 列 min-content 塌到一个字符 ⇒
+ *      浏览器又把首列压回 89.4px ⇒ 单词重新被拆开，等于没修。
+ *      故下面的用例把取值钉死为 break-word，anywhere 会被判红。
+ *
+ * 这里只能守「声明存在且取值正确」这一层 —— 具体像素由
+ * scripts/probe/probe-spacing.mjs 在真浏览器里量（改前/改后对照）。
+ */
+describe('间距几何 · 分割线与表格单元格', () => {
+  const cssClean = wysiwygCss.replace(/\/\*[\s\S]*?\*\//g, '')
+
+  /** 取「选择器 → 规则体」，容忍选择器中的换行与逗号后空白差异 */
+  function bodyOf(...selectors) {
+    const re = /([^{}]+)\{([^{}]*)\}/g
+    for (const m of cssClean.matchAll(re)) {
+      const sel = m[1].trim().replace(/\s+/g, ' ')
+      for (const want of selectors) {
+        if (sel === want.replace(/\s+/g, ' ')) return m[2]
+      }
+    }
+    return null
+  }
+
+  const cellBody = () => bodyOf('.cm-md-table th, .cm-md-table td')
+
+  test('分割线必须是 inline-block（block + margin 会把行盒撑到 87px，看起来「离下面太远」）', () => {
+    const body = bodyOf('.cm-md-hr')
+    assert.ok(body, '未找到 .cm-md-hr 规则（判据失效）')
+    assert.match(
+      body,
+      /display:\s*inline-block/,
+      '.cm-md-hr 必须 display:inline-block —— block 级 child 的上下 margin 会加进 ' +
+        '.cm-line 行盒（实测 87.4px vs 27.2px），分割线上下各多出约 30px 空白，' +
+        '用户侧表现就是「分割线和下面的内容隔得太远」。',
+    )
+    assert.match(
+      body,
+      /(^|[;\s])margin:\s*0[,;]?/,
+      '.cm-md-hr 的 margin 必须是 0：间距交给行高本身，' +
+        '否则行高与 margin 两个来源各加一次，又变回「太远」。',
+    )
+    assert.match(body, /border-top:\s*1px solid/, '.cm-md-hr 仍需 1px 可见横线')
+  })
+
+  test('表格单元格必须复位 white-space / word-break（否则继承 break-spaces，单词被从中间拆开）', () => {
+    const body = cellBody()
+    assert.ok(body, '未找到 .cm-md-table th/td 规则（判据失效）')
+    assert.match(
+      body,
+      /white-space:\s*normal/,
+      '单元格必须显式 white-space:normal —— 它是继承属性，CM6 的 .cm-lineWrapping ' +
+        '给的是 break-spaces，不复位就会漏到 td/th 上。',
+    )
+    assert.match(
+      body,
+      /word-break:\s*normal/,
+      '单元格必须显式 word-break:normal —— 继承来的 break-word 允许在**单词中间**断行，' +
+        '真机实测「Markdown」被拆成「Markdow / n」，这是「表格内容太挤」的根因之一。',
+    )
+    assert.match(
+      body,
+      /overflow-wrap:\s*break-word/,
+      '单元格需要 overflow-wrap:break-word 兜住长 URL / 长路径 —— ' +
+        '只用 word-break:normal 会让长串把表格撑出正文栏。',
+    )
+    // 反向断言：anywhere 会毁掉列宽算法（本轮真实踩坑，见文件头 ② 的注记）
+    assert.ok(
+      !/overflow-wrap:\s*anywhere/.test(body),
+      'overflow-wrap 不能写 anywhere：它把每个字都算成断点，列的 min-content 塌到一个字符，' +
+        '浏览器据此把窄列压回约 89px，单词重新被拆开 —— 实测首列 124.9px(break-word) vs ' +
+        '89.4px(anywhere)，等于没修。',
+    )
+  })
+
+  test('表格单元格留白足够（不低于 10px / 14px 这一档）', () => {
+    const body = cellBody()
+    assert.ok(body, '未找到 .cm-md-table th/td 规则（判据失效）')
+    const m = body.match(/padding:\s*([^;]+);/)
+    assert.ok(m, '单元格缺少 padding 声明（内容会贴到边框上）')
+    const px = m[1].trim().split(/\s+/).map((v) => {
+      const t = v.match(/^([\d.]+)px$/)
+      return t ? Number(t[1]) : null
+    })
+    assert.ok(
+      px.every((v) => v !== null),
+      `单元格 padding 需用 px 直写以便本断言量化（当前: ${m[1].trim()}）—— ` +
+        '若改用 var() token，请同步调整本用例并说明如何量化',
+    )
+    assert.ok(
+      px[0] >= 10 && (px[1] ?? px[0]) >= 14,
+      `单元格留白偏小（当前 ${m[1].trim()}）—— 实测 8px/12px 时内容贴边、观感「太挤」，` +
+        '已定为 10px/14px 这一档。',
+    )
+  })
+})
+
+// ===========================================================================
 // 3) 模板传参：不得把 Ref 对象直接送进 prop
 // ===========================================================================
 describe('模板传参 · 顶层 ref 解包', () => {

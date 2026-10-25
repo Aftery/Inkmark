@@ -88,17 +88,30 @@
 .preview-body li { margin: var(--space-1) 0; }
 .preview-body li::marker { color: var(--muted); }
 
-/* ---- 表格：发丝边框，表头只靠字重 + 底色区分 ---- */
+/* ---- 表格：发丝边框，表头只靠字重 + 底色区分 ----
+   单元格留白 / 折行规则与编辑器的表格真渲染同源（themes/editor-wysiwyg.css 的
+   .cm-md-table 块）：两处必须一起改，否则「编辑时宽、导出后窄」或反过来。
+   为什么显式写 white-space / word-break：.preview-body 自身没有显式定值，
+   而导出 HTML 是在编辑器同源的 WebView 里渲染的，继承来的 break-spaces /
+   break-word 会把拉丁词从中间拆开（2026-10-25 实测「Markdown」拆成
+   「Markdow / n」）。overflow-wrap 用 break-word 兜住长 URL 不撑破版面 ——
+   注意**不能**用 anywhere：它会让 min-content 塌到一个字符，浏览器据此把
+   窄列压到 89px，单词又重新被拆开（实测对照见 editor-wysiwyg.css 同段注释）。 */
 .preview-body table {
   border-collapse: collapse;
   width: 100%;
+  max-width: 100%;
   margin: var(--space-4) 0;
   font-size: 0.9375em;
 }
 .preview-body th, .preview-body td {
   border: 1px solid var(--border);
-  padding: var(--space-2) var(--space-3);
+  padding: 10px 14px;
   text-align: left;
+  vertical-align: top;
+  white-space: normal;
+  word-break: normal;
+  overflow-wrap: break-word;
 }
 .preview-body th {
   font-weight: var(--weight-emphasize);

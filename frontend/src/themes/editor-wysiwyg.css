@@ -55,12 +55,24 @@
 
 /* ---- 分割线：把 `---` 换成实线 ----
    height:0 + border-top 是「零内容但占高度」的经典写法：若只把 `---` 替换成
-   空 widget，该行高度会塌陷，分割线与上下段贴在一起。 */
+   空 widget，该行高度会塌陷，分割线与上下段贴在一起。
+
+   【display 必须是 inline-block，不能是 block —— 2026-10-25「分割线离下面
+   内容太远」的根因】widget 挂在 `.cm-line` 里；block 级 child 的上下 margin
+   会**实打实加进行盒高度**（.cm-line 是普通块级盒，不像相邻兄弟那样发生
+   margin 合并）。实测（1440×1100、body 16px/1.7）：
+     display:block  + margin:16px 0 → 行盒 87.4px，分割线上下各 ≈43px 空白
+     display:inline-block + margin:0 → 行盒 27.2px，分割线上下各 ≈14/12px
+   原因：inline-block 是**行内**盒，行盒高度回到 line-height 主导（一行
+   27.2px），widget 自身的 margin 不再额外撑高。修后上下都是同一个正常行距，
+   与「上一段 / 下一段」之间的视觉节奏一致 —— 既不再「太远」，也不会贴成一块。
+   量化入口：scripts/probe/probe-spacing.mjs（改前后逐项对比 above / below/ 行盒高）。 */
 .cm-md-hr {
-  display: block;
+  display: inline-block;
+  vertical-align: middle;
   height: 0;
   width: 100%;
-  margin: var(--space-4) 0;
+  margin: 0;
   border-top: 1px solid var(--border-strong);
 }
 
@@ -98,23 +110,49 @@
 /* ---- 表格真渲染（StateField block widget，tableRender.js）----
    视觉与 preview.css 的表格规则同源（发丝边框 / 表头底色），单一观感 */
 .cm-md-table {
-  margin: var(--space-4) 0;
+  margin: var(--space-3) 0;
   /* 操作条的定位基准（浮层贴在表格右上角） */
   position: relative;
 }
 .cm-md-table table {
   border-collapse: collapse;
   width: 100%;
+  max-width: 100%;
   font-size: 0.9375em;
 }
 .cm-md-table th,
 .cm-md-table td {
   border: 1px solid var(--border);
-  padding: var(--space-2) var(--space-3);
+  padding: 10px 14px;
   min-width: 4em;
   text-align: left;
   vertical-align: top;
+  /* 【单元格必须显式定 white-space / word-break —— 2026-10-25「表格里内容太挤」根因】
+   * 单元格是 contentEditable，`white-space` 是**继承属性**，而 CM6 给
+   * `.cm-lineWrapping` 写的是 `white-space: break-spaces` + `word-break:
+   * break-word`（见 @codemirror/view dist/index.js 的 baseTheme）。两者都会
+   * 传给 td/th，于是：
+   *   ① word-break:break-word 让**单词中间也允许断行** —— 真机实测
+   *      「Markdown」被拆成「Markdow / n」，首列因此多折一行、整表变高；
+   *   ② 两列布局下浏览器把 736px 版心按 88.9 / 646.1 切，首列只剩 88.9px。
+   * 修法：把 word-break 复位成 normal（只在**词边界**折行），并用
+   * overflow-wrap 兜住长 URL / 长路径（否则会把表格撑出正文栏）。
+   *
+   * 【必须是 break-word，不能是 anywhere —— 这条差一点写错，实测才抓住】
+   * 两者都能兜住长串，但对**列宽算法**的影响完全不同：`anywhere` 把每个字都
+   * 算成合法断点，于是「由普通单词组成的列」min-content 宽度塌到一个字符，
+   * 浏览器据此又把首列压回 89.4px —— 单词重新被拆开，等于没修。
+   * 实测对照（同一份 README、1108px 窗口、同一套其它声明）：
+   *   overflow-wrap:anywhere    → 首列 89.4px，Markdown / WYSIWYG 仍被拆
+   *   overflow-wrap:break-word  → 首列 124.9px，仅带连字符的长串
+   *                               （markdown-it-task-lists）在连字符处折行
+   * 故钉死 break-word。量化入口：scripts/probe/probe-spacing.mjs。 */
+  white-space: normal;
+  word-break: normal;
+  overflow-wrap: break-word;
 }
+
+/* 表头：与预览区同源的字重 + 底色 */
 .cm-md-table th {
   font-weight: var(--weight-emphasize);
   background: var(--surface-warm);
