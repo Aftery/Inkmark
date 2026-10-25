@@ -30,6 +30,26 @@ import { focusEnd, restoreCellFocus } from './tableFocus.js'
 import {
   estimatedTableHeight, measureTableHeight, primeTableHeight,
 } from './tableHeight.js'
+import { buildTableFromModel } from './tableDom.js'
+
+// ---------------- 【复用链令牌 cid】为什么 eq() 不能用实例身份判定 ----------------
+// CM（@codemirror/view ≥6.43 的 Tile 渲染器）在 eq() 命中后走的是
+// 「旧 DOM 配新实例」：findWidget 返回 `new WidgetTile(tile.dom, …, widget)`，
+// 树上留下的新实例是**没有 DOM 的空壳**（toDOM 从未被调用，见 adoptRange 头注），
+// 而真正挂监听、持 DOM 的旧实例从树上退场。于是按实例身份判定会这样断裂：
+//   第 1 个字符：树实例 A(有DOM).eq(B1) —— 编辑标记 === A ⇒ 命中，DOM 复用；
+//                复用后树上是空壳 B1；
+//   第 2 个字符：B1.eq(B2) —— 标记仍指 A，与 B1/B2 都不是同一实例 ⇒ 落空
+//                ⇒ 整表重建 ⇒ 单元格焦点随 DOM 移除丢失（WebKit 甚至不给
+//                被移除元素发 focusout，用户看到的就是「打 2 个字光标没了」）。
+// 2026-10-24 Linux（WebKitGTK 2.54 + 本仓 CM 版本）WebDriver 真机复现确认：
+// 机制本身**与平台无关**，差别只在触发密度（该链在 macOS 上同样存在）。
+//
+// 修法：eq 判定从「实例身份」换成「DOM 出生链身份」—— toDOM 铸造一枚令牌
+// （cid），eq 复用时递给树上留下的空壳实例，令牌随复用链一路传下去。
+// 编辑标记始终指着 DOM 属主实例（focusin 设置，其 cid 即链首），
+// 于是 B1.eq(B2) 也能凭 `this.cid === editing.cid` 认出同一份 DOM 的延续。
+let cidSeq = 0
 
 export class TableWidget extends WidgetType {
   constructor(t) {
@@ -48,17 +68,33 @@ export class TableWidget extends WidgetType {
     this.activeRow = -1
     this.ac = new AbortController()
     this.drag = null
+    // cid = 「这份 DOM 的出生链」令牌，toDOM 铸造、eq 复用时传给新实例。
+    // 为什么不能用实例身份判定「同一张表」——见 cidChain 注释块。
+    this.cid = null
   }
 
   eq(other) {
     const editing = currentEditingWidget()
-    const reuse = (editing && editing.dom?.isConnected && (editing === this || editing === other)) ||
-      other.key === this.key
-    // 只在「同一个表格」时接区间：key 不同意味着源码变了、而 model 仍是旧的，
-    // 此时把新 source 塞进来会造成「新 source + 旧 model」错配 —— 随后 sync()
-    // 会用旧 DOM 序列化出的内容覆盖掉新内容（数据丢失）。故保守跳过。
-    if (reuse && other.key === this.key) this.adoptRange(other)
-    return !!reuse
+    // 编辑中必须优先保住焦点/IME：编辑标记所指实例的 DOM 还挂在文档里时，
+    // this / other 任一是它的延续就复用。两条判定并存、任一命中即可：
+    //   ① 实例身份（旧语义，兜底）：this / other 就是编辑标记所指实例；
+    //   ② 出生链令牌 cid：≥6.43 渲染器复用后树上是空壳实例，实例身份会落空，
+    //      凭 cid 认出它是同一份 DOM 的延续（机制见 cidChain 注释块）。
+    const live = !!(editing && editing.dom?.isConnected)
+    const sameIdentity = live && (this === editing || other === editing)
+    const sameChain = !!(live && editing.cid != null &&
+      (this.cid === editing.cid || other.cid === editing.cid))
+    const reuse = sameIdentity || sameChain || other.key === this.key
+    if (reuse) {
+      // 复用后 CM 树上留下的是 other（空壳：旧 DOM 配新实例，见 adoptRange 头注），
+      // 把出生链令牌递给它，链条才不会在第二个字符起断掉。
+      if (other.cid == null) other.cid = this.cid ?? editing?.cid ?? null
+      // 只在「同一个表格」时接区间：key 不同意味着源码变了、而 model 仍是旧的，
+      // 此时把新 source 塞进来会造成「新 source + 旧 model」错配 —— 随后 sync()
+      // 会用旧 DOM 序列化出的内容覆盖掉新内容（数据丢失）。故保守跳过。
+      if (other.key === this.key) this.adoptRange(other)
+    }
+    return reuse
   }
 
   /**
@@ -110,33 +146,14 @@ export class TableWidget extends WidgetType {
   // 因为 eq() 复用断掉的实例收不到任何 widget 方法，全局通道才可靠。
   ignoreEvent() { return true }
 
-  /** 按 model 构建 <table>（重建与首次渲染共用，保证两条路径绝不会画出两种结构） */
-  buildTable() {
-    const table = document.createElement('table')
-    const { header, aligns, rows } = this.model
-    const mk = (tag, text, i) => {
-      const el = document.createElement(tag)
-      el.contentEditable = 'true'
-      el.textContent = text
-      el.style.textAlign = aligns[i] ?? 'left'
-      return el
-    }
-    const thead = document.createElement('thead')
-    const htr = document.createElement('tr')
-    header.forEach((c, i) => htr.appendChild(mk('th', c, i)))
-    thead.appendChild(htr)
-    table.appendChild(thead)
-    const tbody = document.createElement('tbody')
-    for (const row of rows) {
-      const tr = document.createElement('tr')
-      row.forEach((c, i) => tr.appendChild(mk('td', c, i)))
-      tbody.appendChild(tr)
-    }
-    table.appendChild(tbody)
-    return table
-  }
+  /**
+   * 按 model 构建 <table>（重建与首次渲染共用，保证两条路径绝不会画出两种结构）。
+   * 构建逻辑在 tableDom.js —— 拆出去是为守住 300 有效行红线（契约 5）。
+   */
+  buildTable() { return buildTableFromModel(this.model) }
 
   toDOM(view) {
+    this.cid = ++cidSeq // 铸造出生链令牌（eq 复用时传给树上的空壳实例，见文件头）
     this.viewRef = view
     const wrap = document.createElement('div')
     wrap.className = 'cm-md-table'
