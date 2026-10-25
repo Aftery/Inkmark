@@ -10,6 +10,10 @@ export function ClipboardGet() {
   return window['go']['main']['App']['ClipboardGet']();
 }
 
+export function ClipboardHasImage() {
+  return window['go']['main']['App']['ClipboardHasImage']();
+}
+
 export function ClipboardSet(arg1) {
   return window['go']['main']['App']['ClipboardSet'](arg1);
 }

@@ -52,11 +52,15 @@ import { t } from '../i18n/index.js'
  * @param {Function} deps.getClipboardImage () => Promise<string|null>
  *   ⌘V 的图片通道（useFileAssets.saveImageFromClipboard，quiet 探测）：
  *   剪贴板有图片返回相对路径，无图片 / 未落盘 / 旧构建均返回 null
+ * @param {Function} deps.hasClipboardImage () => Promise<boolean>
+ *   剪贴板里是否有图片（不落盘）：仅用于把「未保存」从「剪贴板为空」里分出来
+ * @param {Function} deps.canSaveImage () => boolean 当前文档是否已落盘
  */
 export function useCommands(deps) {
   const {
     getEditor, session, docState, fileOps, workspace, prefs, outlineSync, help,
     dialog, closeDialog, askInput, notify, slashRef, getClipboardImage,
+    hasClipboardImage, canSaveImage,
   } = deps
 
   // 设置面板（⌘, 打开；Esc / 关闭按钮收起）与关于面板（帮助菜单）
@@ -126,6 +130,8 @@ export function useCommands(deps) {
     await pasteIntoView(view, {
       getClipboardImage,
       getText: () => ClipboardGet(),
+      hasClipboardImage,
+      canSaveImage,
       notify,
     })
   }

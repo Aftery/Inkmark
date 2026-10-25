@@ -489,6 +489,25 @@ func (a *App) SaveImageFromClipboard(docPath string) (string, error) {
 	return "", nil
 }
 
+// ClipboardHasImage 判断系统剪贴板里是否有图片（只探测、不落盘）。
+//
+// 为什么需要它：⌘V 的图片通道在「文档尚未保存」时会静默跳过（quiet 探测，
+// 见 useFileAssets.saveImageFromClipboard），随后文本通道读到空串，用户看到的
+// 是「剪贴板为空」——**与事实不符**（剪贴板里明明有图）。这里给出与落盘无关的
+// 事实判断，前端据此改说「请先保存文档」。
+func (a *App) ClipboardHasImage() bool {
+	pngBytes, filePath := readClipboardImageRaw()
+	if filePath != "" {
+		ext := strings.ToLower(strings.TrimPrefix(filepath.Ext(filePath), "."))
+		if allowedImageExt[ext] {
+			if _, err := os.Stat(filePath); err == nil {
+				return true
+			}
+		}
+	}
+	return sniffImageMagic(pngBytes) != nil
+}
+
 // writeImageAsset 是两条图片通道共用的落盘实现：校验 → 建 assets/ → 命名 → 写盘。
 // 校验集中在这里，两个入口（SaveImage / SaveImageFromPath）不可能各漏一套。
 func writeImageAsset(docPath string, raw []byte, ext string) (string, error) {

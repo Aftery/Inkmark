@@ -131,5 +131,22 @@ export function useFileAssets({ getFilePath, notify }) {
     }
   }
 
-  return { saveImageFile, saveImagePath, saveImageFromClipboard }
+  /**
+   * 剪贴板里是否有图片（只探测、不落盘）。
+   *
+   * 用途：⌘V 在「文档未保存」时图片通道静默跳过，文本又读到空串，用户会看到
+   * 「剪贴板为空」——与事实相反。前端据此改说「请先保存文档」。
+   * 旧构建没有这个绑定 → false（退回旧提示，不会更糟）。
+   */
+  async function clipboardHasImage() {
+    const api = window.go?.main?.App
+    if (typeof api?.ClipboardHasImage !== 'function') return false
+    try {
+      return Boolean(await api.ClipboardHasImage())
+    } catch {
+      return false
+    }
+  }
+
+  return { saveImageFile, saveImagePath, saveImageFromClipboard, clipboardHasImage }
 }

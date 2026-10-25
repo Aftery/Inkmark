@@ -72,10 +72,12 @@ function readSlice(state, from, to) {
  *   （useFileAssets.saveImageFromClipboard：无图片 / 未落盘 / 旧构建降级都返回
  *   null —— 都不是错误，静默落回文本路径）
  * @param {() => Promise<string>} io.getText 读剪贴板文本（ClipboardGet 绑定）
+ * @param {() => Promise<boolean>} [io.hasClipboardImage] 剪贴板里是否有图片（不落盘探测）
+ * @param {() => boolean} [io.canSaveImage] 当前文档是否已落盘（决定图片能否写入）
  * @param {(msg: string, isErr?: boolean) => void} [io.notify] 轻提示
  * @returns {Promise<boolean>} 是否插入了内容
  */
-export async function pasteIntoView(view, { getClipboardImage, getText, notify }) {
+export async function pasteIntoView(view, { getClipboardImage, getText, hasClipboardImage, canSaveImage, notify }) {
   const { from, to } = view.state.selection.main // 快照：异步期间选区可能变
   // 选区文字也在 await 前取（同一快照语义）：链接化要用它当链接文本
   const selected = from === to ? '' : readSlice(view.state, from, to)
@@ -102,7 +104,17 @@ export async function pasteIntoView(view, { getClipboardImage, getText, notify }
     return false
   }
   if (!text) {
-    notify?.(t('toast.clipboardEmpty'))
+    // 「剪贴板里明明有图」与「剪贴板真没有内容」必须分开说：
+    // 前者在文档未落盘时被图片通道静默跳过（quiet 探测），旧实现一律报
+    // 「剪贴板为空」——与事实相反（2026-10-25 真机反馈）。
+    let hasImage = false
+    try { hasImage = Boolean(await hasClipboardImage?.()) } catch { hasImage = false }
+    if (hasImage) {
+      // 已落盘却仍走到这里 = 落盘失败，真错误已由 useFileAssets toast，不再叠加
+      if (!canSaveImage?.()) notify?.(t('toast.saveBeforeImage'), true)
+    } else {
+      notify?.(t('toast.clipboardEmpty'))
+    }
     return false
   }
   // 选中文字 + 粘贴 URL → [选中文字](url)；选区为空时保持原样直接插入文本

@@ -7,6 +7,8 @@ export function CheckUpdate():Promise<main.UpdateInfo>;
 
 export function ClipboardGet():Promise<string>;
 
+export function ClipboardHasImage():Promise<boolean>;
+
 export function ClipboardSet(arg1:string):Promise<void>;
 
 export function CloseWindow(arg1:boolean,arg2:string):Promise<void>;

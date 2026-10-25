@@ -114,6 +114,53 @@ describe('pasteIntoView · 图片优先 / 文本兜底', () => {
     assert.equal(toasts.length, 1)
     assert.equal(view.calls.dispatch.length, 0)
   })
+
+  // 【2026-10-25 真机反馈】文档未保存时图片通道静默跳过，文本又是空串 →
+  // 旧实现报「剪贴板为空」，与事实相反（剪贴板里明明有图）。必须改说「请先保存」。
+  test('有图但文档未保存 → 说「请先保存文档」，不说「剪贴板为空」', async () => {
+    const view = stubView()
+    const toasts = []
+    const ok = await pasteIntoView(view, {
+      getClipboardImage: async () => null,   // quiet 探测：未落盘 → 静默 null
+      getText: async () => '',
+      hasClipboardImage: async () => true,   // 事实：剪贴板里有图
+      canSaveImage: () => false,             // 事实：文档未落盘
+      notify: (m, isErr) => toasts.push({ m, isErr }),
+    })
+    assert.equal(ok, false)
+    assert.equal(toasts.length, 1, '只能有一条提示（不能先「剪贴板为空」再「请先保存」）')
+    assert.match(toasts[0].m, /保存/)
+    assert.equal(toasts[0].isErr, true)
+    assert.equal(view.calls.dispatch.length, 0)
+  })
+
+  test('有图且文档已落盘（落盘失败已 toast）→ 不再叠加第二条提示', async () => {
+    const view = stubView()
+    const toasts = []
+    const ok = await pasteIntoView(view, {
+      getClipboardImage: async () => null,
+      getText: async () => '',
+      hasClipboardImage: async () => true,
+      canSaveImage: () => true,
+      notify: (m) => toasts.push(m),
+    })
+    assert.equal(ok, false)
+    assert.equal(toasts.length, 0, '真错误已由图片通道 toast，这里重复提示只会噪音')
+  })
+
+  test('剪贴板无图且无文本 → 仍然说「剪贴板为空」', async () => {
+    const view = stubView()
+    const toasts = []
+    await pasteIntoView(view, {
+      getClipboardImage: async () => null,
+      getText: async () => '',
+      hasClipboardImage: async () => false,
+      canSaveImage: () => false,
+      notify: (m) => toasts.push(m),
+    })
+    assert.equal(toasts.length, 1)
+    assert.match(toasts[0], /剪贴板/)
+  })
 })
 
 describe('edit.paste 命令接线（真实命令总线驱动）', () => {

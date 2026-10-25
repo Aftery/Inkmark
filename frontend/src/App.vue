@@ -77,6 +77,7 @@ const cmds = useCommands({
   dialog, closeDialog, askInput, notify: showToast, slashRef,
   // ⌘V 的图片通道（quiet：文本粘贴高频，环境性跳过不弹「请先保存」）
   getClipboardImage: () => assets.saveImageFromClipboard({ quiet: true }),
+  hasClipboardImage: () => assets.clipboardHasImage(), canSaveImage: () => Boolean(filePath.value),
 })
 const { menuGroups, showSettings, closeSettings, showAbout, aboutVersion, closeAbout,
   showShortcuts, shortcutRows } = cmds
