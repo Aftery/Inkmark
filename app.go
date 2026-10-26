@@ -62,6 +62,9 @@ func NewApp() *App {
 
 func (a *App) startup(ctx context.Context) {
 	a.ctx = ctx
+	// Linux：让 GTK 走 CSD，避免 KWin Wayland 在自绘标题栏上再叠一层原生
+	// 标题栏（两个最小化按钮）。见 window_linux.c 文件头。
+	applyClientSideDecorations()
 }
 
 // CloseWindow 关闭主窗口（自绘标题栏的关闭按钮调用）。
