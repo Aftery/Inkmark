@@ -13,6 +13,8 @@
 应用内一次调用即可产出**分页 A4、矢量文字、字体内嵌、不弹任何系统对话框**的 PDF。
 推荐方案（下称 **路线 A′**）全部构件均已实测通过；**页眉页脚已由 team-lead 裁决为本期 P0 实施项**（见 §Consequences 风险 4），仅「真实 Wails 宿主内集成」一处需在实施期实机确认（见 §未决与后续）。
 
+**修订留痕（v1.4，2026-10-26）**：**Linux 不再是「只弹打印对话框」**。真机反馈「点导出却出现打印」后，Linux 侧改为 GTK「打印到文件」直出：离屏 WebKitGTK 加载同一份自包含导出 HTML，用 GTK 的虚拟打印机（`Print to File`，名字取 `g_dgettext("gtk30", …)` 的本地化译文）配 `GTK_PRINT_SETTINGS_OUTPUT_URI`，调 `webkit_print_operation_print()`（无对话框版本）写成 PDF。产物 A4、四边 64pt、正文宽 467pt（GTK 走 96dpi，故导出 HTML 的 `--export-measure` 为 622px），已真机验证 3 页文档与相对路径图片。差异：Linux 版**不含**页眉页脚（WebKitGTK 打印 API 不支持逐页叠加），也**不做**500 页硬上限（分页交给 WebKit）。因此 §降级路径 L3 的「非 darwin 走 L2」现仅适用于 Windows。
+
 **修订留痕（v1.3，2026-10-01）**：正文带宽由 **666pt 改为 714pt**（裁决取读法 B——页眉/页脚 24pt 落在 64pt 边距之内、不参与相加）。同步改动：§Decision 端到端流程（`ceil(H/714)`、`rect=(0,i*714,467,714)`、PDF 落页 `(64,64,467,714)`、页眉 PDF y=784 / 页脚 PDF y=56）、§页面几何与页眉页脚、§Consequences（正面「467×714」、风险 4）、§已裁决与待办（新增裁决 4，关闭「§8.4 基线不自洽待复核」）。
 
 ## Background
@@ -239,7 +241,7 @@ go mod init pdfprobe && go build -o probe .        # 仅一条 ld 警告：objec
 |---|---|---|---|
 | L1 | PDFKit 合并在真实宿主中异常 | **单页 `createPDFWithConfiguration`**（探针已验证）：整篇作为一张长页 PDF | 失去 A4 分页与页眉页脚；内容完整、矢量、无对话框 |
 | L2 | cgo / ObjC 集成受阻 | 保留现有 `window.print()`（`main.go:77` → `WindowPrint`） | 回到「弹系统打印对话框」（用户已拒绝，仅作技术兜底） |
-| L3 | 非 macOS 平台 | **菜单项保持可用、不置灰**，触发 L2（`window.print()`）。菜单文案：darwin 显示「导出 PDF…」，非 darwin 显示「**导出 PDF…（本平台走系统打印）**」（文案直接拼在菜单项标题里，不做 tooltip——原生菜单的 tooltip 支持不可靠） | 非 mac 上无一键直出，但用户仍能出 PDF |
+| L3 | 非 macOS 平台（**Windows**；Linux 自 v1.4 起已有一键直出，见修订留痕） | **菜单项保持可用、不置灰**，触发 L2（`window.print()`）。菜单文案：darwin 显示「导出 PDF…」，非 darwin 显示「**导出 PDF…（本平台走系统打印）**」（文案直接拼在菜单项标题里，不做 tooltip——原生菜单的 tooltip 支持不可靠） | 非 mac 上无一键直出，但用户仍能出 PDF |
 
 > 注 1：L1 仍是「一键直出、不弹对话框」，只是不分页——它是本 ADR 的**已验证保险**（`./probe A 6`）。
 > 注 2：**L3 已由 team-lead 裁决（2026-10-01）**——非 macOS 走 L2 降级、**不置灰**。理由：「能出 PDF」优于「完全不能用」；置灰会让用户以为功能坏了。（若用户在三文档确认时改判，team-lead 会即时通知并回改本条。）

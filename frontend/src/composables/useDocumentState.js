@@ -21,7 +21,8 @@
 
 import { ref, watch, onBeforeUnmount } from 'vue'
 import { SaveFileDialog, WriteFile } from '../../wailsjs/go/main/App'
-import { buildHtmlDocument } from '../export/exporters'
+import { buildHtmlDocument, PDF_EXPORT_MEASURE, PDF_EXPORT_MEASURE_GTK } from '../export/exporters'
+import { platform } from './usePlatform.js'
 import { replaceDocument } from '../editor/createEditor'
 import { getPref, onPrefsChange } from '../themes/prefs.js'
 import { t, getLocale } from '../i18n/index.js'
@@ -252,23 +253,28 @@ export function useDocumentState({ getEditor, filePath, title, renderedHtml, the
     return opts
   }
 
-  // 非 darwin 判定：桌面端绑定存在但平台不支持一键导出（后端返回「不支持」错误）时，
-  // 退回 window.print() 保住 ⌘P 出 PDF 的能力（AC-19b 降级链，不弹错误 toast 就结束）。
-  function isNonDarwin() {
-    if (typeof navigator === 'undefined') return false
-    const ua = `${navigator.platform || ''} ${navigator.userAgent || ''}`
-    return !/Mac|iPhone|iPad|iPod/i.test(ua)
+  // 是否退回系统打印对话框（仅 windows / 平台未知时）：
+  // 这两类平台没有一键导出实现（export_pdf_other.go 返回「不支持」），
+  // 退回 window.print() 至少还能出 PDF，不弹错误 toast 就结束（AC-19b）。
+  // 【2026-10-26】Linux 已有一键导出（export_pdf_linux.go 的 GTK 打印到文件），
+  // 失败必须如实报错 —— 再弹打印对话框正是用户抱怨的「点导出却出现打印」。
+  function shouldFallbackToPrint() {
+    const p = platform.value
+    return p !== 'linux' && p !== 'darwin'
   }
 
-  // PDF 一键直出（AC-16~AC-19c）：Go 侧离屏 WKWebView 分页渲染；
-  // 浏览器预览 / 非 darwin（window.go 不可用）降级 window.print()，不炸 setup（AC-19b）。
+  // PDF 一键直出（AC-16~AC-19c）：darwin 用离屏 WKWebView 分页渲染；
+  // linux 用离屏 WebKitGTK「打印到文件」；两者都只弹保存对话框、不弹打印对话框。
+  // 浏览器预览 / windows（window.go 不可用或后端不支持）降级 window.print()。
   async function exportPdf() {
     const api = getAppApi()
     if (!api || typeof api.ExportPDF !== 'function') return window.print()
     // AC-19c 主题映射：dark → 强制 light（PDF 是纸面产物，不出深底浅字）；light/paper 原样
     const pdfTheme = theme.value === 'dark' ? 'light' : theme.value
-    // 版式宽 467px（架构坑 19 / 视觉规格 §8.8）：1 CSS px = 1 pt 分页假设的前提
-    let html = buildHtmlDocument(title.value, renderedHtml.value, pdfTheme, '467px')
+    // 版心宽：darwin 的离屏 WKWebView 满足 1 CSS px = 1 pt，用 467px 正好等于
+    // 可打印宽；GTK 打印走 96dpi，同一物理宽度是 622px（见 exporters.js）。
+    const measure = platform.value === 'linux' ? PDF_EXPORT_MEASURE_GTK : PDF_EXPORT_MEASURE
+    let html = buildHtmlDocument(title.value, renderedHtml.value, pdfTheme, measure)
     // 兜底：若未来模板回退为固定 46rem，这里保证 PDF 版心仍为 467px
     if (/max-width:\s*46rem/.test(html)) html = html.replace(/max-width:\s*46rem/g, 'max-width:467px')
     try {
@@ -278,10 +284,10 @@ export function useDocumentState({ getEditor, filePath, title, renderedHtml, the
       if (!savedPath) return
       notify?.(t('toast.exportPdfDone', { path: savedPath }))
     } catch (err) {
-      // 非 darwin 桌面平台：绑定存在但后端返回「当前平台不支持一键导出 PDF」——
-      // 退回 window.print()，⌘P 仍能出 PDF，而不是弹一个错误 toast 就结束
-      if (isNonDarwin()) return window.print()
-      // 含 Go 侧 500 页超限等错误：明示并中止，不静默
+      // windows / 浏览器：绑定存在但后端不支持一键导出 —— 退回 window.print()，
+      // ⌘P 仍能出 PDF，而不是弹一个错误 toast 就结束
+      if (shouldFallbackToPrint()) return window.print()
+      // darwin / linux 的真错误（含 Go 侧 500 页超限）：明示并中止，不静默
       notify?.(t('toast.exportFailed', { error: errText(err) }), true)
     }
   }

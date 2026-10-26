@@ -15,6 +15,9 @@
 // 禁止用 transform: scale / zoom 凑宽度（会破坏 1 px = 1 pt 的分页假设）。
 export const HTML_EXPORT_MEASURE = '46rem'
 export const PDF_EXPORT_MEASURE = '467px'
+// Linux（GTK 打印到文件）用 96dpi 排版：A4 减去四边 64pt 后的可打印宽
+// 467pt ≈ 622px。用 467px 会让正文只占 350pt，左右各多出 ~58pt 空白。
+export const PDF_EXPORT_MEASURE_GTK = '622px'
 
 export function buildHtmlDocument(title, bodyHtml, theme, measure = HTML_EXPORT_MEASURE) {
   return `<!DOCTYPE html>
