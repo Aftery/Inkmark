@@ -198,6 +198,20 @@ export function isFootnoteDefStart(text) {
 }
 
 /**
+ * 拆一条脚注定义首行 → { label, rest }；不是定义行返回 null。
+ *
+ * 【为什么要有它】2026-10-26 真机反馈「脚注在编辑器里整段消失」：定义行此前被
+ * 整行隐藏、正文 nowhere 可读 —— 预览/导出侧内容渲染成 `<section class="footnotes">`，
+ * 编辑器侧却一个字都看不到。修法是首行不再隐藏，而是换成下方的 FootnoteDefWidget
+ * （编号上标 + 内容小字）；本函数就是 widget 渲染时唯一的取材口，与
+ * isFootnoteDefStart 逐一同步（前缀口径一字不差）。
+ */
+export function parseFootnoteDefText(text) {
+  const m = /^\s{0,3}\[\^([^\]\s]+)\]:\s*(.*)$/.exec(text)
+  return m ? { label: m[1], rest: m[2] } : null
+}
+
+/**
  * 脚注定义 `[^label]: 内容` 的**全部行**区间（含缩进续行）。
  *
  * 【为什么必须自己扫，而不用 LinkReference 节点】lezer 只把**首行**算进
@@ -328,6 +342,36 @@ export function htmlColor(attrs) {
     if (HEX_COLOR.test(v) || NAMED_COLOR.test(v)) return v
   }
   return null
+}
+
+/**
+ * 从属性串里取**单个**属性值（img 的 src / alt 用）；取不到返回 null。
+ *
+ * 【为什么不复用 markdown/html.js 的 parseAttrs】那是给「白名单重建」用的
+ * （逐属性遇非引号值吃到空白为止），它把 `<` `>` 也当属性名边界之外合法字符，
+ * 而这里喂进来的 attrs 来自 parseHtmlTag（标签体已被剥离，不含尖括号）。
+ * 正则一条解决，与 htmlColor 同批函数，不需要拖入两份解析器。
+ */
+export function attrValue(attrs, name) {
+  const re = new RegExp(
+    '(?:^|\\s)' + name + '\\s*=\\s*(?:"([^"]*)"|\'([^\']*)\'|([^\\s>"\']+))', 'i'
+  )
+  const m = re.exec(attrs ?? '')
+  if (!m) return null
+  return m[1] ?? m[2] ?? m[3] ?? null
+}
+
+/**
+ * 从 HTMLTag 标签体里取出 img 的 src / alt；不是可显示的 img（无 src）返回 null。
+ *
+ * 【为什么给 img 开小灶】img 在预览侧白名单里（INLINE_ALLOWED），`<img …/>` 独立
+ * 一行时预览渲染出真图片；编辑器侧此前把它当普通 HTMLTag 留源码 —— 真机反馈
+ * 「内嵌 HTML 的图片不显示」。widget 与 markdown `![]()` 共用 cm-md-img，尺寸
+ * 由 ImageWidget 从 attrs 还原（width/height 只认纯数字，见 imageWidget.sizeOf）。
+ */
+export function htmlImgSrc(attrs) {
+  const src = attrValue(attrs, 'src')
+  return src ? { src, alt: attrValue(attrs, 'alt') ?? '' } : null
 }
 
 /**
@@ -512,3 +556,75 @@ export class FootnoteRefWidget extends WidgetType {
   // 同为行内文本件：点击脚注编号要让光标落到它边上（理由见 MathWidget 处）
   ignoreEvent() { return false }
 }
+
+/**
+ * 脚注**内容** widget：定义行 `[^1]: 这是脚注内容。` 整行换成
+ * 「上标编号 + 内容小字」。此前定义行整块隐藏（与预览侧 `<section
+ * class="footnotes">` FileInfo 两副面孔），真机反馈是「脚注在正文里找不到内容」
+ * —— 静默消失正是本仓最忌讳的形态。内容用 textContent 装载：它来自文档本身，
+ * 不是 HTML，不能当 innerHTML 塞进去（`<b>` 这样的字面量会被激活成元素）。
+ */
+export class FootnoteDefWidget extends WidgetType {
+  constructor(label, content) {
+    super()
+    this.label = label
+    this.content = content
+  }
+  eq(other) { return other.label === this.label && other.content === this.content }
+  toDOM() {
+    // 骨架是静态字符串（不掺任何文档文本）；两处内容用 textContent 装载：
+    // `[^1]: <b>x</b>` 这类字面量不能被激活成元素，它来自文档，不是 HTML
+    const w = document.createElement('span')
+    w.className = 'cm-md-footnote-def'
+    w.innerHTML = '<sup class="cm-md-footnote-ref"></sup><span class="cm-md-footnote-def-content"></span>'
+    w.firstChild.textContent = this.label
+    w.lastChild.textContent = this.content
+    return w
+  }
+  // 内容取自文档，无交互；与 MathWidget 同理由：点击要落光标
+  ignoreEvent() { return false }
+}
+
+/**
+ * 脚注定义块的装饰清单：**首行**换成 FootnoteDefWidget（内容可见），续行保持
+ * 隐藏（hideDeco 空替换，与 wysiwyg.js 的 hideDeco 同一字面）。
+ *
+ * 【为什么在 inlineExtras 而不在 wysiwyg.js】wysiwyg.js 的有效行数已顶到门禁
+ * 红线，这里每多一行都挤掉别的职责。widget 与解析函数同住一个文件，也就天然
+ * 满足「清单与解析同源」。
+ *
+ * @param {import('@codemirror/state').Text} doc
+ * @param {Set<number>} defLines footnoteDefLines 的产物（行号集合，含首行）
+ * @param {number} firstLineNo 定义首行行号（1-based）
+ * @param {(from:number)=>boolean} canHide 活跃行不隐藏（显形源码，与全文件同一口径）
+ * @param {(from:number,to:number)=>boolean} singleLine 跨行拦截（同 wysiwyg.js）
+ * @returns {{from:number,to:number,value:object}[]} 可直接并入 replaces 的区间
+ */
+export function footnoteDefDecorations(doc, defLines, firstLineNo, canHide, singleLine) {
+  // defLines 可能含**下一条定义的首行**（footnoteDefLines 收的是范围内所有定义
+  // 块的行号，不是单块）——本块在「下一个定义首行」处终止，其余块由 wysiwyg 的
+  // 逐行扫描在其各自的首行上自处理（隐藏是幂等的，widget 同样会再产一次）。
+  const sorted = [...defLines].sort((a, b) => a - b)
+  const blockLines = []
+  for (const ln of sorted.slice(sorted.indexOf(firstLineNo) + 1)) {
+    if (isFootnoteDefStart(doc.line(ln).text)) break
+    blockLines.push(ln)
+  }
+  const out = []
+  const first = doc.line(firstLineNo)
+  const parts = parseFootnoteDefText(first.text)
+  if (parts && canHide(first.from) && singleLine(first.from, first.to)) {
+    // 空内容照样渲染 widget（编号在），与预览侧空脚注一致
+    const content = (parts.rest + ' ' + blockLines.map((ln) => doc.line(ln).text.trim()).join(' ')).trim()
+    out.push({ from: first.from, to: first.to,
+      value: Decoration.replace({ widget: new FootnoteDefWidget(parts.label, content) }) })
+  }
+  for (const ln of blockLines) {
+    const l = doc.line(ln)
+    if (canHide(l.from)) out.push({ from: l.from, to: l.to, value: hideLineDeco })
+  }
+  return out
+}
+
+/** 续行隐藏装饰。与 wysiwyg.js 的 hideDeco 有同一字面（空替换） */
+const hideLineDeco = Decoration.replace({})

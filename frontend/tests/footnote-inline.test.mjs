@@ -76,6 +76,7 @@ function decorationsOf(body) {
       text: doc.slice(from, to),
       widget: val.widget ? val.widget.constructor.name : null,
       label: val.widget?.label,
+      content: val.widget?.content,
       cls: val.spec?.class ?? null,
       atomic: null,
     })
@@ -255,14 +256,15 @@ describe('缺陷 B · 多行脚注定义连缩进续行一起隐藏', () => {
     return items.some((i) => i.widget === null && i.from <= start && i.to >= end && i.to > i.from)
   }
 
-  test('**决定性判据**：首行与 4 空格缩进的续行**都**有隐藏装饰', () => {
+  test('**决定性判据**：首行换成内容 widget（编号+内容可见），续行整行隐藏', () => {
+    // 【2026-10-26 口径更新】定义首行不再隐藏 —— 此前正文在编辑器里一处都看不到，
+    // 真机反馈「脚注最下面没有内容」。现改为 FootnoteDefWidget（上标编号 + 内容
+    // 小字），续行（隐藏口径来自缺陷 B 的修复）仍整行隐藏。
     const { items, doc } = decorationsOf(DOC)
-    const hideItems = items.filter((i) => i.widget === null && i.to > i.from)
-    assert.ok(hideItems.length >= 2, `应至少有 2 条隐藏装饰（首行 + 续行），实际 ${hideItems.length}`)
-    assert.ok(
-      lineHidden(items, doc, '[^note]: 命名脚注可以写多行，'),
-      '定义行首行没有被隐藏'
-    )
+    const defs = items.filter((i) => i.widget === 'FootnoteDefWidget')
+    assert.equal(defs.length, 1, `应有 1 条定义内容 widget，实际 ${defs.length}`)
+    assert.equal(defs[0].label, 'note', 'widget 应带上定义的脚注标签')
+    assert.ok(defs[0].content.includes('命名脚注可以写多行'), 'widget 内容缺失')
     assert.ok(
       lineHidden(items, doc, '    续行需要缩进。'),
       '缩进续行没有被隐藏 —— 缺陷 B 复现：编辑器里续行留在正文（4 空格时还是代码块），而预览里是完整一条'
@@ -287,7 +289,9 @@ describe('缺陷 B · 多行脚注定义连缩进续行一起隐藏', () => {
 
   test('空行终止续行区：空行后的独立段落必须**不**被隐藏', () => {
     const { items, doc } = decorationsOf('[^a]: 内容\n\n独立段落\n')
-    assert.ok(lineHidden(items, doc, '[^a]: 内容'), '定义行没有被隐藏')
+    const defs = items.filter((i) => i.widget === 'FootnoteDefWidget')
+    assert.equal(defs.length, 1, '定义行应由一条内容 widget 承载（不再整行隐藏）')
+    assert.equal(defs[0].content, '内容', 'widget 内容不对')
     assert.ok(
       !lineHidden(items, doc, '独立段落'),
       '空行之后的独立段落被连带隐藏了 —— 续行区必须遇到空行就终止'
@@ -302,16 +306,14 @@ describe('缺陷 B · 多行脚注定义连缩进续行一起隐藏', () => {
     )
   })
 
-  test('两条相邻定义 → 各隐藏各的，不粘连', () => {
+  test('两条相邻定义 → 各换各的内容 widget，不粘连', () => {
     const { items, doc } = decorationsOf('[^a]: 第一条\n[^b]: 第二条\n')
-    const hideItems = items.filter((i) => i.widget === null && i.to > i.from)
-    assert.equal(hideItems.length, 2, `两条定义应各有一条隐藏装饰，实际 ${hideItems.length}`)
-    assert.ok(lineHidden(items, doc, '[^a]: 第一条'))
-    assert.ok(lineHidden(items, doc, '[^b]: 第二条'))
-    // 不沾连：任何一条隐藏区间都不许跨过行边界（跨行 replace 会被 CM 抛错）
-    for (const h of hideItems) {
-      const slice = doc.slice(h.from, h.to)
-      assert.ok(!slice.includes('\n'), `隐藏区间跨行了：${JSON.stringify(slice)}`)
+    const defs = items.filter((i) => i.widget === 'FootnoteDefWidget')
+    assert.equal(defs.length, 2, `两条定义应各有 1 条内容 widget，实际 ${defs.length}`)
+    assert.deepEqual(defs.map((d) => d.content), ['第一条', '第二条'])
+    // 不粘连：任何一条 widget 区间都不许跨过行边界（跨行 replace 会被 CM 抛错）
+    for (const d of defs) {
+      assert.ok(!d.text.includes('\n'), `widget 区间跨行了：${JSON.stringify(d.text)}`)
     }
   })
 
@@ -331,25 +333,23 @@ describe('缺陷 B · 多行脚注定义连缩进续行一起隐藏', () => {
     //   ③ `: 第二条` 不许以任何形式裸露在正文里。
     const body = '[^a]: 第一条\n  续行\n[^b]: 第二条\n'
     const { items, doc } = decorationsOf(body)
-    assert.ok(lineHidden(items, doc, '[^a]: 第一条'), '第 1 条定义首行未隐藏')
+    // 口径更新（2026-10-26）：定义首行 = 内容 widget；续行 = 隐藏
+    const defs = items.filter((i) => i.widget === 'FootnoteDefWidget')
+    assert.equal(defs.length, 2, `应有 2 条内容 widget（两条定义），实际 ${defs.length}`)
+    assert.deepEqual(defs.map((d) => d.content), ['第一条 续行', '第二条'], 'widget 内容不对')
     assert.ok(lineHidden(items, doc, '  续行'), '第 1 条定义的缩进续行未隐藏')
-    assert.ok(
-      lineHidden(items, doc, '[^b]: 第二条'),
-      '缺陷 D 复现：第 2 条定义没被整行隐藏（lezer 没给它 LinkReference，行级口径也没兜住）'
-    )
     const fn = footnotesOf(items)
     assert.deepEqual(
       fn.map((f) => f.text),
       [],
-      '定义行里的 `[^b]` 被当成了行内引用 widget —— 定义行应整块隐藏，不该再产上标'
+      '定义行里的 `[^b]` 被当成了行内引用 widget —— 定义行应换内容 widget，不该再产上标'
     )
-    // ③ 裸露检查：隐藏装饰覆盖不到的地方不许剩 `: 第二条` 这半截
-    const hiddenSpans = items.filter((i) => i.widget === null && i.to > i.from)
-    const covered = (pos) => hiddenSpans.some((h) => h.from <= pos && h.to >= pos)
+    // ③ 裸露检查：`[^b]: 第二条` 的每个字符都要被**某条装饰**覆盖（widget 或隐藏）
+    // —— 隐藏装饰覆盖不到的地方不许剩 `: 第二条` 这半截源码
     const defStart = doc.indexOf('[^b]: 第二条')
-    for (let i = defStart; i < defStart + '[^b]: 第二条'.length; i++) {
-      assert.ok(covered(i), `第 ${i - defStart} 个字符没被隐藏装饰覆盖 —— 会留下半截源码`)
-    }
+    const defEnd = defStart + '[^b]: 第二条'.length
+    const covered = items.some((i) => i.from <= defStart && i.to >= defEnd && i.to > i.from)
+    assert.ok(covered, '[^b]: 第二条 整段没有被任何装饰覆盖 —— 会留下半截源码')
   })
 })
 
@@ -410,16 +410,17 @@ describe('编辑器 ↔ 渲染器对照 · 多行定义两侧一致', () => {
     assert.equal(items.length, 1, `应恰好 1 条脚注，实际 ${items.length}`)
   })
 
-  test('编辑器侧：同一份文档里定义行 + 续行都被隐藏（与渲染器的「完整一条」对齐）', () => {
+  test('编辑器侧：定义整条以内容 widget 呈现、续行隐藏（与渲染器的「完整一条」对齐）', () => {
     const { items, doc } = decorationsOf(DOC)
-    const hiddenTexts = items.filter((i) => i.widget === null && i.to > i.from).map((i) => i.text)
+    const defs = items.filter((i) => i.widget === 'FootnoteDefWidget')
+    assert.equal(defs.length, 1, `应有 1 条内容 widget，实际 ${defs.length}`)
+    // 首行与续行的文字都必须出现在 widget 内容里 —— 这就是「完整一条」在
+    // 编辑器侧的对等判据（编辑器不再要求源码以隐藏形态呈现整条）
+    assert.ok(defs[0].content.includes('命名脚注可以写多行'), 'widget 缺首行内容')
+    assert.ok(defs[0].content.includes('续行需要缩进'), 'widget 缺续行内容 —— 与渲染器分叉')
     assert.ok(
-      hiddenTexts.some((t) => t.includes('命名脚注可以写多行')),
-      `定义行首行没被隐藏（实际隐藏：${JSON.stringify(hiddenTexts)}）`
-    )
-    assert.ok(
-      hiddenTexts.some((t) => t.includes('续行需要缩进')),
-      `定义行续行没被隐藏 —— 编辑器与渲染器分叉（实际隐藏：${JSON.stringify(hiddenTexts)}）`
+      items.some((i) => i.widget === null && i.to > i.from && i.text.includes('续行需要缩进')),
+      '续行源码仍要整行隐藏（渲染器侧它已并入同一条脚注）'
     )
     // 引用处仍有一个 widget
     assert.equal(footnotesOf(items).length, 1, '正文里的引用应产出 1 个上标 widget')

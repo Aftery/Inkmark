@@ -36,8 +36,9 @@ import { blockRangesField } from './blockRanges.js'
 import {
   activeLineSet, noteQuoteDepth, pushLineClass, flushQuoteLines, pushMark,
   findChild, linkTextRange, footnoteLabel, parseHtmlTag, tagClass, htmlColor,
-  matchCloseTag, scanInlineMath, scanFootnoteRefs, footnoteDefLines,
-  isFootnoteDefStart, MathWidget, EmojiWidget, FootnoteRefWidget,
+  htmlImgSrc, matchCloseTag, scanInlineMath, scanFootnoteRefs,
+  isFootnoteDefStart, footnoteDefLines, footnoteDefDecorations,
+  MathWidget, EmojiWidget, FootnoteRefWidget,
 } from './inlineExtras.js'
 
 // 图片装饰已整块搬到 imageWidget.js（行数红线）；这里重导出以保住既有导入路径
@@ -147,10 +148,6 @@ export function buildDecorations(state, visibleRanges) {
     if (!canHide(from) || from >= to) return
     replaces.push({ from, to: lineSafeTo(from, to), value: hideDeco })
   }
-  // 整行隐藏（含行首缩进）：脚注定义的续行常有 4 空格缩进，`hide(line.from,
-  // line.to)` 会把缩进一起隐掉 —— 这正是我们要的效果；单列成辅助只是让调用处
-  // 不必每次写 line.from / line.to。
-  const hideLine = (line) => hide(line.from, line.to)
   // widget 替换不能裁剪（半截替换会产出「半个图片/半个公式」），跨行时整套跳过
   const singleLine = (from, to) => !doc.sliceString(from, to).includes('\n')
   const markFor = (from, to, cls, color) => pushMark(decoRanges, from, to, cls, color)
@@ -274,6 +271,11 @@ export function buildDecorations(state, visibleRanges) {
           // 跨行标签（属性换行）实测存在；隐藏半截会留下 `style="…">` 这种残渣，
           // 比整段源码更难读 —— 一律保持源码可见
           if (!tag || !singleLine(node.from, node.to)) return
+          // <img …/>：整体换成与 `![]()` 同款的图片预览 widget（口径同
+          // inlineExtras.htmlImgSrc）。img 在预览侧白名单里，编辑器留裸标签
+          // 正是「内嵌 HTML 的图片不显示」的真机反馈，两副面孔必须修齐。
+          const img = tag.name === 'img' && !tag.closing && canHide(node.from) ? htmlImgSrc(tag.attrs) : null
+          if (img) { replaces.push({ from: node.from, to: node.to, value: Decoration.replace({ widget: new ImageWidget(img.src, img.alt, tag.attrs) }) }); return }
           const cls = tagClass(tag.name)
           const color = tag.closing ? null : htmlColor(tag.attrs)
           if (!cls && !color) return
@@ -384,7 +386,7 @@ export function buildDecorations(state, visibleRanges) {
         ? footnoteDefLines(doc, n, doc.lineAt(visTo).number, (l) => inBlock(l.from, l.to)
             || codeRanges.some(([a, b]) => l.from >= a && l.to <= b))
         : null
-      if (defLines) { for (const m of defLines) hideLine(doc.line(m)); continue }
+      if (defLines) { for (const r of footnoteDefDecorations(doc, defLines, n, canHide, singleLine)) replaces.push(r); continue }
       for (const m of scanInlineMath(line.text, line.from)) {
         if (inCode(m.from, m.to)) continue
         replaces.push({ from: m.from, to: m.to, value: Decoration.replace({ widget: new MathWidget(m.tex) }) })

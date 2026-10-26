@@ -104,6 +104,9 @@
    上下留白对齐正文节奏、超宽公式横向可滚、长公式不撑破正文栏。 */
 .cm-md-math-block {
   margin: var(--space-3) 0;
+  /* 点击即回到源码编辑（wysiwygBlocks.js 的 editSourceOn）：文字光标是唯一
+     能让用户发现「这块能点进去改」的线索 */
+  cursor: text;
   /* 超宽公式（长矩阵 / 多行推导）横向滚动而不是溢出正文栏。scroll 而非
      auto：auto 在 macOS 上默认不显示滚动条，用户不知道右边还有内容 */
   overflow-x: auto;

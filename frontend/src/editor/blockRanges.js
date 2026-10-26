@@ -32,6 +32,30 @@ const DETAILS_OPEN = /^\s{0,3}<details\b/i
 const DETAILS_CLOSE = /<\/details\s*>/i
 
 /**
+ * 对齐块：`<div align="center">` / `<p align="right">` 这类**整行**开标签、配对
+ * 闭标签独占一行的块。真机反馈「内嵌 HTML 里 div/p 不渲染」—— 预览侧这些标签
+ * 走 html.js 白名单照常渲染，编辑器侧由行内 HTMLTag 兜底只能隐掉配对的行内
+ * 标签，整块 div 保持源码。修法与 details 同路：由块级 widget 整块渲染。
+ *
+ * 【为什么只认「独占一行的开标签」】行内写法 `<p align="center">x</p>` 交给
+ * 行内 HTMLTag 隐藏即可，混进来会和行内装饰抢同一片文本（module 头注的
+ * 「两套机制抢」正是这里在新 kind 上复刻的坑）。闭标签必须独占一行同理：
+ * `</div>` 尾巴上带正文时按「未配对」处理，保持源码可见。
+ */
+const ALIGN_OPEN = /^\s{0,3}<(div|p)((?:\s[^<>]*?)?)(\/?)>$/i
+
+/**
+ * 取一条文字（trim 后）里开标签的标签名；不是独占一行的 div/p 开标签返回 null。
+ * 刻意**独立成函数**而不是直接一条正则糊在扫描循环里：闭标签配对、代码块排除、
+ * 「开标签必须独占一行」三件事在 update() 的窄循环里互相缠着，站到外面才讲得清。
+ */
+function alignOpenName(text) {
+  const m = ALIGN_OPEN.exec(text.trim())
+  if (!m || m[3] === '/') return null // 自闭合不是块开标签
+  return m[1].toLowerCase()
+}
+
+/**
  * 扫描「必须由块级 widget 独占」的区间。
  *
  * 纯函数（入参是 doc + 语法树），便于直接对真实 EditorState 打靶 —— 块级渲染的
@@ -97,6 +121,29 @@ export function scanBlockRanges(doc, tree) {
         const close = doc.line(closed)
         out.push({ from: line.from, to: close.to, kind: 'math' })
         i = closed + 1
+        continue
+      }
+      i++
+      continue
+    }
+    // 对齐块（div/p 独占一行的开标签）：找配对的同名闭标签行，允许嵌套
+    const openName = !inCode(line.from) && alignOpenName(line.text)
+    if (openName) {
+      const closeRe = new RegExp('^\\s*</\\s*' + openName + '\\s*>$', 'i')
+      let depth = 1
+      let j = i
+      while (j < doc.lines) {
+        j++
+        const l = doc.line(j)
+        if (inCode(l.from)) continue
+        if (alignOpenName(l.text) === openName) depth++
+        if (closeRe.test(l.text)) { depth--; if (depth <= 0) break }
+      }
+      if (depth <= 0) {
+        // 闭标签行必须独占一行（closeRe 只认这个形态）；尾巴上带正文时按
+        // 「未配对」处理 —— 源码保持可见，不吞后半篇
+        out.push({ from: line.from, to: doc.line(j).to, kind: 'html' })
+        i = j + 1
         continue
       }
       i++

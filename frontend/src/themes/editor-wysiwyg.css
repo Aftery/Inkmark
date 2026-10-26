@@ -484,3 +484,26 @@
   cursor: pointer;
   vertical-align: super;
 }
+
+/* ---- 脚注定义（首行整行换成 widget）----
+   `[^1]: 内容` 在编辑器里此前整块隐藏，正文在编辑器里无处可读（真机反馈「脚注
+   最下面没有内容」）。widget = 上标编号 + 内容小字，样式与引用块脚注编号同源。 */
+.cm-md-footnote-def {
+  display: inline-block;
+  color: var(--meta);
+  font-size: 0.92em;
+}
+.cm-md-footnote-def .cm-md-footnote-def-content {
+  /* 长内容折行：定义行.widget 是行内替换，块的自然流不受影响 */
+  margin-left: 4px;
+}
+
+/* ---- HTML 对齐块（<div align="center">…</div>）----
+   block 级 widget 整块渲染；对齐由 widget 的 style.textAlign 承担，这里只管
+   与正文节奏一致的内边距（div 在预览侧无额外留白，编辑器贴齐正文左缘）。 */
+.cm-md-html-align {
+  /* p/div 在预览侧是普通流式元素，不做额外盒模型修饰；inline 内容正常折行 */
+  white-space: normal;
+  /* 点击即回到源码编辑（wysiwygBlocks.js 的 editSourceOn） */
+  cursor: text;
+}

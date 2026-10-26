@@ -111,7 +111,92 @@ export function parseMathBlock(source) {
   return tex ? { tex } : null
 }
 
+/**
+ * 拆对齐块源码 → { tag, align, body }；结构不成立返回 null。
+ *
+ * 首行必须是独占一行的 `<div …>` / `<p …>` 开标签、末行是同名闭标签独占一行
+ * （blockRanges 已做一次配对，这里再验一次 —— 理由同 parseMathBlock：扫描边界
+ * 偏一行时，闭标签行正文会混进 body，渲染出半截 HTML 文字）。
+ *
+ * align 只放行四个对齐关键字：它要变成 widget 的 style.textAlign，任意值等于
+ * 一条 CSS 注入通道（同 htmlColor 只认颜色的取窄逻辑）。正文交给
+ * sanitizeHtml —— 与 `<details>` 正文同一份白名单口径，不新增信任面。
+ */
+export function parseHtmlAlignBlock(source) {
+  const lines = source.split(/\r\n|\r|\n/)
+  const head = /^\s{0,3}<(div|p)((?:\s[^<>]*?)?)(\/?)>$/.exec(lines[0].trim())
+  if (!head || head[3] === '/') return null
+  const tag = head[1].toLowerCase()
+  if (!new RegExp('^\\s*</\\s*' + tag + '\\s*>$', 'i').test(lines[lines.length - 1])) return null
+  const align = /\balign\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))/i.exec(head[2] ?? '')
+  const a = align ? (align[1] ?? align[2] ?? align[3] ?? '') : ''
+  return {
+    tag,
+    align: /^(left|center|right|justify)$/i.test(a) ? a.toLowerCase() : '',
+    body: lines.slice(1, -1).join('\n'),
+  }
+}
+
 // ---------------- widget ----------------
+
+/**
+ * 点击渲染块 → 把光标放进块内源码。
+ *
+ * 【为什么必须显式派发选区】block 装饰把整段源码换成了一个 widget，
+ * `ignoreEvent() = true` 又让 CM 完全不看这次点击 —— 表现就是「公式 / HTML 块
+ * 渲染出来以后点不进去、改不了」。这里用当前 DOM 反查块起点（**不能用构造期
+ * 缓存的 from**：块上方插入文字后 widget 会被 CM 复用，旧 from 已经偏移），
+ * 再落到正文首行。选区一进块，selectionInside() 就让 widget 退回源码。
+ *
+ * @param {HTMLElement} el widget 根元素
+ * @param {import('@codemirror/view').EditorView} view
+ * @param {string} source 块原文（用来跳过开标签 / `$$` 那一行）
+ * @param {'mousedown'|'dblclick'} [type]
+ */
+function editSourceOn(el, view, source, type = 'mousedown') {
+  el.addEventListener(type, (e) => {
+    e.preventDefault()
+    e.stopPropagation()
+    let from = -1
+    try { from = view.posAtDOM(el) } catch { return }
+    if (from < 0) return
+    const nl = source.indexOf('\n')
+    const pos = Math.min(from + (nl < 0 ? 1 : nl + 1), view.state.doc.length)
+    view.dispatch({ selection: { anchor: pos } })
+    view.focus()
+  })
+}
+
+/**
+ * 对齐块 widget：`<div align="center">…</div>` 整块渲染成同名元素、对齐映射到
+ * style.textAlign。正文是**用户手写 HTML**，必须过 sanitizeHtml（与 <details>
+ * 的正文同一口径：预览里会渲染的，编辑器里就只能渲染净化后的版本）。
+ */
+class HtmlAlignWidget extends WidgetType {
+  constructor(block) {
+    super()
+    this.kind = 'html'
+    this.source = block.source
+    this.parts = block.parsed
+  }
+
+  eq(other) {
+    return other.kind === this.kind && other.source === this.source
+  }
+
+  // 内容是静读区（无交互元素），点击让光标落到块两侧（与 details 同一取舍）
+  ignoreEvent() { return true }
+
+  toDOM(view) {
+    const el = document.createElement(this.parts.tag)
+    el.className = 'cm-md-html-align'
+    if (this.parts.align) el.style.textAlign = this.parts.align
+    // 只放白名单重建后的内容：innerHTML 的信任边界见 parseHtmlAlignBlock 头注
+    el.innerHTML = sanitizeHtml(this.parts.body)
+    editSourceOn(el, view, this.source)
+    return el
+  }
+}
 
 class DetailsBlockWidget extends WidgetType {
   constructor(block) {
@@ -129,10 +214,12 @@ class DetailsBlockWidget extends WidgetType {
   // 点击/按键全部交还浏览器：<summary> 的原生切换就靠这个
   ignoreEvent() { return true }
 
-  toDOM() {
+  toDOM(view) {
     const el = document.createElement('details')
     el.className = 'cm-md-details'
     if (this.parts.open) el.open = true
+    // 单击留给原生展开/收起；双击才进源码编辑 —— 否则折叠块的交互会被编辑态抢走
+    editSourceOn(el, view, this.source, 'dblclick')
 
     const sum = document.createElement('summary')
     sum.className = 'cm-md-details-summary'
@@ -165,7 +252,7 @@ class MathBlockWidget extends WidgetType {
 
   ignoreEvent() { return true }
 
-  toDOM() {
+  toDOM(view) {
     const wrap = document.createElement('div')
     wrap.className = 'cm-md-math-block'
     // 只放 renderMath 的输出：居中与 display 版式由 KaTeX 的 .katex-display
@@ -176,6 +263,7 @@ class MathBlockWidget extends WidgetType {
     if (html) wrap.innerHTML = html
     // 渲染失败（空源码等极端情况）退回源码文本，绝不产出空白块
     else wrap.textContent = this.source
+    editSourceOn(wrap, view, this.source)
     return wrap
   }
 }
@@ -191,7 +279,9 @@ function decoOf(state, blocks) {
   const b = new RangeSetBuilder()
   for (const blk of blocks) {
     if (selectionInside(state, blk)) continue
-    const widget = blk.kind === 'details' ? new DetailsBlockWidget(blk) : new MathBlockWidget(blk)
+    const widget = blk.kind === 'details' ? new DetailsBlockWidget(blk)
+      : blk.kind === 'math' ? new MathBlockWidget(blk)
+      : new HtmlAlignWidget(blk)
     // 【inclusiveEnd 只在「块一直延伸到文档末尾」时关掉 —— 否则光标无处可落】
     // CM 的 block replace 默认 inclusiveEnd:true（端点也归 widget 所有）。当块
     // 覆盖到 doc.length 且文档**不以换行结尾**时，文档末尾没有任何普通文本行可
@@ -245,7 +335,9 @@ function buildBlocks(state) {
     if (inFencedCode(tree, Math.min(r.from + 1, r.to))) continue
     if (tables.some((t) => r.from < t.to && r.to > t.from)) continue
     const source = state.sliceDoc(r.from, r.to)
-    const parsed = r.kind === 'details' ? parseDetails(source) : parseMathBlock(source)
+    const parsed = r.kind === 'details' ? parseDetails(source)
+      : r.kind === 'html' ? parseHtmlAlignBlock(source)
+      : parseMathBlock(source)
     if (!parsed) continue
     blocks.push({ from: r.from, to: r.to, kind: r.kind, source, parsed })
   }

@@ -13,7 +13,13 @@ import { WidgetType } from '@codemirror/view'
 import { resolveAssetSrc } from './assetUrl.js'
 // 子节点查找的唯一实现放在 inlineExtras.js：图片与链接都要在「同一层子节点」里
 // 找 URL / LinkMark，两处各写一份必然在「要不要下钻」上分叉
-import { findChild } from './inlineExtras.js'
+import { attrValue, findChild } from './inlineExtras.js'
+
+/** HTML `<img width="200" height="150">` 的尺寸：只认纯数字，任意值不得进 DOM 属性 */
+function sizeOf(attrs, name) {
+  const v = attrValue(attrs, name)
+  return /^\d{1,4}$/.test(v ?? '') ? Number(v) : 0
+}
 
 /**
  * 构建图片预览的 DOM（占位框态含在内）。
@@ -25,13 +31,17 @@ import { findChild } from './inlineExtras.js'
  * @param {string} resolved 已按 assetUrl 口径改写的 src（img 实际加载的地址）
  * @param {string} alt
  */
-export function buildImageDOM(rawSrc, resolved, alt) {
+export function buildImageDOM(rawSrc, resolved, alt, width = 0, height = 0) {
   const wrap = document.createElement('span')
   wrap.className = 'cm-md-img'
   const img = document.createElement('img')
   img.src = resolved
   img.alt = alt
   img.loading = 'lazy'
+  // HTML 图片的 width/height 要照写，否则 `<img width="200">` 在编辑器里
+  // 按原始像素显示，与预览侧「可控制大小」的示例对不上
+  if (width) img.width = width
+  if (height) img.height = height
   img.addEventListener('error', () => {
     // 远程图常因离线 / 防盗链失败：留一个可读的占位而不是碎图标。
     // tip 文案用**原始** src（用户写进 Markdown 的路径），不是改写后的
@@ -62,10 +72,13 @@ export function buildImageDOM(rawSrc, resolved, alt) {
 // 不够 —— 路径变化**不产生 CM 事务**，装饰根本不会重算，故另需 assetContext.js
 // 的版本号与刷新信号（见该文件头与 wysiwyg.js 的 shouldRebuildDecorations）。
 export class ImageWidget extends WidgetType {
-  constructor(src, alt) {
+  constructor(src, alt, attrs = '') {
     super()
     this.src = src
     this.alt = alt
+    // 尺寸只来自 HTML 属性（Markdown `![]()` 没有），进 eq 才能随属性变化重建
+    this.width = sizeOf(attrs, 'width')
+    this.height = sizeOf(attrs, 'height')
     // eq 键带 resolvedSrc：否则文档路径状态变化时 widget 被判「没变」，
     // 上一次按旧开关解析出的地址（多半是 404）会被一直复用（见上）。
     this.resolvedSrc = resolveAssetSrc(src)
@@ -73,12 +86,13 @@ export class ImageWidget extends WidgetType {
   eq(other) {
     return other.src === this.src && other.alt === this.alt
       && other.resolvedSrc === this.resolvedSrc
+      && other.width === this.width && other.height === this.height
   }
   toDOM() {
     // toDOM 可能在构造之后很久才被 CM 调用（视口外惰性构建），此时再读一次
     // 当前开关；构造期已解析的 this.resolvedSrc 作为兜底 —— 两个时点都不漏。
     const resolved = resolveAssetSrc(this.src) || this.resolvedSrc
-    return buildImageDOM(this.src, resolved, this.alt)
+    return buildImageDOM(this.src, resolved, this.alt, this.width, this.height)
   }
   ignoreEvent() { return false }
 }
