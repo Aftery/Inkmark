@@ -24,6 +24,13 @@ import { codeLinePlugin, codeCopyPlugin } from './codeBlock.js'
 
 import { tableRenderField, tableScanKick, tableSelectionGuard } from './tableRender'
 import { tableInputGate } from './tableInputGate'
+// 块级即时渲染（折叠块 <details> + 多行公式）与它依赖的区间登记处。
+// 【顺序】blockRangesField 声明在 wysiwygBlocksField 之前，wysiwygBlocksField 在
+// tableRenderField 之后 —— 依赖方向是「区间登记 → 块 widget」「表格区间 → 块 widget」。
+// CM 的 StateField 是惰性求值，实测倒序声明也能读到正确的依赖值，所以这不是硬
+// 约束而是**可读性约定**：声明顺序与依赖方向一致，读代码时不必回头查谁依赖谁。
+import { blockRangesField } from './blockRanges'
+import { wysiwygBlocksField, blockScanKick } from './wysiwygBlocks'
 import { slashCommandExtension } from './slashCommand'
 import { imageDropHandlers } from './imageDrop'
 import { smartInputExtension } from './smartInput.js'
@@ -378,6 +385,14 @@ export function createEditor(parent, { doc = '', onDocChange, onScroll, onUpdate
       tableInputGate,
       // 语法树补齐后的初始重扫兜底（StateField.create 跑在树就绪之前）
       tableScanKick(),
+      // 块级即时渲染：区间登记处 → 块 widget（折叠块 / 多行公式）。
+      // 依赖方向：blockRangesField（区间）→ wysiwygBlocksField（读区间 + 读
+      // tableRenderField 的 tables 做互斥）。声明顺序与依赖方向一致只为可读性。
+      // 根因链见 editor/wysiwygBlocks.js 头注。
+      blockRangesField,
+      wysiwygBlocksField,
+      // 树补齐后的补扫（与 tableScanKick 同构：StateField.create 早于树就绪）
+      blockScanKick(),
       // 缩放（状态栏 90/100/110/125%）：Compartment 运行时重配，不重建编辑器
       zoomCompartment.of(EditorView.theme({ '&': { fontSize: 'calc(var(--text-base) * 1)' } })),
     ],

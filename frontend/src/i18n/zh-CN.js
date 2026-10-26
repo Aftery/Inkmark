@@ -342,4 +342,8 @@ export default {
   'menu.zoom': '缩放',
   'menu.settings': '设置…',
   'help.syntax': 'Markdown 语法示例',
+  'footnote.title': '脚注',
+  'footnote.ref': '脚注 {n}',
+  'footnote.back': '回到正文第 {n} 条脚注的引用位置',
+  'footnote.backText': '回跳',
 }

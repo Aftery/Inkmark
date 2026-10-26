@@ -325,4 +325,8 @@ export default {
   'menu.zoom': 'Zoom',
   'menu.settings': 'Settings…',
   'help.syntax': 'Markdown Syntax Examples',
+  'footnote.title': 'Footnotes',
+  'footnote.ref': 'Footnote {n}',
+  'footnote.back': 'Back to reference {n} in the text',
+  'footnote.backText': 'Back',
 }

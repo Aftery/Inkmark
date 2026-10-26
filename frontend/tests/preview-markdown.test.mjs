@@ -62,10 +62,21 @@ describe('渲染器回归（覆写 html_inline 不许动其它规则）', () => 
     assert.match(html, /id="章节-1"/)
   })
 
-  test('html:false 仍然生效：原始 HTML 被转义，不进 DOM（防注入不回归）', () => {
+  test('原始 HTML 走白名单净化：危险属性被剥掉，不认识的事件处理器不进 DOM', () => {
+    // 【2026-10-25 契约变更】原文断言的是「html:false ⇒ 一切原始 HTML 被转义」。
+    // 用户真机反馈「HTML 标签不支持」（<kbd> / <mark> / <details> 全显示成源码），
+    // 故渲染器改为 html:true + 白名单重建（frontend/src/markdown/html.js）。
+    // 判据随之改变：不再是「不许出现 <img」，而是「危险的属性与协议不许存活」——
+    // 这比原判据更贴近真实风险（原判据只能守住「全部关掉」这一种做法）。
     const html = render(md, '<img src=x onerror=alert(1)>\n')
-    assert.ok(!/<img/.test(html), '原始 HTML 标签不该出现在输出里')
-    assert.match(html, /&lt;img/)
+    assert.match(html, /<img src="x">/, '白名单内的 img 应保留，但属性需按白名单重建')
+    assert.ok(!/onerror/i.test(html), '事件处理器属性必须被丢弃')
+    // script / iframe 这类容器整段删除（含内容），连转义文本都不留
+    assert.ok(!/<script/i.test(render(md, '<script>alert(1)</script>\n')))
+    // javascript: 协议被剥成无 href 的 <a>
+    assert.ok(!/javascript:/i.test(render(md, '<a href="javascript:alert(1)">x</a>\n')))
+    // 不认识的标签退化为文本（用户至少看得到自己写了什么，不是静默消失）
+    assert.match(render(md, '<blink>x</blink>\n'), /&lt;blink&gt;/)
   })
 
   test('代码块仍走高亮（highlight 规则不受影响）', () => {

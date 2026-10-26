@@ -92,12 +92,32 @@
 }
 .cm-md-img-tip { color: var(--meta); font-size: var(--text-xs); }
 
-/* ---- 引用块底色（Blockquote 节点）---- */
-/* 只加左侧边框，不做整行底色（避免与专注模式淡化冲突） */
-/* CodeMirror 行级装饰类加在 .cm-line 上 */
+/* ---- 引用块底色（Blockquote 节点）· 按嵌套深度分层 ----
+   只加左侧边框，不做整行底色（避免与专注模式淡化冲突）。
+   CodeMirror 行级装饰类加在 .cm-line 上。
+
+   【为什么靠「边框递进 + 内缩」而不是「叠三条 border-left」】
+   .cm-line 上只有一条 border-left，三层嵌套的 Blockquote 在编辑器里是
+   **同一行上的三个节点**（外层区间包含内层所有行），不是三个并排的盒子 ——
+   物理上叠不出三层边框。故分层只能靠「深度类 → 边框色阶 + 内缩量」表达：
+     d1  3px --accent          缩进 8px
+     d2  3px color-mix 60%     缩进 20px（比 d1 多一级，肉眼能看出「在里面」）
+     d3  3px color-mix 35%     缩进 32px
+   逐级变浅 + 逐级内缩，与预览区 blockquote 三层递进（markdown-extras.css 的
+   blockquote blockquote / blockquote blockquote blockquote）是同一视觉语言。
+   【必须用三档不同取值】都退回同一个 --accent 就是用户截图里的
+   「三级引用一模一样」—— 三层类特异性相同，样式若相同即等于没分层。 */
 .cm-line.cm-md-quote {
   border-left: 3px solid var(--accent);
   padding-left: calc(var(--space-2) - 3px); /* 补偿边框宽度 */
+}
+.cm-line.cm-md-quote-2 {
+  border-left-color: color-mix(in srgb, var(--accent) 60%, var(--border-strong));
+  padding-left: calc(var(--space-5) - 3px);
+}
+.cm-line.cm-md-quote-3 {
+  border-left-color: color-mix(in srgb, var(--accent) 35%, var(--border-strong));
+  padding-left: calc(var(--space-8) - 3px);
 }
 
 /* ---- 围栏代码块底色（FencedCode 节点）---- */
@@ -361,4 +381,106 @@
 .cm-md-table [contenteditable]:focus {
   outline: 2px solid var(--accent);
   outline-offset: -2px;
+}
+
+/* ============================================================================
+ * 行内扩展语法（wysiwyg.js + inlineExtras.js 产出）
+ * ----------------------------------------------------------------------------
+ * 五组：链接 / HTML 语义标签 / 行内公式 / emoji / 脚注引用。
+ * 全部**只改文字表现**，不改行高与布局 —— 它们是行内 mark 与行内 widget，
+ * 一旦改动行盒高度，CM6 的行高测量会与实际渲染失配（表现为方向键光标漂移，
+ * 静默且极难归因，见 createEditor.js 里 lineWrapping 那段注释的同源教训）。
+ * ========================================================================== */
+
+/* ---- 链接：正文可见、带语义色（引用式 / 行内式 / 自动链接统一）----
+   不加下划线：WYSIWYG 是写作面，链接与正文同权重更接近 Typora；
+   悬停才给下划线，与 preview.css 的 .preview-body a 同一行为。 */
+.cm-md-link {
+  color: var(--accent);
+  text-decoration: none;
+  cursor: pointer;
+}
+.cm-md-link:hover {
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+/* ---- HTML 内联语义标签（清单唯一真源：markdown/html.js 的 EDITOR_TAG_CLASS）----
+   与 preview.css / markdown-extras.css 的同名标签观感对齐，避免「编辑器里
+   是键帽、预览里是等宽字」这种同文档两副面孔。 */
+.cm-md-kbd {
+  display: inline-block;
+  padding: 0 5px;
+  border: 1px solid var(--border-strong);
+  border-bottom-width: 2px;
+  border-radius: var(--radius-sm);
+  background: var(--surface-warm);
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 0.85em;
+  line-height: 1.6;
+  /* 垂直微调而不是加 margin：行内盒的 margin 会把行盒撑高 */
+  vertical-align: 1px;
+}
+.cm-md-mark {
+  background: color-mix(in srgb, var(--accent) 22%, transparent);
+  color: inherit;
+  padding: 0 1px;
+  border-radius: 2px;
+}
+.cm-md-sup { font-size: 0.75em; vertical-align: super; line-height: 0; }
+.cm-md-sub { font-size: 0.75em; vertical-align: sub; line-height: 0; }
+.cm-md-small { font-size: 0.85em; }
+.cm-md-strong { font-weight: var(--weight-announce); }
+.cm-md-em { font-style: italic; }
+.cm-md-underline { text-decoration: underline; text-underline-offset: 2px; }
+.cm-md-strike { text-decoration: line-through; }
+.cm-md-abbr { text-decoration: underline dotted; text-underline-offset: 2px; cursor: help; }
+.cm-md-quote-inline { font-style: italic; color: var(--fg-2); }
+.cm-md-inline-code {
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 0.9em;
+  padding: 1px 4px;
+  border-radius: var(--radius-sm);
+  background: var(--surface-warm);
+}
+
+/* ---- 行内公式 `$…$` ----
+   widget 里是 KaTeX 的 span 树（KaTeX 自带样式表由 themes/index.css 引入，
+   本文件不再引第二次）。KaTeX 的 .katex 是 inline-block 且自带 line-height，
+   直接放进 .cm-line 会把行盒撑高 —— 实测同类结构（.cm-md-hr 的 block 化）
+   会让单行行盒从 27.2px 涨到 87.4px。故这里把它的行高钉回 normal 并靠
+   vertical-align 对齐文字基线，保证公式行与普通行同高。 */
+.cm-md-math {
+  display: inline-block;
+  vertical-align: baseline;
+  line-height: normal;
+  /* 公式两侧留一点气口：紧贴中文时容易看成两个词 */
+  padding: 0 1px;
+}
+.cm-md-math .katex { font-size: 1.05em; }
+/* KaTeX 语法错误是红字 span（math.js 的 throwOnError:false 产物）：
+   不给它额外描边，避免把「用户公式写错了」渲染成更吓人的告警块。 */
+.cm-md-math .katex-error { color: var(--danger); }
+
+/* ---- emoji 短码 ----
+   字符本身由 markdown/emoji.js 的表决定（源码里不出现任何表情字符，P0-1）。
+   这里只把行高复位：原生 emoji 字形比正文高，会顶开行盒。 */
+.cm-md-emoji {
+  font-family: 'Apple Color Emoji', 'Segoe UI Emoji', 'Noto Color Emoji', sans-serif;
+  font-style: normal;
+  line-height: 1;
+  vertical-align: -2px;
+}
+
+/* ---- 脚注引用 ----
+   widget 是 <sup>：上标由标签语义承担，这里只调字号与颜色。
+   line-height:0 是上标不撑行盒的关键（sup 默认会把行盒顶高，
+   一段长文里每处脚注都多出几像素，整体节奏就散了）。 */
+.cm-md-footnote-ref {
+  font-size: 0.72em;
+  line-height: 0;
+  color: var(--accent);
+  margin-left: 1px;
+  cursor: pointer;
+  vertical-align: super;
 }

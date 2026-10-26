@@ -29,6 +29,12 @@ const SRC = join(dirname(fileURLToPath(import.meta.url)), '..', 'src')
 const read = (...p) => readFileSync(join(SRC, ...p), 'utf8')
 
 const wysiwyg = read('editor', 'wysiwyg.js')
+// 【锚点随实现搬迁】图片装饰整块（ImageWidget / buildImageDOM / urlOf / altOf）
+// 于 2026-10-25 抽到 editor/imageWidget.js —— wysiwyg.js 当时顶到了契约 5 的
+// 300 有效代码行红线，而图片与行内文本渲染无耦合。wysiwyg.js 仍 re-export
+// 这两个符号（既有导入路径不破），但**源码文本**在 imageWidget.js 里，
+// 故下面针对 ImageWidget 的断言改读新文件。断言强度未变。
+const imageWidget = read('editor', 'imageWidget.js')
 const slashExt = read('editor', 'slashCommand.js')
 const slashComp = read('components', 'SlashCommand.vue')
 const appVue = read('App.vue')
@@ -52,6 +58,7 @@ function stripComments(src, lang) {
   return out.replace(/\/\*[\s\S]*?\*\//g, '')
 }
 const wysiwygCode = stripComments(wysiwyg)
+const imageWidgetCode = stripComments(imageWidget)
 const slashCompCode = stripComments(slashComp)
 const appVueCode = stripComments(appVue)
 const createEditorCode = stripComments(createEditor)
@@ -132,7 +139,7 @@ describe('wysiwyg 装饰 · 表格 / 分割线 / 图片', () => {
 
   test('必须处理 Image（否则图片语法裸露）', () => {
     assert.match(wysiwygCode, /name === 'Image'/, '未处理 Image 节点')
-    assert.match(wysiwygCode, /class ImageWidget/, '缺少图片预览 widget')
+    assert.match(imageWidgetCode, /class ImageWidget/, '缺少图片预览 widget')
     // 图片 widget 必须用「非活跃行才替换」的语义（活跃行显形是 §3.2 硬约束）
     assert.match(
       wysiwygCode,
@@ -148,8 +155,8 @@ describe('wysiwyg 装饰 · 表格 / 分割线 / 图片', () => {
       !/node\.state\.doc/.test(wysiwygCode),
       '不得访问 node.state.doc —— lezer 的 SyntaxNode 没有 state/doc 属性，会打崩插件',
     )
-    assert.match(wysiwygCode, /function urlOf\(node,\s*doc\)/, 'urlOf 应显式接收 doc')
-    assert.match(wysiwygCode, /function altOf\(node,\s*doc\)/, 'altOf 应显式接收 doc')
+    assert.match(imageWidgetCode, /function urlOf\(node,\s*doc\)/, 'urlOf 应显式接收 doc')
+    assert.match(imageWidgetCode, /function altOf\(node,\s*doc\)/, 'altOf 应显式接收 doc')
   })
 
   test('分割线装饰必须撑开高度（纯空替换会让行高塌陷）', () => {
@@ -176,7 +183,7 @@ describe('wysiwyg 装饰 · 表格 / 分割线 / 图片', () => {
   })
 
   test('图片加载失败须有可读占位，不得留碎图标', () => {
-    assert.match(wysiwygCode, /addEventListener\('error'/, '图片 widget 缺少 onError 处理')
+    assert.match(imageWidgetCode, /addEventListener\('error'/, '图片 widget 缺少 onError 处理')
     assert.match(wysiwygCss, /\.cm-md-img\.is-broken/, '缺少加载失败的占位样式')
   })
 })

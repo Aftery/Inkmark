@@ -14,22 +14,36 @@
 // 显形判定（§3.2）：「活跃」= 与任一 selection range 相交的行。活跃行的所有
 // 隐藏型替换一律跳过（显形 = 保持源码原样）；行级样式类（引用底色等）照常应用。
 //
-// 样式：.cm-md-* 全部定义在 createEditor.js 的单一 EditorView.theme 内
-// （§3.6：不得新建第二个 theme 扩展）。
+// 【本文件只管「在哪儿用」】HTML 内联标签的解析/配对、行内公式的边界扫描、
+// emoji 与脚注的 widget 都在 editor/inlineExtras.js；图片整块在
+// editor/imageWidget.js（两者都是为了让本文件守住建制 5 的 300 有效行红线）。
+//
+// 样式：.cm-md-* 全部定义在 themes/editor-wysiwyg.css（该文件是唯一定义处）。
 
 import { ViewPlugin, Decoration, WidgetType, EditorView } from '@codemirror/view'
 import { StateField, StateEffect } from '@codemirror/state'
 import { syntaxTree } from '@codemirror/language'
 // 任务列表 checkbox 的无障碍标签要随界面语言走 —— 它是 span[role=checkbox] 的
 // aria-label，屏幕阅读器会读出来，属于货真价实的用户可见文案。
-// （此文件此前未被 i18n 覆盖，是 Spec §5 组件清单的一处遗漏，已补上。）
 import { t } from '../i18n/index.js'
-// 图片 src 的文档相对路径 → /doc-assets/ 改写（唯一口径在 assetUrl.js）；
-// 不改写的话 src 会落到构建产物目录，图片永远是碎图占位
-import { resolveAssetSrc } from './assetUrl.js'
 // 改写口径的版本号：文档路径变化不产生事务，装饰必须靠它判「过期了」。
 // 同步点与版本号都在 assetContext.js（文件头有完整根因说明）。
 import { assetVersion } from './assetContext.js'
+// 短码表情的唯一真源（与预览/导出同一份表，否则同一份文档两副面孔）
+import { emojiFor } from '../markdown/emoji.js'
+// details / 多行 $$ 区间由块级 widget 独占（blockRanges.js 是唯一登记处）
+import { blockRangesField } from './blockRanges.js'
+import {
+  activeLineSet, noteQuoteDepth, pushLineClass, flushQuoteLines, pushMark,
+  findChild, linkTextRange, footnoteLabel, parseHtmlTag, tagClass, htmlColor,
+  matchCloseTag, scanInlineMath, scanFootnoteRefs, footnoteDefLines,
+  isFootnoteDefStart, MathWidget, EmojiWidget, FootnoteRefWidget,
+} from './inlineExtras.js'
+
+// 图片装饰已整块搬到 imageWidget.js（行数红线）；这里重导出以保住既有导入路径
+// （tests/image-asset-context.test.mjs 从本文件 import buildImageDOM）。
+export { buildImageDOM, ImageWidget } from './imageWidget.js'
+import { ImageWidget, urlOf, altOf } from './imageWidget.js'
 
 // ---------- 开关：StateField + StateEffect（与 createEditor.js 的 setFocusMode 同构） ----------
 // 默认开启：即时模式是 D-2 的默认编辑形态。
@@ -74,6 +88,8 @@ const bulletDeco = Decoration.replace({ widget: new BulletWidget() })
 const taskDeco = (checked) => Decoration.replace({ widget: new TaskCheckboxWidget(checked) })
 const emptyHintDeco = Decoration.mark({ class: 'cm-md-empty' })
 const listmarkDeco = Decoration.mark({ class: 'cm-md-listmark' })
+// 隐藏用的空替换共用一个实例：eq 恒等 ⇒ 视口滚动时 CM 不必重建这些 DOM
+const hideDeco = Decoration.replace({})
 
 // ---------- 分割线：把 `---` 替换成一条真实的横线 ----------
 // 为什么用 widget 而不是只给隐藏后的行加边框：hide() 之后行内没有任何内容，
@@ -92,140 +108,7 @@ class HrWidget extends WidgetType {
 }
 const hrDeco = Decoration.replace({ widget: new HrWidget() })
 
-/**
- * 构建图片预览的 DOM（占位框态含在内）。
- * 独立成导出函数的原因：ImageWidget 的 toDOM 要按「构造期 / 构建期」两个
- * 时点解析 src（见 ImageWidget 头注的定格缺陷），测试也需要一个能注入
- * document stub 直接驱动的入口 —— 它就是图片装饰的**唯一 DOM 组装点**。
- *
- * @param {string} rawSrc Markdown 里的原始 src（占位框文案用它，与旧实现一致）
- * @param {string} resolved 已按 assetUrl 口径改写的 src（img 实际加载的地址）
- * @param {string} alt
- */
-export function buildImageDOM(rawSrc, resolved, alt) {
-  const wrap = document.createElement('span')
-  wrap.className = 'cm-md-img'
-  const img = document.createElement('img')
-  img.src = resolved
-  img.alt = alt
-  img.loading = 'lazy'
-  img.addEventListener('error', () => {
-    // 远程图常因离线 / 防盗链失败：留一个可读的占位而不是碎图标。
-    // tip 文案用**原始** src（用户写进 Markdown 的路径），不是改写后的
-    // /doc-assets/… —— 占位框是给「看 Markdown 的人」读的。
-    wrap.classList.add('is-broken')
-    img.remove()
-    const tip = document.createElement('span')
-    tip.className = 'cm-md-img-tip'
-    tip.textContent = alt || rawSrc
-    wrap.appendChild(tip)
-  })
-  wrap.appendChild(img)
-  return wrap
-}
-
-// ---------- 图片：`![alt](url)` 换成图片预览 ----------
-// 只在「非活跃行」替换（活跃行保持源码，见 §3.2 显形判定）：用户正在编辑
-// 那一行时把它变成图片反而挡路。加载失败不抛——onError 把 <img> 摘掉，
-// 由 CSS 的 .is-broken 呈现占位框（并保留 alt 文本于 title）。
-//
-// 【eq/toDOM 为什么带着 resolvedSrc —— 2026-10-23 真机回归「图片占位框显示
-// assets/ 路径而不是图片」的根因，勿回退】
-// 改写依赖 assetUrl 的模块级开关，而 widget 是**构造期快照**：插图时文档往往
-// 还没落盘（开关关着）⇒ toDOM 拿到未改写的 assets/… ⇒ 404 ⇒ 占位框。此后文档
-// 落盘、开关打开，但 eq() 只比 src/alt（两者不变）⇒ CM 复用旧 DOM ⇒ 破损态
-// 永久定格。另一条路径是跨目录切换，toDOM 读到的是上一个文档的开关状态。
-// 修法 = 让「改写口径」参与复用判定（构造期解析出的 resolvedSrc 进 eq）；但仅此
-// 不够 —— 路径变化**不产生 CM 事务**，装饰根本不会重算，故另需 assetContext.js
-// 的版本号与刷新信号（见该文件头与 shouldRebuildDecorations）。
-class ImageWidget extends WidgetType {
-  constructor(src, alt) {
-    super()
-    this.src = src
-    this.alt = alt
-    // eq 键带 resolvedSrc：否则文档路径状态变化时 widget 被判「没变」，
-    // 上一次按旧开关解析出的地址（多半是 404）会被一直复用（见上）。
-    this.resolvedSrc = resolveAssetSrc(src)
-  }
-  eq(other) {
-    return other.src === this.src && other.alt === this.alt
-      && other.resolvedSrc === this.resolvedSrc
-  }
-  toDOM() {
-    // toDOM 可能在构造之后很久才被 CM 调用（视口外惰性构建），此时再读一次
-    // 当前开关；构造期已解析的 this.resolvedSrc 作为兜底 —— 两个时点都不漏。
-    const resolved = resolveAssetSrc(this.src) || this.resolvedSrc
-    return buildImageDOM(this.src, resolved, this.alt)
-  }
-  ignoreEvent() { return false }
-}
-
-// ---------- 活跃行集合（§3.2）：与任一选区相交的行号，扩展上下各 1 行 ----------
-// 扩展原因（真机反馈）：只含选区行时，光标移到相邻行瞬间该行标记从「隐藏+原子」
-// 突变为可见，atomicRanges 动态变化导致方向键跳跃感明显。扩展后相邻行标记
-// 已处于可见态（非原子），跨行移动平滑；隔行以上才遇原子区，频率大幅降低。
-function activeLineSet(doc, selection) {
-  const active = new Set()
-  for (const r of selection.ranges) {
-    const from = Math.max(1, doc.lineAt(r.from).number - 1)
-    const to = Math.min(doc.lines, doc.lineAt(r.to).number + 1)
-    for (let n = from; n <= to; n++) active.add(n)
-  }
-  return active
-}
-
 const parentName = (ref) => (ref.node && ref.node.parent ? ref.node.parent.name : '')
-
-/**
- * 从 Image 节点里取出 URL 与 alt 文本。
- * 不用正则去 `![]()` 上抠（会误伤嵌套括号与转义），而是走子节点：
- * URL 节点是解析器给出的权威区间，LinkLabel 里是 alt。
- * 两个都要在直接子节点里找 —— Image 的子结构随内容变
- * （`![](a.png)` 没有 LinkLabel，`![说明](a.png)` 有）。
- *
- * 【坑，勿改】SyntaxNode 上**没有** .state / .doc 属性（只有 from/to/name/
- * node/nextSibling 等）。取文本必须用闭包里的 doc（build() 的 state.doc）。
- * 曾写成 node.state.doc 直接把插件打崩（CodeMirror plugin crashed）。
- */
-function findChild(node, name) {
-  const n = node.node
-  if (!n) return null
-  for (let c = n.firstChild; c; c = c.nextSibling) {
-    if (c.name === name) return c
-  }
-  return null
-}
-function urlOf(node, doc) {
-  const url = findChild(node, 'URL')
-  if (!url) return null
-  // URL 节点含尖括号包裹时 slice 出来是 <a.png>，去掉
-  return doc.sliceString(url.from, url.to).replace(/^<|>$/g, '')
-}
-
-/**
- * 取图片的 alt 文本。
- *
- * 【为什么不能只认 LinkLabel 子节点 —— 2026-10-24 实测】lezer 对**行内式**
- * `![alt](url)` **不产出 LinkLabel 节点**（Image 的子节点只有
- * LinkMark/LinkMark/LinkMark/URL/LinkMark），只有**引用式** `![alt][ref]` 才有。
- * 旧实现只查后者 ⇒ 行内图片的 alt 恒为 ''：占位框丢掉用户写的说明、退化成裸
- * 路径，eq 的 alt 项也永远不生效（两侧都是空串）。故行内式改从 Image 的**头两个
- * LinkMark 之间**取（`![` 之后到 `]` 之前）—— 那就是 alt 的权威区间，比在
- * `![]()` 上跑正则可靠（不误伤嵌套括号与转义）。
- */
-function altOf(node, doc) {
-  const label = findChild(node, 'LinkLabel')
-  if (label) return doc.sliceString(label.from, label.to).replace(/^\[|\]$/g, '')
-  const n = node.node
-  if (!n) return ''
-  // 第一个 LinkMark 是 `![`，第二个是 `]`；两者之间即 alt
-  const marks = []
-  for (let c = n.firstChild; c && marks.length < 2; c = c.nextSibling) {
-    if (c.name === 'LinkMark') marks.push(c)
-  }
-  if (marks.length < 2) return ''
-  return doc.sliceString(marks[0].to, marks[1].from)
-}
 
 // ---------- 装饰构建：只遍历 visibleRanges ----------
 /**
@@ -233,8 +116,7 @@ function altOf(node, doc) {
  *
  * 形参是 state + 可见区间而**不是** view：本函数只用到这两样，收窄签名后
  * 「同一份文档 + 两种改写口径」可以在 node 里直接对比（见
- * tests/image-asset-context.test.mjs —— 缺陷本体就是「两种口径下产出的装饰
- * 应当不同」，而它此前完全没有覆盖）。
+ * tests/image-asset-context.test.mjs）。
  *
  * @param {import('@codemirror/state').EditorState} state
  * @param {readonly {from:number,to:number}[]} visibleRanges
@@ -246,39 +128,42 @@ export function buildDecorations(state, visibleRanges) {
   const doc = state.doc
   const active = activeLineSet(doc, state.selection)
   const decoRanges = []
-  const atomicRanges = []
-  let lastReplacedTo = -1 // 防 replace 区间重叠（重叠 replace 会抛 RangeError）
-
-  // 活跃行 → 不隐藏（显形）；已在隐藏区之后 → 跳过（防重叠）
-  const canHide = (from) =>
-    !active.has(doc.lineAt(from).number) && from >= lastReplacedTo
-
+  const replaces = []
+  // 块级区间（details / 多行 $$）：**整节点被覆盖**才跳过。
+  // 不能直接用 isBlockCovered 的相交语义 —— iterate 第一个进入的节点就是
+  // Document（0..doc.length），相交判定对它恒为 true，整篇会被一句话跳过，
+  // 界面表现为「编辑器空白」。
+  const blocks = state.field(blockRangesField, false) ?? []
+  const inBlock = (from, to) => blocks.some((r) => from >= r.from && to <= r.to)
+  // 活跃行 → 不隐藏（显形）；跨行与重叠的拦截在末尾统一做（见 replaces 的去重）
+  const canHide = (from) => !active.has(doc.lineAt(from).number)
+  // 【跨行 = 致命，必须在唯一入口拦】插件提供的 replace 覆盖换行时，CM 在
+  // emit 阶段直接抛 "Decorations that replace line breaks may not be specified
+  // via plugins"（dist/index.js:2776）。lezer 的节点**可以**跨行：实测
+  // `![a⏎b](u)` 是一个完整 Image 节点、`<span⏎ style="…">` 是一个完整 HTMLTag。
+  // 故 replace 一律按「首个行尾」裁剪，宁可少隐一段也不让整个插件崩掉。
+  const lineSafeTo = (from, to) => Math.min(to, doc.lineAt(from).to)
   const hide = (from, to) => {
-    if (!canHide(from)) return
-    const d = Decoration.replace({})
-    decoRanges.push({ from, to, value: d })
-    atomicRanges.push({ from, to, value: d })
-    lastReplacedTo = to
+    if (!canHide(from) || from >= to) return
+    replaces.push({ from, to: lineSafeTo(from, to), value: hideDeco })
   }
+  // 整行隐藏（含行首缩进）：脚注定义的续行常有 4 空格缩进，`hide(line.from,
+  // line.to)` 会把缩进一起隐掉 —— 这正是我们要的效果；单列成辅助只是让调用处
+  // 不必每次写 line.from / line.to。
+  const hideLine = (line) => hide(line.from, line.to)
+  // widget 替换不能裁剪（半截替换会产出「半个图片/半个公式」），跨行时整套跳过
+  const singleLine = (from, to) => !doc.sliceString(from, to).includes('\n')
+  const markFor = (from, to, cls, color) => pushMark(decoRanges, from, to, cls, color)
 
-  // 行级样式（引用底色 / 代码块底色）：Decoration.line 允许经插件提供。
-  // 注意 range 必须是**点区间**（from == to == line.from）——line 装饰的语义是
-  // 「给该行加样式」，CM6 只读 from。若写成 {from: line.from, to: line.to} 的
-  // 非点区间，tile 构建会把行装饰当作跨整行的区间处理，导致根节点 length 与
-  // 子节点总长失配，随后首次 measure 的 docView.update 就会在
-  // TilePointer.advance 抛 "Cannot destructure property 'tile' of 'parents.pop(...)'"。
-  const lineClass = (node, cls, visFrom, visTo) => {
-    const from = Math.max(node.from, visFrom)
-    const to = Math.min(node.to, visTo)
-    if (from >= to) return
-    for (let pos = from; pos <= to; ) {
-      const line = doc.lineAt(pos)
-      decoRanges.push({ from: line.from, to: line.from, value: Decoration.line({ class: cls }) })
-      pos = line.to + 1
-    }
-  }
+  // 引用块深度：先收集每行最大深度、再统一发一个类（原因见 noteQuoteDepth）。
+  // 行级装饰的点区间要求见 pushLineClass 的头注；seen 是重叠视口的去重键。
+  const quoteDepth = new Map()
+  const seenLines = new Set()
 
   for (const { from: visFrom, to: visTo } of visibleRanges) {
+    // 代码区间：行内公式的**文本扫描**要避开它们（`$x$` 在代码里是内容）。
+    // 语法树本身不给 Math 节点，公式只能按行扫文本，故需要这份排除表。
+    const codeRanges = []
     syntaxTree(state).iterate({
       from: visFrom,
       to: visTo,
@@ -286,19 +171,22 @@ export function buildDecorations(state, visibleRanges) {
         const name = node.name
         const parent = parentName(node)
 
+        // 块级 widget 独占的区间（details / 多行公式）：整段跳过，别抢同一片文本
+        if (inBlock(node.from, node.to)) return false
+
         // 块容器：行级底色（不改布局，仅背景，与专注模式 line 类叠加共存）
-        if (name === 'Blockquote') { lineClass(node, 'cm-md-quote', visFrom, visTo); return }
-        if (name === 'FencedCode') { lineClass(node, 'cm-md-codeblock', visFrom, visTo); return }
+        if (name === 'Blockquote') { noteQuoteDepth(quoteDepth, doc, node, visFrom, visTo); return }
+        if (name === 'FencedCode') {
+          codeRanges.push([node.from, node.to])
+          pushLineClass(decoRanges, doc, node, 'cm-md-codeblock', visFrom, visTo, seenLines)
+          return
+        }
+        if (name === 'InlineCode' || name === 'CodeText') { codeRanges.push([node.from, node.to]); return }
 
         // 分隔线：整行替换为横线 widget。必须**整节点**替换且在活跃行显形
         // （否则光标停在那一行时横线消失，位置感错乱）。
         if (name === 'HorizontalRule') {
-          if (canHide(node.from)) {
-            const d = hrDeco
-            decoRanges.push({ from: node.from, to: node.to, value: d })
-            atomicRanges.push({ from: node.from, to: node.to, value: d })
-            lastReplacedTo = node.to
-          }
+          if (canHide(node.from)) replaces.push({ from: node.from, to: node.to, value: hrDeco })
           return
         }
 
@@ -309,19 +197,92 @@ export function buildDecorations(state, visibleRanges) {
 
         // 图片：非活跃行替换为图片预览。父 Image 的 from/to 覆盖整个
         // `![alt](url)`，一次整体替换（内部 LinkMark/URL/LinkTitle 的
-        // 隐藏靠 lastReplacedTo 被拦掉，不会与本条产生重叠区间）。
+        // 隐藏靠区间去重被拦掉，不会与本条产生重叠替换区间）。
         if (name === 'Image') {
+          // 跨行图片（alt 里带换行，lezer 实测会合并成一个 Image 节点）整体跳过：
+          // 插件跨行替换会被 CM 直接拒绝，而只隐掉里头几个符号会留下
+          // `a⏎b` 这种「半截语法」—— 比原始源码更难读。故整棵子树不碰。
+          if (!singleLine(node.from, node.to)) return false
           if (canHide(node.from)) {
             const src = urlOf(node, doc) ?? ''
             const alt = altOf(node, doc) ?? ''
             if (src) {
-              const d = Decoration.replace({ widget: new ImageWidget(src, alt) })
-              decoRanges.push({ from: node.from, to: node.to, value: d })
-              atomicRanges.push({ from: node.from, to: node.to, value: d })
-              lastReplacedTo = node.to
-              return
+              replaces.push({ from: node.from, to: node.to, value: Decoration.replace({ widget: new ImageWidget(src, alt) }) })
+              return false
             }
           }
+          return
+        }
+
+        // 引用式链接定义：`[ref]: url` 与脚注定义 `[^1]: 内容` 都解析成
+        // LinkReference。非活跃时隐藏（正文里不该看到定义），活跃时显形可改。
+        // 【逐行隐藏，绝不跨行替换】lezer 允许标题/内容续行，节点可能跨两行
+        // （实测 `[ref]: url⏎  "标题"` 是一个节点）；插件跨行替换会被 CM 抛
+        // RangeError，故按行切开、每段都落在同一行内。
+        if (name === 'LinkReference') {
+          // 【脚注定义不在这里处理 —— 2026-10-26 缺陷 D】lezer 对「续行紧接另一条
+          // 定义」的排列**不产 LinkReference**（把第三行并进上一段 Paragraph），
+          // 跟着节点走就一定漏。脚注定义统一改由下面的行级扫描处理（含续行），
+          // 这里只处理普通引用式链接定义 `[ref]: url`。
+          // 普通定义也可能跨行（实测 `[ref]: url⏎  "标题"` 是一个节点），故按行切开。
+          if (!isFootnoteDefStart(doc.lineAt(node.from).text)) {
+            for (let pos = node.from; pos < node.to;) {
+              const line = doc.lineAt(pos)
+              hide(pos, Math.min(node.to, line.to))
+              pos = line.to + 1
+            }
+          }
+          return false
+        }
+
+        // 链接文字上语义色（引用式 / 行内式 / 快捷键式都一样）；脚注引用另走一条
+        if (name === 'Link') {
+          const label = footnoteLabel(node, doc)
+          if (label) {
+            // 这里只处理「整个 Link 恰好就是一个脚注引用」的情形。同一行有多个
+            // 脚注时 lezer 会把它们合并成一个 Link（内部文本含 `[`/`]`），
+            // footnoteLabel 会返回 null，改由下面的行级 scanFootnoteRefs 逐个处理
+            // —— 否则中间那段正文会被一起换掉（2026-10-25 截图里「文字1]，还可以
+            // 有命名脚注[^note」就是这条漏判的现场）。
+            if (canHide(node.from) && singleLine(node.from, node.to)) {
+              replaces.push({ from: node.from, to: node.to, value: Decoration.replace({ widget: new FootnoteRefWidget(label) }) })
+            }
+            return
+          }
+          // 合并型脚注 Link（内部文本含 `[`/`]`）：**不加链接色**。它的文字区间
+          // 横跨「^1]，…[^note」这种碎片，上色只会让中间那段正文变成链接色，
+          // 而那根本不是链接。真正的脚注由行级 scanFootnoteRefs 换成上标 widget。
+          const text = linkTextRange(node, doc)
+          if (text && !doc.sliceString(text.from, text.to).includes('^')) {
+            markFor(text.from, text.to, 'cm-md-link')
+          }
+          return
+        }
+        // 自动链接 `<https://x>`：只保留 url 文本并上链接色，尖括号在 LinkMark 分支隐藏
+        if (name === 'Autolink') {
+          const url = findChild(node, 'URL')
+          if (url) markFor(url.from, url.to, 'cm-md-link')
+          return
+        }
+
+        // HTML 内联标签：隐藏标签本体、给两者之间的内容上语义类。
+        // 清单只认 html.js 的 EDITOR_TAG_CLASS；不在清单里的一律保持源码可见
+        // （用户至少能看到自己写了什么，而不是静默消失）。
+        if (name === 'HTMLTag') {
+          const raw = doc.sliceString(node.from, node.to)
+          const tag = parseHtmlTag(raw)
+          // 跨行标签（属性换行）实测存在；隐藏半截会留下 `style="…">` 这种残渣，
+          // 比整段源码更难读 —— 一律保持源码可见
+          if (!tag || !singleLine(node.from, node.to)) return
+          const cls = tagClass(tag.name)
+          const color = tag.closing ? null : htmlColor(tag.attrs)
+          if (!cls && !color) return
+          hide(node.from, node.to)
+          if (tag.closing || tag.selfClosing) return
+          const close = matchCloseTag(node, tag.name, doc)
+          if (close) hide(close.from, close.to)
+          // 内容区间到闭标签为止；用户正写到一半（未配对）时只隐标签，不吞内容
+          markFor(node.to, close ? close.from : doc.lineAt(node.to).to, cls, color)
           return
         }
 
@@ -352,16 +313,22 @@ export function buildDecorations(state, visibleRanges) {
               if (p && p.to - p.from > 2) hide(node.from, node.to) // `x` 空码不隐藏
             } else if (parent === 'FencedCode') {
               // 围栏整行（含 CodeInfo 语言名）行内替换为空；to == line.to 不触发跨行禁令
-              const line = doc.lineAt(node.from)
-              hide(node.from, line.to)
+              hide(node.from, doc.lineAt(node.from).to)
             }
             return
           }
           case 'LinkMark':
           case 'URL':
           case 'LinkTitle': {
-            // 只隐藏 Link/Image 内的 [ ] ( ) 与 URL / 标题；保留 LinkLabel 文本
+            // Link/Image 内的 [ ] ( ) 与 URL / 标题；Autolink 只隐尖括号、URL 是正文
             if (parent === 'Link' || parent === 'Image') hide(node.from, node.to)
+            else if (parent === 'Autolink' && name === 'LinkMark') hide(node.from, node.to)
+            return
+          }
+          case 'LinkLabel': {
+            // 引用式链接的 `[ref]` 尾巴：Link 的直接子节点。Image 的 LinkLabel
+            // 是 alt 文本（整块已由图片 widget 处理），不能在这里隐掉。
+            if (parent === 'Link') hide(node.from, node.to)
             return
           }
           case 'QuoteMark': { // > （含其后一个空格）
@@ -372,9 +339,7 @@ export function buildDecorations(state, visibleRanges) {
           }
           case 'ListMark': {
             if (parent === 'BulletList' && canHide(node.from)) {
-              decoRanges.push({ from: node.from, to: node.to, value: bulletDeco })
-              atomicRanges.push({ from: node.from, to: node.to, value: bulletDeco })
-              lastReplacedTo = node.to
+              replaces.push({ from: node.from, to: node.to, value: bulletDeco })
             } else if (parent === 'OrderedList' && canHide(node.from)) {
               // 有序列表序号保形着色（不换内容，无需 atomic）
               decoRanges.push({ from: node.from, to: node.to, value: listmarkDeco })
@@ -385,16 +350,71 @@ export function buildDecorations(state, visibleRanges) {
             if (!canHide(node.from)) return
             const inner = doc.sliceString(node.from + 1, node.to - 1).trim().toLowerCase()
             const checked = inner === 'x'
-            const d = taskDeco(checked)
-            decoRanges.push({ from: node.from, to: node.to, value: d })
-            atomicRanges.push({ from: node.from, to: node.to, value: d })
-            lastReplacedTo = node.to
-            if (checked) lineClass(node, 'cm-md-task-done', visFrom, visTo)
+            replaces.push({ from: node.from, to: node.to, value: taskDeco(checked) })
+            if (checked) pushLineClass(decoRanges, doc, node, 'cm-md-task-done', visFrom, visTo, seenLines)
+            return
+          }
+          case 'Emoji': { // `:smile:` → 表情；不认识的短码保持源码（与 GitHub 一致）
+            const char = emojiFor(doc.sliceString(node.from, node.to))
+            if (char && canHide(node.from) && singleLine(node.from, node.to)) {
+              replaces.push({ from: node.from, to: node.to, value: Decoration.replace({ widget: new EmojiWidget(char) }) })
+            }
             return
           }
         }
       },
     })
+
+    // 行级扫描两件事：行内公式 `$…$` 与脚注引用 `[^label]`。
+    //
+    // 【为什么公式非扫不可】lezer 不认 TeX，语法树里**没有任何节点**可挂。
+    // 【为什么脚注也要扫】同一行多个脚注会被 lezer 合并成一个 Link 节点（内部
+    // 文本横跨两个脚注 + 中间正文），按节点处理必然漏；`[^label]` 在词法上很
+    // 规整，按行扫反而精确（见 inlineExtras.js 的 isFootnoteLabel / scanFootnoteRefs）。
+    // 公式的边界规则逐条对齐 markdown/math.js（预览/导出的唯一口径），否则会出现
+    // 「编辑器是公式、预览是一对美元符」这种静默分叉。两者都只在非活跃行生效。
+    for (let n = doc.lineAt(visFrom).number; n <= doc.lineAt(visTo).number; n++) {
+      const line = doc.line(n)
+      if (active.has(n) || inBlock(line.from, line.to)) continue
+      const inCode = (from, to) => codeRanges.some(([a, b]) => from >= a && to <= b)
+      // 脚注定义块（首行 + 缩进续行）整块隐藏。走行级而非节点：缺陷 D 里 lezer
+      // 对「续行紧接另一条定义」不产 LinkReference，跟着节点走必漏（详见
+      // inlineExtras.footnoteDefLines 头注）。先登记行号集合，本行就不再产 widget。
+      const defLines = isFootnoteDefStart(line.text)
+        ? footnoteDefLines(doc, n, doc.lineAt(visTo).number, (l) => inBlock(l.from, l.to)
+            || codeRanges.some(([a, b]) => l.from >= a && l.to <= b))
+        : null
+      if (defLines) { for (const m of defLines) hideLine(doc.line(m)); continue }
+      for (const m of scanInlineMath(line.text, line.from)) {
+        if (inCode(m.from, m.to)) continue
+        replaces.push({ from: m.from, to: m.to, value: Decoration.replace({ widget: new MathWidget(m.tex) }) })
+      }
+      for (const m of scanFootnoteRefs(line.text, line.from)) {
+        if (inCode(m.from, m.to)) continue
+        replaces.push({ from: m.from, to: m.to, value: Decoration.replace({ widget: new FootnoteRefWidget(m.label) }) })
+      }
+    }
+  }
+
+  // 【必须在所有可见区间跑完之后才铺引用行类】visibleRanges 允许重叠（相邻
+  // 分片常共享边界行）。若在每片末尾各铺一次，同一条跨片断的行会被两片各判
+  // 出一个深度 —— 实测「> > > 三」在 [0,12)+[12,n) 两片下同时收到
+  // `cm-md-quote cm-md-quote-2` 与 `...-3` 两条行装饰，两个类特异性相同，
+  // 样式表里后者胜出，但前一条仍留在 tile 里白占一份。累积到末尾统一铺，
+  // 每行只会有「所有片里见过的最大深度」这一个结论。
+  flushQuoteLines(decoRanges, doc, quoteDepth, seenLines)
+
+  // replace 区间必须互不重叠：CM 对重叠替换的渲染未定义（两段替换叠在一起会
+  // 出现半行消失）。按起点升序、同起点取更长者，再顺序丢弃被覆盖的区间 ——
+  // 这样「整节点替换」（Image / 脚注 / 公式）永远胜过它内部那些细节节点。
+  replaces.sort((a, b) => a.from - b.from || b.to - a.to)
+  const atomicRanges = []
+  let lastEnd = -1
+  for (const r of replaces) {
+    if (r.from < lastEnd) continue
+    lastEnd = r.to
+    decoRanges.push(r)
+    atomicRanges.push(r)
   }
 
   return {

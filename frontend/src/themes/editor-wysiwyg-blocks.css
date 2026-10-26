@@ -1,0 +1,134 @@
+/* ============================================================================
+ * editor-wysiwyg-blocks.css — 块级即时渲染的视觉（折叠块 / 多行公式）
+ * ----------------------------------------------------------------------------
+ * 类名由 editor/wysiwygBlocks.js 产出，值全部引用语义 Token，无裸 hex。
+ *
+ * 为什么独立成文件、而不是继续追加到 editor-wysiwyg.css：
+ *   ① 那份文件已 364 行、容纳的是一整片「行内装饰」视觉；块级 widget 的
+ *      布局模型完全不同（会撑开行盒 / 自带容器），混在一起会让「哪条规则属于
+ *      哪套机制」变得不可读；
+ *   ② 两个队友并行改同一条 CSS 的冲突面最小。
+ *   命名仍守本仓惯例：`.cm-md-*` 只在这里定义，不写进 createEditor.js 的
+ *   EditorView.theme（同键覆盖风险见 editor-wysiwyg.css 头注）。
+ *
+ * 【KaTeX 的样式表不在这里 @import】：公式版式与预览 / 导出侧必须同源，
+ * 真源统一在 themes/index.css 引入 `katex/dist/katex.min.css`。本文件若也引
+ * 一次，两处版本/路径一旦分叉就会出现「编辑器公式对齐、导出散架」这类最难
+ * 归因的缺陷。故这里只做「容器」相关的三件事：块级留白、横向可滚、溢出兜底。
+ * ========================================================================== */
+
+/* ---- 折叠块 <details>（widget 内部是浏览器原生 details）----
+   视觉目标：一个「看得见边界、但不喧宾夺主」的卡片 —— 只有 1px 发丝边框 +
+   极轻的容器底色。不给整块加阴影：折叠块在正文里出现频率高，阴影叠加会让
+   页面显脏（与本仓零阴影的表格 / 引用块同一取舍）。
+
+   【为什么 margin 只写上下、左右为 0】widget 挂在 `.cm-line` 里，而 .cm-line
+   已有 `padding: 0 var(--space-6)`（左右各 24px，见 createEditor.js 的 theme）。
+   再给左右 margin 会变成双击缩进、和正文段落对不齐。 */
+.cm-md-details {
+  margin: var(--space-3) 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface-warm);
+  /* 内容区里的长 URL / 长代码串必须能折行：不复位会横向撑破正文栏
+     （.cm-lineWrapping 给 .cm-line 的是 break-spaces，会继承进来） */
+  white-space: normal;
+  overflow-wrap: break-word;
+}
+
+/* 摘要行：整行可点（原生行为），故 cursor 必须是 pointer —— 手型是唯一能让
+   用户发现「这一行能点」的线索，静态标题看起来只是加粗文字。 */
+.cm-md-details > summary {
+  padding: var(--space-2) var(--space-3);
+  cursor: pointer;
+  /* 默认三角由浏览器用 list-item 画，但不同 WebView 的样式不一致（WebKit
+     的三角紧贴左边框、且随字号缩放），故统一接管：收起三角 + 展开态旋转。 */
+  list-style: none;
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  font-weight: var(--weight-emphasize);
+  color: var(--fg-2);
+  /* 去掉 WebKit 的默认聚焦描边，改成本仓的 focus-ring（见下） */
+  outline: none;
+}
+.cm-md-details > summary::-webkit-details-marker { display: none; }
+
+/* 三角指示器：纯 CSS 边框三角（零 emoji、零图标库 —— P0-1）。
+   用 border 画三角而不是 SVG：一个 4px 三角不值得多一个元素/一条 path 常量，
+   border 写法还能在旋转时保持像素对齐。 */
+.cm-md-details > summary::before {
+  content: '';
+  flex: none;
+  width: 0;
+  height: 0;
+  /* 上右下左：只有右侧有宽度 = 指向右的三角（收起态） */
+  border-left: 5px solid var(--muted);
+  border-top: 4px solid transparent;
+  border-bottom: 4px solid transparent;
+  transform-origin: 40% 50%;
+  transition: transform var(--motion-fast) var(--ease-standard);
+  /* 与首行文字的视觉基线对齐：三角自身没有文字基线，微调半行 */
+  margin-top: 0.35em;
+}
+/* 展开态：三角转向下（90deg）。用 [open] 而不是 JS 切类 —— 原生属性就是
+   唯一真源，加类只会多一个可能与 DOM 状态不同步的变量。 */
+.cm-md-details[open] > summary::before { transform: rotate(90deg); }
+
+/* 键盘可达：CM 的 contentDOM 里 tab 进不来，但点击/鼠标用户之外，
+   屏幕阅读器仍会聚焦 summary —— 给它一条与全仓一致的焦点环。 */
+.cm-md-details > summary:focus-visible {
+  box-shadow: var(--focus-ring);
+  border-radius: var(--radius-sm);
+}
+
+/* 没有 <summary> 时不编造标题（浏览器的默认 "Details" 是英文硬编码）：
+   只留一个可点的窄条，三角仍然指示开合。 */
+.cm-md-details > summary.is-untitled { min-height: 1.6em; }
+
+/* 内容区：左右与摘要对齐；上边留一道分隔发丝线，让「标题 / 内容」层次清楚
+   （不用背景色差：折叠块已经有 --surface-warm 底色，再分两色会脏）。 */
+.cm-md-details > .cm-md-details-body {
+  padding: var(--space-2) var(--space-3) var(--space-3);
+  border-top: 1px solid var(--border-soft);
+  color: var(--fg);
+}
+/* 内容里的首尾空段不该额外占高（用户常在 </details> 前留空行） */
+.cm-md-details-body > :first-child { margin-top: 0; }
+.cm-md-details-body > :last-child { margin-bottom: 0; }
+
+/* ---- 多行公式（块级 KaTeX）----
+   【只做容器，不做版式】居中与外边距由 KaTeX 的 `.katex-display` 自己给
+   （`display:block; margin:1em 0; text-align:center`），这里再套一层居中/
+   padding 就会和导出侧排成两套版式。本文件只管三件 KaTeX 不管的事：
+   上下留白对齐正文节奏、超宽公式横向可滚、长公式不撑破正文栏。 */
+.cm-md-math-block {
+  margin: var(--space-3) 0;
+  /* 超宽公式（长矩阵 / 多行推导）横向滚动而不是溢出正文栏。scroll 而非
+     auto：auto 在 macOS 上默认不显示滚动条，用户不知道右边还有内容 */
+  overflow-x: auto;
+  overflow-y: hidden;
+  /* 滚动时不要连带选中/拖走整块：保持默认文字行为即可，这里不加 user-select */
+  max-width: 100%;
+}
+/* 公式确实比栏宽时，给一条极淡的底边提示「还能往右看」。:has 不受支持时
+   只是少一条提示，不影响可滚 —— 故不需要 JS 兜底。 */
+.cm-md-math-block:has(> .katex-display > .katex > .katex-html) {
+  scrollbar-width: thin;
+}
+.cm-md-math-block::-webkit-scrollbar { height: 8px; }
+.cm-md-math-block::-webkit-scrollbar-thumb {
+  background-color: var(--border-strong);
+  border-radius: var(--radius-pill);
+}
+/* KaTeX 自己的上下 margin 在编辑区里偏大（1em ≈ 正文一行）：收紧到与段落
+   间距同量级，否则每个公式上下各多出整整一行空白。改的是 KaTeX 的容器类，
+   不是它的内部排版 —— 公式内部的行距/字号仍完全由 KaTeX 决定。 */
+.cm-md-math-block > .katex-display { margin: var(--space-2) 0; }
+/* 渲染失败（KaTeX 抛错时 renderMath 依 throwOnError:false 产出红字 span）：
+   保证错误颜色在三个主题下都可见，并允许折行 —— 错误信息通常很长。 */
+.cm-md-math-block .katex-error {
+  color: var(--danger);
+  white-space: normal;
+  overflow-wrap: break-word;
+}

@@ -47,6 +47,7 @@ const exportCss = `
 :root[data-theme='light'] {
   --bg:#FFFFFF; --fg:#16171D; --fg-2:#40434E; --muted:#6B6E7A;
   --accent:#4F46E5; --border:#E5E6EC; --surface-warm:#F3F4F8;
+  --border-soft:#EEEFF4; --surface-2:#EEF0F4; --border-strong:#D3D5DE;
   --code-bg:#F7F8FA; --code-inline-bg:#F1F2F6; --code-border:#E5E6EC;
   --font-body:-apple-system,BlinkMacSystemFont,"Inter","Segoe UI","PingFang SC","Noto Sans SC","Microsoft YaHei",sans-serif;
   --font-mono:"SF Mono","JetBrains Mono","Fira Code",Menlo,Consolas,monospace;
@@ -57,6 +58,7 @@ const exportCss = `
 :root[data-theme='dark'] {
   --bg:#14151A; --fg:#E7E8ED; --fg-2:#B4B7C2; --muted:#8A8D99;
   --accent:#6E76F0; --border:#2A2C34; --surface-warm:#1C1E25;
+  --border-soft:#20222A; --surface-2:#21232B; --border-strong:#3A3D47;
   --code-bg:#1C1E25; --code-inline-bg:#21232B; --code-border:#2A2C34;
   --leading-body:1.7;
   --hl-keyword:#E08C7C; --hl-string:#A8C68C; --hl-number:#84B4DB;
@@ -65,6 +67,7 @@ const exportCss = `
 :root[data-theme='paper'] {
   --bg:#FAF7F1; --fg:#2A2620; --fg-2:#4E4941; --muted:#6F675A;
   --accent:#9D5A2F; --border:#E5DED0; --surface-warm:#F1EADF;
+  --border-soft:#EDE7DB; --surface-2:#EFE8DC; --border-strong:#DAD2C2;
   --code-bg:#F3EEE5; --code-inline-bg:#EFE9DD; --code-border:#E5DED0;
   --font-body:Georgia,"Times New Roman","Songti SC","Noto Serif SC","Source Han Serif SC","STSong",SimSun,serif;
   --font-mono:"SF Mono","JetBrains Mono","Fira Code",Menlo,Consolas,monospace;
@@ -107,6 +110,10 @@ blockquote{
   background:var(--surface-warm);border-radius:6px;color:var(--fg-2);
 }
 blockquote p{margin:4px 0}
+/* 嵌套引用分层：三层逐级加深（与 themes/markdown-extras.css 同一规则） */
+blockquote blockquote{background:color-mix(in srgb, var(--fg) 4%, var(--surface-warm));margin:8px 0}
+blockquote blockquote blockquote{background:color-mix(in srgb, var(--fg) 8%, var(--surface-warm))}
+blockquote blockquote blockquote blockquote{background:color-mix(in srgb, var(--fg) 10%, var(--surface-warm))}
 ul,ol{padding-left:1.5em;margin:12px 0}
 li{margin:4px 0}
 li::marker{color:var(--muted)}
@@ -115,11 +122,46 @@ th,td{border:1px solid var(--border);padding:10px 14px;text-align:left;vertical-
 th{font-weight:510;background:var(--surface-warm)}
 hr{border:none;border-top:1px solid var(--border);margin:32px 0}
 img{max-width:100%;border-radius:6px}
+/* ---- 扩展语法（与 themes/markdown-extras.css 逐条对应） ---- */
+details{
+  margin:16px 0;padding:8px 16px;
+  background:var(--surface-warm);border-radius:6px;border:1px solid var(--border-soft);
+}
+summary{cursor:pointer;font-weight:510;color:var(--fg);padding:4px 0}
+details > *:not(summary){margin-top:8px}
+details p:first-of-type{margin-top:8px}
+details p:last-child{margin-bottom:4px}
+kbd{
+  font-family:var(--font-mono);font-size:.8125em;padding:.15em .45em;
+  border:1px solid var(--border-strong);border-bottom-width:2px;border-radius:6px;
+  background:var(--surface-warm);color:var(--fg);white-space:nowrap;
+}
+mark{background:color-mix(in srgb, var(--accent) 22%, transparent);color:inherit;padding:0 .15em;border-radius:2px}
+sup,sub{font-size:.75em;line-height:0}
+small{font-size:.85em;color:var(--fg-2)}
+abbr[title]{text-decoration:underline dotted;cursor:help}
+.footnotes{margin-top:32px;padding-top:16px;border-top:1px solid var(--border-soft);font-size:.875em;color:var(--fg-2)}
+.footnotes-title{font-size:.9375rem;font-weight:510;color:var(--muted);margin:0 0 8px;letter-spacing:0}
+.footnotes-list{padding-left:1.25em;margin:0}
+.footnote-item{margin:4px 0}
+.footnote-item p{margin:0}
+sup.footnote-ref{font-size:.75em;line-height:0}
+sup.footnote-ref a{text-decoration:none;padding:0 .15em;border-radius:2px}
+.footnote-backref{font-size:.875em;text-decoration:none;color:var(--muted);margin-left:.25em}
+.md-math{display:inline-block;vertical-align:baseline}
+.md-math-display{display:block}
+.md-math-block{margin:16px 0;overflow-x:auto;overflow-y:hidden;padding:4px 0}
+.md-math-block .katex-display{margin:0}
+.katex-error,.md-math-error{color:#B4232A;font-family:var(--font-mono);font-size:.9em}
 input[type='checkbox']{margin-right:8px;accent-color:var(--accent)}
 li:has(> input[type='checkbox']:checked){color:var(--muted);text-decoration:line-through}
 @media print{
   body{background:#fff;color:#000}
   article.preview-body{max-width:none;margin:0;padding:0}
-  pre,blockquote,table{break-inside:avoid}
+  pre,blockquote,table,details{break-inside:avoid}
+  /* 折叠块在纸面上没有「点击」：不强制展开的话，导出 PDF 会只剩 summary 一行，
+   * 内容整段消失且不报错（用户以为导出丢了内容）。 */
+  details > *:not(summary){display:block}
+  .md-math-block{overflow:visible}
 }
 `

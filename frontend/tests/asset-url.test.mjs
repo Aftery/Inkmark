@@ -80,7 +80,11 @@ describe('改写口径的唯一性（两处消费方不许各写一份）', () =
     .split('\n').filter((l) => !/^\s*\/\//.test(l)).join('\n')
 
   test('wysiwyg 的 ImageWidget 走 resolveAssetSrc，不得自己拼 src', () => {
-    const code = stripComments(readFileSync(join(HERE, '../src/editor/wysiwyg.js'), 'utf8'))
+    // 【锚点随实现搬迁】ImageWidget 于 2026-10-25 从 editor/wysiwyg.js 抽到
+    // editor/imageWidget.js（wysiwyg.js 顶到 300 有效代码行红线，图片与行内
+    // 文本渲染无耦合）。wysiwyg.js 仍 re-export 它，故消费方导入路径不变，
+    // 但**源码文本**在新文件里，断言改读新文件。断言强度未变。
+    const code = stripComments(readFileSync(join(HERE, '../src/editor/imageWidget.js'), 'utf8'))
     assert.ok(
       code.includes('resolveAssetSrc(this.src)'),
       'ImageWidget.toDOM 必须经 assetUrl.resolveAssetSrc 改写'

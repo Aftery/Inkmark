@@ -1,0 +1,149 @@
+/* ============================================================================
+ * Inkmark · 扩展语法排版（预览 / 导出共用）
+ * frontend/src/themes/markdown-extras.css
+ * ----------------------------------------------------------------------------
+ * 覆盖 markdown-it 扩展产物的样式：嵌套引用、折叠块 <details>、行内 HTML 语义标签、
+ * 脚注、数学公式（KaTeX 的少量覆盖）。
+ *
+ * 【为什么单独一个文件而不塞进 preview.css】
+ * preview.css 是「正文排版基线」（字号阶梯 / 行宽 / 表格 / 代码），它同时被
+ * writing-surface 门禁按段落比对；扩展语法出现的频率低、样式彼此独立，混进去会让
+ * 基线文件变成杂物间。这里只放「扩展产物」的规则。
+ *
+ * 【导出侧必须同步】frontend/src/export/exporters.js 里的 exportCss 是**自包含
+ * 副本**（导出产物要脱离应用独立可看，不能 @import 应用样式）。两处规则必须一起
+ * 改 —— 门禁 tests/markdown-extras.test.mjs 逐条比对关键选择器是否两边都有。
+ * ========================================================================== */
+
+/* ---- 嵌套引用：三层要能看出层级 ----
+ * 【为什么不用彩色竖线】视觉规格（docs/design/phaseC-visual-spec.md）已裁决
+ * 「引用块无彩色竖线」，靠**底色阶 + 缩进**分层。而原实现只有一层底色
+ * （--surface-warm），三层嵌套叠同一个颜色 ⇒ 屏幕上完全一样，用户看到的就是
+ * 「一级二级三级引用渲染不对」。
+ * 这里用 color-mix 把前景墨色按 4%/8% 混进底色：三层在同一色系里逐级加深，
+ * 不需要新增 Token，也不会在深色主题下变成亮斑（混合的是当前主题的 --fg）。 */
+.preview-body blockquote {
+  background: var(--surface-warm);
+}
+.preview-body blockquote blockquote {
+  background: color-mix(in srgb, var(--fg) 4%, var(--surface-warm));
+}
+.preview-body blockquote blockquote blockquote {
+  background: color-mix(in srgb, var(--fg) 8%, var(--surface-warm));
+}
+/* 第四层及以后不再加深（继续混会接近正文墨色，文字对比度反而下降） */
+.preview-body blockquote blockquote blockquote blockquote {
+  background: color-mix(in srgb, var(--fg) 10%, var(--surface-warm));
+}
+/* 嵌套引用之间给一点内缩，让「层」这件事在横向也成立 */
+.preview-body blockquote blockquote { margin: var(--space-2) 0; }
+
+/* ---- 折叠块 <details> ---- */
+.preview-body details {
+  margin: var(--space-4) 0;
+  padding: var(--space-2) var(--space-4);
+  background: var(--surface-warm);
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-soft);
+}
+.preview-body summary {
+  cursor: pointer;
+  font-weight: var(--weight-emphasize);
+  color: var(--fg);
+  /* 三角标记由浏览器原生 ::marker 提供；这里只调间距，不自绘图标 */
+  padding: var(--space-1) 0;
+}
+.preview-body summary:hover { color: var(--accent); }
+.preview-body details > *:not(summary) { margin-top: var(--space-2); }
+/* 折叠块内的 <p> 不要再叠一层外边距（视觉上会变成「框里飘着两行字」） */
+.preview-body details p:first-of-type { margin-top: var(--space-2); }
+.preview-body details p:last-child { margin-bottom: var(--space-1); }
+
+/* ---- 行内 HTML 语义标签（白名单：见 markdown/html.js） ---- */
+.preview-body kbd {
+  font-family: var(--font-mono);
+  font-size: 0.8125em;
+  padding: 0.15em 0.45em;
+  border: 1px solid var(--border-strong);
+  border-bottom-width: 2px;
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+  color: var(--fg);
+  white-space: nowrap;
+}
+.preview-body mark {
+  /* 直接 color-mix 当前主题的 --accent：不新增 Token，三主题自动跟随。
+     （曾写成 var(--hl-mark-bg, …)，但仓库里没有这个 Token —— 悬空引用虽然
+     有回退值不会崩，却会让下一个人以为「改 --hl-mark-bg 能改高亮色」。） */
+  background: color-mix(in srgb, var(--accent) 22%, transparent);
+  color: inherit;
+  padding: 0 0.15em;
+  border-radius: 2px;
+}
+.preview-body sup, .preview-body sub { font-size: 0.75em; line-height: 0; }
+.preview-body small { font-size: 0.85em; color: var(--fg-2); }
+.preview-body abbr[title] { text-decoration: underline dotted; cursor: help; }
+
+/* ---- 脚注 ---- */
+.preview-body .footnotes {
+  margin-top: var(--space-8);
+  padding-top: var(--space-4);
+  border-top: 1px solid var(--border-soft);
+  font-size: 0.875em;
+  color: var(--fg-2);
+}
+.preview-body .footnotes-title {
+  font-size: 0.9375rem;
+  font-weight: var(--weight-emphasize);
+  color: var(--muted);
+  margin: 0 0 var(--space-2);
+  letter-spacing: 0;
+}
+.preview-body .footnotes-list { padding-left: 1.25em; margin: 0; }
+.preview-body .footnote-item { margin: var(--space-1) 0; }
+.preview-body .footnote-item p { margin: 0; }
+.preview-body sup.footnote-ref { font-size: 0.75em; line-height: 0; }
+.preview-body sup.footnote-ref a {
+  text-decoration: none;
+  padding: 0 0.15em;
+  border-radius: 2px;
+}
+.preview-body sup.footnote-ref a:hover { background: var(--surface-2); }
+.preview-body .footnote-backref {
+  font-size: 0.875em;
+  text-decoration: none;
+  color: var(--muted);
+  margin-left: 0.25em;
+}
+.preview-body .footnote-backref:hover { color: var(--accent); text-decoration: underline; }
+
+/* ---- 数学公式 ----
+ * KaTeX 自带样式表（katex/dist/katex.min.css）由 themes/index.css 统一引入，
+ * 这里只补「本仓排版」相关的三件事：块级公式的溢出与间距、错误态、行内对齐。 */
+.preview-body .md-math { display: inline-block; vertical-align: baseline; }
+.preview-body .md-math-display { display: block; }
+/* 块级公式：长公式在正文限宽里不能把版面撑破 —— 与代码块同一策略（横向滚动） */
+.preview-body .md-math-block {
+  margin: var(--space-4) 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding: var(--space-1) 0;
+}
+.preview-body .md-math-block .katex-display { margin: 0; }
+/* KaTeX 解析失败会产出 katex-error（红字）；换成主题的警示色而不是硬编码 #cc0000，
+ * 否则深色主题下红字压在深底上几乎看不清 */
+.preview-body .katex-error,
+.preview-body .md-math-error {
+  color: var(--danger, #B4232A);
+  font-family: var(--font-mono);
+  font-size: 0.9em;
+}
+
+/* ---- 打印 / 导出：折叠块保持展开 ----
+ * 折叠块在纸面上没有「点击」，<details> 默认只印 summary 一行，
+ * 用户导出 PDF 后会发现内容整段消失（且不报错）。故打印时强制展开内容。 */
+@media print {
+  .preview-body details > *:not(summary) { display: block !important; }
+  .preview-body details { break-inside: avoid; }
+  .preview-body .md-math-block { overflow: visible; }
+}

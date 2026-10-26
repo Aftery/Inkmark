@@ -7,8 +7,16 @@
  *   2) base.css                —— 全局重置与 body 基础排版
  *   3) preview.css             —— 预览区排版 + highlight.js token 配色
  *   4) app-shell.css           —— 装配层布局（App.vue 的样式部分迁出，≤150 行铁律）
- *   5) editor-wysiwyg.css      —— 编辑器内 WYSIWYG 装饰视觉（.cm-md-* 的唯一定义处）
- *   6) platform-darwin.css     —— macOS 毛玻璃适配（挂 <html data-platform>）
+ *   5) editor-wysiwyg.css      —— 编辑器内 WYSIWYG 行内装饰视觉（.cm-md-* 的唯一定义处）
+ *   6) editor-wysiwyg-blocks.css —— 编辑器内块级 widget 视觉（折叠块 / 多行公式容器）
+ *   7) katex/dist/katex.min.css —— 数学公式排版（KaTeX 自带，唯一引入处）
+ *   8) markdown-extras.css     —— 扩展语法排版（嵌套引用 / 折叠块 / 行内 HTML / 脚注 / 公式微调）
+ *   9) platform-darwin.css     —— macOS 毛玻璃适配（挂 <html data-platform>）
+ *
+ * 【KaTeX 样式为什么在这里、而且只在这里】它的产物是大量 .katex-* span + 20 个
+ * Web 字体，缺 CSS 时公式是「散架的无样式文本」。两个消费面（编辑器 widget 与
+ * 预览/导出）必须共用同一份，否则会出现「编辑器里公式对齐、导出后散架」这种
+ * 极难归因的缺陷。故由本入口统一引入一次，任何地方都不得再 @import 一份。
  *
  * 使用：App.vue 顶部 `import './themes/index.css'`（main.js 不再单独引 base.css）。
  * ========================================================================== */
@@ -18,4 +26,7 @@
 @import './preview.css';
 @import './app-shell.css';
 @import './editor-wysiwyg.css';
+@import './editor-wysiwyg-blocks.css';
+@import 'katex/dist/katex.min.css';
+@import './markdown-extras.css';
 @import './platform-darwin.css';

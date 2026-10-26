@@ -23,7 +23,10 @@
     "@lezer/highlight": "^1.2.1",
     "codemirror": "^6.0.1",
     "highlight.js": "^11.11.1",
-    "markdown-it": "^14.1.0",
+    "katex": "^0.19.1",
+    "markdown-it": "^14.3.3",
+    "markdown-it-emoji": "^3.1.0",
+    "markdown-it-footnote": "^4.0.0",
     "markdown-it-task-lists": "^2.1.1",
     "vue": "^3.5.13"
   },

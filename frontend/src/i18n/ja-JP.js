@@ -326,4 +326,8 @@ export default {
   'menu.zoom': '拡大',
   'menu.settings': '設定…',
   'help.syntax': 'Markdown 記法の例',
+  'footnote.title': '脚注',
+  'footnote.ref': '脚注 {n}',
+  'footnote.back': '本文の脚注 {n} の参照位置へ戻る',
+  'footnote.backText': '戻る',
 }

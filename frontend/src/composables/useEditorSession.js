@@ -86,7 +86,9 @@ export function useEditorSession({
   // 预览面开 src 改写（/doc-assets/，见 assetUrl.js）；导出面保持磁盘相对路径
   // ——落盘 HTML 与文档同级，浏览器按相对路径加载 assets/ 才是对的
   const previewHtml = computed(() => render(renderer, markdown.value, { resolveAssets: true }))
-  const exportHtml = computed(() => render(renderer, markdown.value))
+  // 导出面公式走 MathML 形态：导出产物里没有 KaTeX 的 Web 字体，用 html 形态会
+  // 变成「字体缺失、符号错位」的公式（不报错、只是难看）。见 markdown/math.js 头注。
+  const exportHtml = computed(() => render(renderer, markdown.value, { mathOutput: 'mathml' }))
 
   // 文档路径 → 三处消费：前端改写开关（assetUrl）+ Go 侧镜像（/doc-assets/ 读盘根，
   // docassets.go）+ 图片装饰刷新信号（assetContext.js）。三件事必须一起做，
@@ -178,9 +180,16 @@ export function useEditorSession({
     nextTick(() => onOutlineRefresh?.())
   }
 
-  /** 把一段 Markdown 渲染成 HTML（复制选区为 HTML 用；与预览同一渲染器） */
+  /**
+   * 把一段 Markdown 渲染成 HTML（「复制选区为 HTML」用；与预览同一渲染器）。
+   *
+   * 【为什么走 mathml 形态】复制出去的内容会粘到别的应用（邮件 / 笔记 / 文档），
+   * 那里既没有 KaTeX 的 CSS 也没有它的 Web 字体 —— html 形态的公式会变成一堆
+   * 错位的 span。MathML 由接收方系统字体渲染，粘过去至少是「能读的公式」。
+   * 这与导出 HTML/PDF 的取舍同源（见 markdown/math.js 头注）。
+   */
   function renderMarkdown(md) {
-    return render(renderer, md)
+    return render(renderer, md, { mathOutput: 'mathml' })
   }
 
   onMounted(() => {

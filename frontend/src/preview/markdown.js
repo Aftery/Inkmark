@@ -13,6 +13,13 @@ import hljs from 'highlight.js/lib/core'
 import taskLists from 'markdown-it-task-lists'
 import { createSlugCounter } from '../editor/anchors.js'
 import { resolveAssetSrc } from '../editor/assetUrl.js'
+// 扩展语法（HTML 白名单 / 表情 / 脚注 / 公式）全部经 markdown/ 下的模块接入。
+// 为什么是「模块」而不是散在本文件里：编辑器 WYSIWYG 侧要用同一份口径
+// （标签清单、短码表、KaTeX 选项、脚注编号），两边各写一份必然漂移。
+import { installHtmlSanitizer } from '../markdown/html.js'
+import { emojiPlugin } from '../markdown/emoji.js'
+import { installFootnote } from '../markdown/footnote.js'
+import { mathPlugin } from '../markdown/math.js'
 
 import javascript from 'highlight.js/lib/languages/javascript'
 import typescript from 'highlight.js/lib/languages/typescript'
@@ -112,7 +119,11 @@ for (const [name, lang] of Object.entries(LANGUAGES)) {
 
 export function createRenderer() {
   const md = new MarkdownIt({
-    html: false,          // 不渲染原始 HTML，防注入（本地工具可开，默认关）
+    // html 开成 true 才能渲染 <kbd> / <mark> / <details> / <span style="color:red">
+    // 这类用户手写标签（真机反馈「HTML 标签不支持」）。**安全性不靠这个开关**，
+    // 靠 markdown/html.js 的白名单重建：认识的标签按属性白名单重写、其余转义成
+    // 文本。原文关着它时这些语法会以裸尖括号显示，用户以为「编辑器不支持 HTML」。
+    html: true,
     linkify: true,        // 自动识别 URL
     breaks: true,         // 单个换行转成 <br>，符合写作直觉
     typographer: true,    // 智能标点："quotes" → “curly”
@@ -127,15 +138,15 @@ export function createRenderer() {
   })
   // GFM 任务列表
   md.use(taskLists, { enabled: true, label: true, labelAfter: false })
-  // markdown-it-task-lists 的已知缺陷：enabled:true 时 disabledAttr 是空串，
-  // 输出的 <input> 缺一个空格 —— `<input class="…"type="checkbox">`。
-  // 浏览器按 HTML5 规范会把它解析成两个属性（实测 Chrome 正常渲染勾选框），
-  // 但这是**依赖容错的畸形 HTML**：换 stricter 的解析器（或将来接净化器）就会
-  // 静默丢掉 type。html:false 下 html_inline token 只可能来自本插件，故在此
-  // 定点修补，不动插件本体（node_modules 不改）。
-  // 默认规则即 `tokens[idx].content`（markdown-it renderer.mjs 的 default_rules）。
-  md.renderer.rules.html_inline = (tokens, idx) =>
-    tokens[idx].content.replace(/(class="task-list-item-checkbox"(?: checked="")?)type=/g, '$1 type=')
+  // 扩展语法。顺序有讲究：
+  //   · 任务列表先装 —— installHtmlSanitizer 的 html_inline 规则里保留了
+  //     「勾选框缺空格」的定点修补（见 markdown/html.js 的 clean()）。
+  //   · 脚注在 emoji 之前装：脚注定义行 `[^1]: …` 的内容也要能写表情。
+  //   · 公式最后装：`$…$` 规则挂在 escape 之后，与脚注/链接的 `[` `]` 不冲突。
+  installHtmlSanitizer(md)
+  installFootnote(md)
+  emojiPlugin(md)
+  mathPlugin(md)
   // 标题写 id（「插入 → 目录」链接的跳转目标）：slug 生成规则在 editor/anchors.js，
   // 与目录插入共用同一套顺序去重计数，两边的 id 严格对应。
   md._slugs = createSlugCounter()
@@ -159,8 +170,20 @@ export function createRenderer() {
   return md
 }
 
-export function render(renderer, markdown, { resolveAssets = false } = {}) {
+/**
+ * @param {object} renderer createRenderer() 的产物
+ * @param {string} markdown 原文
+ * @param {{resolveAssets?: boolean, mathOutput?: 'html'|'mathml'}} [opts]
+ *   resolveAssets —— 应用内预览为 true（图片走 /doc-assets/），导出为 false
+ *   mathOutput    —— 应用内 'html'（KaTeX 自带字体随包），导出 'mathml'
+ *                    （自包含，不依赖导出目录里有字体，见 markdown/math.js 头注）
+ */
+export function render(renderer, markdown, { resolveAssets = false, mathOutput = 'html' } = {}) {
   renderer._slugs = createSlugCounter() // 每次渲染重置去重计数，重复标题稳定为 -1/-2…
   renderer._resolveAssets = resolveAssets
-  return renderer.render(markdown)
+  renderer._mathOutput = mathOutput
+  // env 必须每篇一份：markdown-it-footnote 把脚注清单存在 env.footnotes 里，
+  // 复用同一个 env 对象会让上一篇文档的脚注串到下一篇（打开第二个文件时
+  // 底部突然多出上一个文件的脚注，且编号从 3 开始）。
+  return renderer.render(markdown, {})
 }

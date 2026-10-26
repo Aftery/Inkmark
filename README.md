@@ -14,6 +14,7 @@
 | Markdown 编辑 + 语法高亮 | CodeMirror 6（`src/editor/`），写作工具形态：无行号、无整行高亮；围栏代码块高亮与预览区共用同一套 `--hl-*` 色板 |
 | **WYSIWYG 即时渲染（默认）** | `src/editor/wysiwyg.js`：光标所在行及上下相邻 1 行显示 Markdown 源码，其余行呈现渲染效果（列表圆点 / 任务勾选框 / 表格 / 分割线 / 图片以 widget 替换标记符）；仅产装饰、**零文档篡改**；中文输入（IME）时冻结重算；装饰只在可视区计算，大文档不卡 |
 | 实时预览 | markdown-it + highlight.js（`src/preview/`），GFM 任务列表（markdown-it-task-lists），highlight.js 按需注册 **79 种语言**（含别名，非整库导入）；正文限宽居中 |
+| **扩展语法** | 嵌套引用分层（三层底色逐级加深）/ 折叠块 `<details>`（打印与导出自动展开）/ 行内 HTML 白名单（`kbd` `mark` `sup` `sub` `small` `abbr` `p align` `span style` 等，按标签+属性白名单重建，脚本与危险协议一律剥离，见 `src/markdown/html.js`）/ 脚注（上标引用 + 尾部区块 + 语义化回跳，文案走 `t()` 三语）/ KaTeX 公式（`$…$` 行内、`$$…$$` 块级与段中单行 display；应用内 html 形态、导出 MathML 形态，`trust:false` 禁 `\href`）/ emoji 短码（只认 `:smile:` 这类显式短码，**不**认 `:)` `8)` 等 emoticon 快捷码）——渲染器接线 `src/preview/markdown.js`，排版 `src/themes/markdown-extras.css`（导出模板 `src/export/exporters.js` 有同步副本） |
 | **预览渲染防抖** | 输入期预览渲染防抖 ~120ms，大文档连续输入不卡；打开 / 恢复文件即时渲染，导出前强制 flush 保证内容最新（`useEditorSession`） |
 | **所见即所得渲染** | 编辑器内渐进渲染（Bear 式行内装饰 + 表格真渲染：`src/editor/wysiwyg.js` + `src/editor/tableRender.js`，单元格可编辑并同步回 Markdown 源码）；`⌘⇧F` 专注模式收起界面干扰（`useWorkspace`） |
 | **任务列表勾选** | 点勾选框直接翻转 `[ ]` ⇄ `[x]`（`src/editor/taskToggle.js`）；渲染仍在 wysiwyg.js，交互单独一层，不打破「装饰层不碰文档」的约束 |
@@ -197,7 +198,7 @@ inkmark/
     │   └── themes/          # tokens/design-tokens.css（Token 唯一真源）+ index.css（唯一样式入口）
     │                        #   + app-shell.css / platform-darwin.css / editor-wysiwyg.css
     │                        #   + theme.js（主题解析）/ prefs.js（偏好唯一真源）
-    ├── tests/           # node:test 测试网（560 条测试 / 131 个 suite，零第三方依赖），需 Node ≥22
+    ├── tests/           # node:test 测试网（655 条测试 / 152 个 suite，零第三方依赖），需 Node ≥22
     └── wailsjs/         # Wails 自动生成的 IPC 绑定（勿手改）
 ```
 
@@ -231,7 +232,7 @@ npm install
 
 npm run dev      # 本地开发服务器
 npm run build    # 生产构建 → frontend/dist
-npm test         # 测试网（560 条测试，零第三方依赖），【需 Node ≥22】
+npm test         # 测试网（655 条测试，零第三方依赖），【需 Node ≥22】
 ```
 
 > - `npm test` 用的是 Node **内置** `node:test`（无第三方测试依赖），因此**必须 Node ≥22**；低版本会报 `node --test` 不可用。
@@ -242,7 +243,7 @@ npm test         # 测试网（560 条测试，零第三方依赖），【需 No
 ### 门禁脚本（与 CI 同口径）
 
 ```bash
-cd frontend && npm test                                    # 测试网，期望 560/560
+cd frontend && npm test                                    # 测试网，期望 655/655
 node scripts/verify/verify-readme-claims.mjs               # README 数字声明 ↔ 实测（自己会再跑一遍测试网；退出码 1=漂移 / 2=测量失效）
 node scripts/verify/verify-shortcuts.mjs                   # 快捷键三方对齐（README ↔ 速查表 ↔ COMMANDS）
 node scripts/verify/scan-i18n-residue.mjs                  # i18n 文案残留
