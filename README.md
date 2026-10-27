@@ -165,6 +165,8 @@ inkmark/
 ├── clipboard_*.go       # 图片粘贴通道③：读系统剪贴板（darwin=cgo+AppKit / linux=xclip、wl-paste / windows=CF_DIB* /
 │                        #   其余平台恒空兜底）；clipboard_image.go 为全平台共用的魔数嗅探判据
 ├── snapshot.go          # 历史快照存储（写入 / 轮转 / 读取，docKey 派生）
+├── docassets.go         # /doc-assets/ 资源服务（按当前文档目录读盘，图片显示的唯一入口）
+├── dialogs.go           # 原生对话框文案本地化（按前端传入的 locale 取表，未知语言回落中文）
 ├── watcher.go           # 文件树外部变更监听（fsnotify，一层 + 去抖；前端已订阅 fs:changed，待真机确认，见「已知问题」）
 ├── version.go           # 版本单一真源（构建时 -ldflags -X main.version= 注入）
 ├── export_pdf_darwin.go # PDF 一键直出（macOS：WKWebView/PDFKit）
@@ -178,7 +180,7 @@ inkmark/
 │   ├── p0-check-emoji.sh        # P0-1 emoji 扫描（零容忍，CI 门禁之一）
 │   ├── smoke/render-check.mjs   # 真渲染冒烟（dev + dist 双路径）
 │   ├── probe/                   # CDP 交互探针（斜杠面板 / WYSIWYG 装饰 / 主题计算色 / 表格提示）
-│   └── verify/                  # 快捷键契约 / README 数字声明 / i18n 残留 / 目视清单同步 / 图标与主题校验脚本
+│   └── verify/                  # 快捷键契约 / README 数字声明 / i18n 残留 / 目视清单同步 / README 路径存在性 / 图标与主题校验脚本
 ├── docs/                # 交接说明 HANDOFF.md、架构决策（architecture/ADR-00x）、规格（spec/）、
 │                        #   悬而未决登记册（decisions/OPEN-DECISIONS.md）、
 │                        #   真机目视验收工具（qa/：visual-checklist.html + VERIFICATION-LOG.md）
@@ -260,6 +262,7 @@ CGO_ENABLED=0 GOOS=linux   /usr/local/opt/go/bin/go build -o /dev/null .   # Lin
 CGO_ENABLED=0 GOOS=windows /usr/local/opt/go/bin/go build -o /dev/null .   # Windows 适配层不腐烂
 node scripts/smoke/render-check.mjs                        # 真渲染冒烟（CI frontend job 第三步；需先 npm run build）
 node scripts/verify/verify-visual-checklist.mjs             # 目视清单副本 ↔ HANDOFF §6 同步（退出码 1=漂移 / 2=解析失效）
+node scripts/verify/verify-readme-paths.mjs                 # README 引用路径必须真实存在 + 根 Go 文件必须登记（CI 门禁 4 第三步）
 node scripts/verify/scripts-verify-icons.mjs                # 图标 ↔ phaseC 规格逐字比对（手动，不在 CI；期望 24/24）
 node scripts/verify/scripts-verify-theme.mjs                # theme.js 优先级自检（手动，不在 CI；期望 8/8）
 ```

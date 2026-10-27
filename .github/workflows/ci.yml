@@ -9,16 +9,17 @@
 #   2. go            —— 静态检查（go vet）+ 真实编译（go build）+ 测试（go test）
 #                       + Linux/Windows 交叉编译（通道③ 的另两个平台适配层）
 #   3. p0-emoji      —— P0-1 零 emoji 绝对规则
-#   4. docs-contract —— 文档契约（快捷键键位 + 目视清单同步）
+#   4. docs-contract —— 文档契约（快捷键键位 + 目视清单同步 + README 引用路径存在性）
 #   5. i18n-residue  —— 用户可见文案残留（漏走 t()）
 #
 # 【2026-10-06 单栏重构后的真源】键位唯一真源是前端命令表
 # frontend/src/composables/useShortcuts.js 的 COMMANDS；原生菜单（main.go 的
 # buildMenu）已整体下线，故 docs-contract 门禁解析该表而非 main.go。
 #
-# 平台锁 macos-latest：本应用的 export_pdf_darwin.go 依赖 WebKit / PDFKit
-# （ADR-003 路线 A′），只有 macOS runner 能编出真实产物；Linux runner 走
-# export_pdf_other.go 降级分支，等于没验证到真正的代码路径。
+# 【2026-10-27 平台锁的例外】export_pdf_linux.go 落地后，Linux 侧不再是「降级分支」
+# —— Linux 现在有真正的「GTK 打印到文件」实现，且 release.yml 已在 ubuntu-latest
+# 上真跑过。但 CI 仍锁 macos-latest：Linux 实现依赖 cgo + GTK 主循环，单元测试只覆盖
+# 其中纯 Go 的 base URI 拼装（export_pdf_opts_test.go），打印本体靠发布线的真机构建。
 # ============================================================================
 
 name: CI
@@ -201,6 +202,19 @@ jobs:
       # 本 job 无 defaults.run.working-directory，工作目录即仓库根，直接用仓库根相对路径。
       - name: 校验目视清单与 HANDOFF §6 同步
         run: node scripts/verify/verify-visual-checklist.mjs
+
+      # 【2026-10-27 新增】README 引用的仓库路径必须真实存在（判据 A：README → 文件系统），
+      # 且仓库根每个生产 Go 文件必须登记进「## 目录结构」（判据 B：文件系统 → README）。
+      # 加它的缘由：2026-10-27 通读 README 一次抓出 7 处失真 —— 代码块高亮说「go 只在
+      # 预览区」（实际早 import lang-go）、文本导出说「其它平台走系统打印」（Linux 已有
+      # 一键直出）、目录结构缺 4 个 Go 文件、命令数停在 55/43（实测 62/50）。病因统一：
+      # **README 的能力表与目录结构没有门禁守着**，既有的 verify-readme-claims 只守
+      # 三个数字（测试条数 / suite 数 / App.vue 行数）。
+      # 为什么放 docs-contract 而不是 frontend job：它是「文档 ↔ 代码」的漂移，与本 job
+      # 另两道同族，且**不需要 node_modules**（只读文件系统），无需为它跑 npm ci。
+      # 退出码：0=一致 / 1=有漂移 / 2=判据失效（不可采信，含「核对数骤降」的空跑检测）。
+      - name: 校验 README 引用路径存在性与 Go 文件登记覆盖
+        run: node scripts/verify/verify-readme-paths.mjs
 
   # --------------------------------------------------------------------------
   # 门禁 5：i18n 文案残留
