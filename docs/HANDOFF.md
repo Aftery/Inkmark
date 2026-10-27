@@ -4,9 +4,9 @@
 > `docs/spec/` 与项目记忆。它记录「做到了什么、怎么验证、哪些坑别再踩」，
 > 而不是流水账。
 >
-> 最后更新：2026-10-20（新增第二十轮：交互细节打磨 —— 表格拖拽/对齐 + 智能符号与标点 + 标题与列表键位）
+> 最后更新：2026-10-27（新增第二十三轮：CI 双红收口 —— README 数字漂移 + Linux 交叉编译 undefined）
 >
-> 上一轮记录：2026-10-17（第十六轮：「去抖边界双发」实测不成立 —— 撤销登记 + 去抖改串行状态机 + 补 Go 测试）
+> 上一轮记录：2026-10-20（第二十轮：交互细节打磨 —— 表格拖拽/对齐 + 智能符号与标点 + 标题与列表键位）
 >
 > ✅ **2026-10-17 第十六轮：一个从未被验证过的「已知未修项」，实测不成立**
 > 接第十五轮后翻 watcher 的账，发现 README #6 / §6 #22 / §7 三处都登记着
@@ -1268,6 +1268,49 @@ README 数字声明门禁已同步（239→253 条 / 50→52 suite）。
 ⚠️ **未做真机目视**（本机无 GUI 自动化权限，且无 Chrome 可跑 CDP 探针）：
 手柄命中区与落点线的观感、对齐按钮反色对比、`⌘⌥↑` 在真实输入法下的表现 ——
 已登记为 §6 的第 23~26 项。
+
+---
+
+### 第二十三轮：CI 双红收口 —— README 数字漂移 + Linux 交叉编译 undefined（`c9b93de`，2026-10-27）
+
+**起因**：接手时查 CI 公开 API，发现 origin/main 最新提交 `31bd7e6` 的 run
+`40299484398` 是 **failure**（前端测试与构建 / Go 静态检查编译与测试两个 job 红），
+而本地此前毫无感知——又是「本地绿、runner 红」的形态。
+
+**根因（两个独立缺陷，都在推送前少跑了几条门禁命令）**：
+1. **README 数字漂移**：`31bd7e6` 加了扩展语法测试（655 → 671 条 / 152 → 157 suite）
+   但没同步 README 三处声明，`verify-readme-claims` 退出码 1（这正是第十五轮门禁
+   要抓的形态，第一次在 CI 上真正兑现）。
+2. **Linux 交叉编译 undefined（两层）**：`8d369c8` 新增 `startup()` 调
+   `applyClientSideDecorations()`，但 `window_linux.go`（cgo+GTK）与 `window_other.go`
+   （`!linux`）在 `CGO_ENABLED=0 GOOS=linux` 组合下**同时被剔除** → `app.go:67
+   undefined`，CI 的「交叉编译不腐烂」一步直接红。交叉 vet 又暴露第二层：
+   `export_pdf_linux_test.go`（`//go:build linux`）引用的 `fileURIForDir` 住在
+   cgo 文件 `export_pdf_linux.go` 里 —— 被测文件剔除、测试文件还在 → 同样 undefined。
+   本机此前这两条命令**从未在提交前跑过**（HANDOFF §0 写着要做，没做）。
+
+**修法**：
+1. README 三处 655/152 改 671/157（实测为准）。
+2. `window_other.go` 构建标签改 `//go:build !linux || !cgo`：覆盖「linux 但关 cgo」
+   的组合（真机 Linux 必带 cgo，此桩只服务门禁编译期，注释写明）。
+3. `fileURIForDir` 是纯 Go，从 cgo 文件移入无平台标签的 `export_pdf_opts.go`
+   （纯逻辑住纯文件）；`export_pdf_linux_test.go` 删除，`TestFileURIForDir` 并入
+   `export_pdf_opts_test.go` —— macOS runner 从此也会真跑它（原 linux 标签下
+   CI 从未覆盖过这条）。
+
+**变异自证 3 方向**（全部先红后逐字节还原、sha256 校验一致）：
+① `window_other` 改回 `!linux` → linux 交叉 build/vet 报 `app.go:67 undefined`（与 CI 失败一字不差）；
+② `fileURIForDir` 回迁 cgo 文件 → linux 交叉 vet 报 `opts_test undefined`；
+③ README 改回 655/152 → `verify-readme-claims` 退出码 1。
+
+**验证**：本地全门禁绿——`npm test` **671/671（Node 22.23.4，与 CI 同版本）**、
+README 门禁 / 快捷键 / i18n / 目视清单 / p0-emoji 退出码全 0、
+Go darwin vet/build/test 绿、linux/windows 交叉 build+vet 全绿、
+`render-check` self-test 与 dist 双 PASS。已推送 `c9b93de`。
+
+**教训**：Go 侧两处 undefined 都只因「推送前没跑 HANDOFF §0 的交叉编译两条命令」。
+凡是动了构建标签 / cgo 文件 / 新增跨平台函数调用的提交，**交叉 build + 交叉 vet
+四条命令是推送前必跑项**，不是可选项。
 
 ---
 
