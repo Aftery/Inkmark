@@ -18,7 +18,7 @@
 | **预览渲染防抖** | 输入期预览渲染防抖 ~120ms，大文档连续输入不卡；打开 / 恢复文件即时渲染，导出前强制 flush 保证内容最新（`useEditorSession`） |
 | **所见即所得渲染** | 编辑器内渐进渲染（Bear 式行内装饰 + 表格真渲染：`src/editor/wysiwyg.js` + `src/editor/tableRender.js`，单元格可编辑并同步回 Markdown 源码）；`⌘⇧F` 专注模式收起界面干扰（`useWorkspace`） |
 | **任务列表勾选** | 点勾选框直接翻转 `[ ]` ⇄ `[x]`（`src/editor/taskToggle.js`）；渲染仍在 wysiwyg.js，交互单独一层，不打破「装饰层不碰文档」的约束 |
-| **代码块增强** | 代码块内显示行号（各块独立从 1 起）、悬停出现「复制」按钮（复制纯代码，不含围栏）；编辑器侧语法高亮覆盖 js/ts 家族、java、html/xml 家族、css 家族、json 家族、python（`src/editor/codeBlock.js` + `markdownHighlight.js`）。go / rust 等语言**只在预览区**高亮（编辑器侧无对应语言包，本仓不新增依赖） |
+| **代码块增强** | 代码块内显示行号（各块独立从 1 起）、悬停出现「复制」按钮（复制纯代码，不含围栏）；编辑器侧语法高亮覆盖 js/ts 家族、java、html/xml 家族、css 家族、json 家族、python、**c/cpp、go、sql（含 MySQL/PostgreSQL/SQLite/MSSQL 方言）**（`src/editor/codeBlock.js` + `markdownHighlight.js`）。其余语言（rust 等）**只在预览区**高亮（编辑器侧无对应语言包，本仓不新增依赖） |
 | **表格行列增删** | 悬停表格右上角出现操作条：下方插行 / 删当前行 / 右侧插列 / 删当前列（`src/editor/tableOps.js` + `tableWidget.js`）；最少保留 1 行 1 列，操作在 model 上改到自洽再整体序列化，杜绝列数不一致的非法 Markdown |
 | **主题 4 档（含跟随系统）** | 浅 Indigo / 深 Indigo / 纸感赭石三套配色（`src/themes/tokens/design-tokens.css`）+ 跟随系统，共 4 档；`system` 偏好由 `theme.js` 解析为具体主题并写入（纸感不会被系统自动选中）；切换只改 `<html data-theme>`，**不重建编辑器** |
 | **大纲视图** | `⌘B` 开关（`src/components/Outline.vue` + `editor/outline.js` + `useOutline.js`），从文档提取标题层级、高亮当前节、点击跳转 |
@@ -49,7 +49,7 @@
 | **重命名 / 插入目录 / 清除格式** | 重命名走应用内输入对话框（WKWebView 无 `window.prompt`）；「格式 ▸ 插入 ▸ 目录」按标题层级生成 TOC（`editor/commands.js` 的 `insertToc`） |
 | 快捷键速查 | `⌘/` 打开应用内弹层；非 macOS 自动把 `⌘/⌥/⇧` 显示为 `Ctrl+/Alt+/Shift+` |
 | 快捷键 | 文件 / 编辑 / 格式 / 视图 / 窗口 / 帮助六类，唯一真源是 `useShortcuts.js` 的 `COMMANDS` 表，见下方「快捷键」 |
-| 文本导出 | HTML：内联样式模板（46rem 行宽）；PDF：macOS 一键直出（WebKit/PDFKit，dark→light 主题映射，467px 版心），其它平台走系统打印（`src/export/`） |
+| 文本导出 | HTML：内联样式模板（46rem 行宽）；PDF：**macOS 与 Linux 均为一键直出**（macOS 走 WebKit/PDFKit、Linux 走 GTK 打印到文件，dark→light 主题映射，467px 版心），Windows 与浏览器预览走系统打印（`src/export/` + `export_pdf_{darwin,linux,other}.go`） |
 | 本地文件管理 | 打开文件 / 打开文件夹，递归懒加载文件树（`app.go` + `src/components/FileTree.vue`） |
 
 ## 快捷键
@@ -167,9 +167,13 @@ inkmark/
 ├── snapshot.go          # 历史快照存储（写入 / 轮转 / 读取，docKey 派生）
 ├── watcher.go           # 文件树外部变更监听（fsnotify，一层 + 去抖；前端已订阅 fs:changed，待真机确认，见「已知问题」）
 ├── version.go           # 版本单一真源（构建时 -ldflags -X main.version= 注入）
-├── export_pdf_darwin.go # PDF 一键直出（WKWebView/PDFKit）
-├── export_pdf_other.go  # 非 darwin 平台的降级实现
-├── wails.json           # Wails 配置（前后端构建命令）
+├── export_pdf_darwin.go # PDF 一键直出（macOS：WKWebView/PDFKit）
+├── export_pdf_linux.go  # PDF 一键直出（Linux：GTK 离屏 WebView + 虚拟打印机写文件）
+├── export_pdf_opts.go   # PDF 导出跨平台公共部分（参数形状 / 默认文件名 / base URI）
+├── export_pdf_other.go  # 其余平台（Windows 等）的降级实现
+├── window_linux.go      # Linux 窗口装饰收口（GTK CSD，修 KWin Wayland 双层标题栏）
+├── window_other.go      # 非 Linux（或 linux 关闭 cgo 的交叉编译组合）空实现桩
+├── wails.json           # Wails 配置（前后端构建命令；info.productVersion 进 macOS Info.plist）
 ├── scripts/             # 工程门禁脚本
 │   ├── p0-check-emoji.sh        # P0-1 emoji 扫描（零容忍，CI 门禁之一）
 │   ├── smoke/render-check.mjs   # 真渲染冒烟（dev + dist 双路径）
@@ -186,15 +190,17 @@ inkmark/
     │   │                    #   commands / anchors / imageDrop / markdownHighlight / sampleDocs /
     │   │                    #   tableHint（表格未渲染的检测，纯函数）
     │   ├── preview/         # markdown-it 渲染配置（highlight.js 按需注册 79 种语言、GFM 任务列表）
+    │   ├── markdown/        # 扩展语法**共享口径模块**（html 白名单 / footnote / math / emoji）——
+    │   │                    #   渲染器与编辑器装饰两侧同源消费，避免「同一文档两副面孔」
     │   ├── export/          # HTML / PDF 导出模板与 exporters
     │   ├── composables/     # useEditorSession（编辑器实例 + 派生状态）/ useDocumentState（dirty /
-    │   │                    #   自动保存 / 快照 / 导出 / 历史）/ useCommands（55 条命令处理器 + 菜单结构）
+    │   │                    #   自动保存 / 快照 / 导出 / 历史）/ useCommands（62 条命令处理器 + 菜单结构）
     │   │                    #   / useWorkspace / useFileAssets / usePrefs / useShortcuts（键位唯一真源）
     │   │                    #   / useShortcutsHelp / useOutline / usePlatform / useToast / useDialog /
-    │   │                    #   useFileOps / useTableHint（表格提示，模块级单例）
+    │   │                    #   useFileOps / useTableHint（表格提示，模块级单例）/ useChrome / commandFilter
     │   ├── components/      # TitleBar（自绘标题栏）/ Sidebar / SlashCommand / StatusBar / HistoryPanel /
     │   │                    #   SettingsPanel / InputDialog / ShortcutsDialog / AboutDialog / FileTree /
-    │   │                    #   Outline / SegmentedControl / icons/
+    │   │                    #   CommandPalette / Outline / SegmentedControl / TreeNode / icons/
     │   └── themes/          # tokens/design-tokens.css（Token 唯一真源）+ index.css（唯一样式入口）
     │                        #   + app-shell.css / platform-darwin.css / editor-wysiwyg.css
     │                        #   + theme.js（主题解析）/ prefs.js（偏好唯一真源）
@@ -283,7 +289,7 @@ node scripts/probe/probe-r11-fixes.mjs             # 第十一轮修复：全角
 3. **主题 = CSS 变量**：编辑器（CodeMirror theme）、预览排版、代码高亮 token 全部引用同一组变量，切换零成本；预览高亮没用 hljs 官方主题 CSS，而是把 token 色值做成变量（`--hl-keyword` 等），保证明暗一致。`data-theme` 始终存「已解析」的具体主题（不存 `system`），切换只改属性、不重建编辑器。
 4. **单栏居中流式**：双栏 / 分屏 / 滚动联动已随产品减法整体下线，正文限宽（`--single-measure: 46rem`）居中；阅读态已于 2026-10-14 移除，所见即所得渲染直接内嵌编辑器（表格真渲染见 `src/editor/tableRender.js`）；`useOutline` 只保留大纲高亮与跳转。
 5. **窗口拖拽用 `--wails-draggable`**：Wails 不读 `-webkit-app-region`（那是 Chromium 的，macOS WKWebView 不认）。标题栏根节点设 `--wails-draggable: drag`，交互子元素（菜单按钮 / 下拉项 / 窗口按钮）逐个设 `no-drag`——该自定义属性**会向下继承**，只能落在叶子可点元素上，落在布局容器上会把空白区也变成非拖动区。
-6. **原生菜单已下线，键位真源在前端**：原生菜单因「Role 不可本地化 / 非 darwin 不展开 / 无边框下无处安放」三条实测约束整体删除，键位收敛到 `useShortcuts.js` 的 `COMMANDS` 表（55 条命令 / 43 项键位），菜单结构、全局分发、速查表三方同源派生；门禁 `verify-shortcuts.mjs` 守着 README 与命令表不漂移。
+6. **原生菜单已下线，键位真源在前端**：原生菜单因「Role 不可本地化 / 非 darwin 不展开 / 无边框下无处安放」三条实测约束整体删除，键位收敛到 `useShortcuts.js` 的 `COMMANDS` 表（**62 条命令 / 50 项键位**），菜单结构、全局分发、速查表三方同源派生；门禁 `verify-shortcuts.mjs` 守着 README 与命令表不漂移。
 7. **渲染进程零 Node 能力**：前端只能通过生成的 `wailsjs` 绑定调 Go 方法，文件系统攻击面收在 `app.go`。
 8. **WYSIWYG 即时渲染的边界**：只产装饰、绝不 `dispatch` 文档变更（内容零篡改）；`view.composing` 为 true（中文输入中）时冻结重算，避免抖动；装饰只在 `visibleRanges` 内计算（大文档性能）；活跃行向上下各扩 1 行，避免方向键因标记符显隐突变而跳跃。
 9. **快照与自动保存解耦**：自动保存 800ms 防抖覆盖原文件；快照独立按「节流 / 显式保存 / 切换文件边界 / 手动」触发，避免每次按键都落快照、污染历史。
@@ -305,16 +311,16 @@ node scripts/probe/probe-r11-fixes.mjs             # 第十一轮修复：全角
 
 | # | 项 | 状态 / 说明 |
 |---|-----|------------|
-| 1 | **Windows / Linux 无边框形态未真机验证** | 窗口形态已按平台分流，但无边框拖拽、自绘窗口按钮、关闭守卫**从未在真实 Windows / Linux 上跑过**；导出 PDF 在这些平台降级为系统打印 |
-| 2 | **真机目视清单未过** | 自动化只验到「根节点渲染 + 标题栏/编辑区已挂载 + 无异常」。标题栏拖拽、红绿灯留白、毛玻璃、斜杠面板、GFM 任务列表、代码块高亮、「插入目录」跳转等交互**全部需目视**，完整 22 项见 [`docs/HANDOFF.md`](docs/HANDOFF.md) §6。**现在有可执行副本了**：打开 [`docs/qa/visual-checklist.html`](docs/qa/visual-checklist.html)（单文件、双击即开、零依赖）逐项勾选并导出 Markdown，追加进 [`docs/qa/VERIFICATION-LOG.md`](docs/qa/VERIFICATION-LOG.md) 留痕——清单副本与 §6 真源的编号/标题由门禁 4 第二步机检守着 |
+| 1 | **Windows / Linux 无边框形态未真机验证** | 窗口形态已按平台分流，但无边框拖拽、自绘窗口按钮、关闭守卫**从未在真实 Windows / Linux 上跑过**；导出 PDF 在 **Linux 已是一键直出**（GTK 打印到文件，2026-10-26 落地），仅 **Windows** 仍降级为系统打印 |
+| 2 | **真机目视清单未过** | 自动化只验到「根节点渲染 + 标题栏/编辑区已挂载 + 无异常」。标题栏拖拽、红绿灯留白、毛玻璃、斜杠面板、GFM 任务列表、代码块高亮、「插入目录」跳转等交互**全部需目视**，完整 **29 项**见 [`docs/HANDOFF.md`](docs/HANDOFF.md) §6。**现在有可执行副本了**：打开 [`docs/qa/visual-checklist.html`](docs/qa/visual-checklist.html)（单文件、双击即开、零依赖）逐项勾选并导出 Markdown，追加进 [`docs/qa/VERIFICATION-LOG.md`](docs/qa/VERIFICATION-LOG.md) 留痕——清单副本与 §6 真源的编号/标题由门禁 4 第二步机检守着 |
 | 3 | **macOS 透明窗口的代价** | `WebviewIsTransparent` + `WindowIsTranslucent` 在旧款 Intel Mac 上可能掉帧（透明窗口不能被合成器缓存）；本机是 macOS 12，只验到「能编译」，性能未实测 |
 | 4 | **Linux（CachyOS）真机** | 无边框 + 自绘标题栏的 Linux 表现从未在真机跑过；窗口按钮对接的 `WindowMinimise / WindowToggleMaximise / CloseWindow` 在 Linux 后端的行为需目视 |
 | 5 | **「最近打开」功能整体下线** | 它的唯一消费方是原生菜单的子菜单；自绘标题栏未做该入口。若要恢复需**重做**：前端加列表 + Go 侧重写持久化（原 `GetRecents` / `recents.json` 逻辑已随原生菜单整体删除，`app.go` 只剩历史注释提及） |
 | 6 | **文件树外部变更监听已接线，待真机确认** | 2026-10-13 落地：前端 `useFileOps` 订阅 `fs:changed`（payload 为根目录路径，仅当与当前 `folderPath` 严格相等才自增 `treeSignal`，`FileTree` 收信号后重拉目录）；Go 侧 `watcher.go` 另修一个真实缺陷——切换/停止文件夹时，旧监听残留的去抖定时器会把已失效目录的 `fs:changed` 推给前端（代际校验修复）。沙箱内无法验证真实 fsnotify 事件，需 `wails dev` 真机确认三场景：① 监听目录内新建/删除文件后树即时刷新；② 切到另一文件夹后旧目录的迟到事件不再触发；③ 关闭文件夹（空串）后无事件推送。另有两项已知未修：~~去抖边界双发（同 root 多刷一次，无正确性影响）~~ **（2026-10-17 撤销：实测不成立——该条目从未被真机验证过，同批连续到达的变更只推 1 次，跨窗口的两次独立变更推 2 次是正确行为）**；`w.Errors` 现已记日志（2026-10-15 落地，仍不打扰用户——fsnotify 内部错误时监听可能失效，日志是唯一排查线索）。**2026-10-17 另**：Go 侧去抖改为串行状态机（行为不再取决于调度顺序），语义由 `watcher_test.go` 的 5 条 Go 测试钉死 |
 | 7 | **表格真渲染待真机验收** | 2026-10-14 落地：编辑器内 StateField block 装饰渲染真表格（`src/editor/tableRender.js`），单元格可直接编辑并同步回 Markdown 源码；单元测试（`tests/table-render.test.mjs`）已过，光标进出切换渲染/源码、Tab 换格、IME 输入等真机路径仍需目视。原「阅读态跳转未目视」项随阅读态移除而消失 |
-| 8 | **`release.yml` 从未跑过** | 需 push 一个 `v*` tag 才会触发三平台打包；三平台构建的坑（Linux 的 webkit2_41 tag、macOS 签名）都还没被它验过 |
-| 9 | **检查更新** | 仓库**无任何 Release**，所以现在只会返回「无法检查更新」（不谎报「已是最新」） |
-| 10 | **macOS 未签名分发** | Gatekeeper 会拦，需 Apple 开发者账号（$99/年）签名 + 公证 |
+| 8 | ✅ **`release.yml` 已跑通（2026-10-21 / 2026-10-27 各一次）** | `v0.1.0` 与 `v0.2.0` 两个 tag 各触发一次三平台原生构建，五个 job 全 success，产物自动上传为 Release 附件。三平台构建的坑（Linux 的 `webkit2_41` tag、macOS ditto 打包、Windows exe）已被真 runner 验过。**剩余仅签名/公证**（见 #10） |
+| 9 | ✅ **检查更新已可用（2026-10-21 起）** | 已有 Release（当前 `v0.2.0`），`releases/latest` 返回 200，`CheckUpdate` 走真实 semver 比对路径，不再落到「暂无已发布的版本」 |
+| 10 | **macOS 未签名分发** | Gatekeeper 会拦，需 Apple 开发者账号（$99/年）签名 + 公证。⚠️ `release.yml` 目前**没有** codesign / notarize 步骤，产物是未签名 zip —— 用户下载后需右键「打开」或 `xattr -d com.apple.quarantine` |
 | 11 | **无「退出应用」快捷键** | Wails v2.16 没有 `WindowClose`，⌘Q 未设；关闭走 macOS 红绿灯 / Linux 自绘 ×（`App.CloseWindow()`） |
 | 12 | **导出产物不跟随正文字体偏好（已裁决）** | 2026-10-13 裁决**不跟随**：导出物是分发格式，把作者本地偏好写死进 HTML/PDF 会让排版随机器漂移；保持主题级 `--font-body` 保证任何机器导出一致。用户偏好是本地阅读体验，不是文档内容。重开条件见 [`docs/decisions/OPEN-DECISIONS.md`](docs/decisions/OPEN-DECISIONS.md) |
 | 13 | **零多标签页 / 多文档** | 当前一次只开一个文档。ADR-005 已预留 `dirty` 语义的升级路径，多文档需重新定义「关闭哪个文档」的判定 |
