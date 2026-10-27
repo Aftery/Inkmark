@@ -4,9 +4,9 @@
 > `docs/spec/` 与项目记忆。它记录「做到了什么、怎么验证、哪些坑别再踩」，
 > 而不是流水账。
 >
-> 最后更新：2026-10-27（新增第二十三轮：CI 双红收口 —— README 数字漂移 + Linux 交叉编译 undefined）
+> 最后更新：2026-10-27（新增第二十四轮：v0.2.0 发布 —— 25 个提交入版、版本号四处同步）
 >
-> 上一轮记录：2026-10-20（第二十轮：交互细节打磨 —— 表格拖拽/对齐 + 智能符号与标点 + 标题与列表键位）
+> 上一轮记录：2026-10-27（第二十三轮：CI 双红收口 —— README 漂移 + Linux 交叉编译 undefined）
 >
 > ✅ **2026-10-17 第十六轮：一个从未被验证过的「已知未修项」，实测不成立**
 > 接第十五轮后翻 watcher 的账，发现 README #6 / §6 #22 / §7 三处都登记着
@@ -1314,6 +1314,50 @@ Go darwin vet/build/test 绿、linux/windows 交叉 build+vet 全绿、
 
 ---
 
+### 第二十四轮：v0.2.0 发布（2026-10-27）
+
+**起因**：核对线上时发现 v0.1.0（2026-10-21，指向 `70619fd`）之后 **25 个提交
+全部没进任何 Release** —— 扩展 Markdown 语法整套、表格跑行三根因修复、图片链路
+修复、Linux 一键导出 PDF、KDE Wayland 双层标题栏修复全在裸奔。按 semver 属
+**功能增量**，应为次版本号 `v0.2.0`。
+
+**发布前补的一处真实缺陷（自己踩的）**：版本号原本只有 `version.go` 一处会随
+tag 变化（`-ldflags -X main.version` 注入），但 `wails.json` 的
+`info.productVersion` **写进 macOS .app 的 Info.plist**，而 `release.yml` 全程
+没有 `-info` / `-ldflags` 覆盖它 → 不同步的话，**包内显示 0.2.0、系统「关于本机」
+与访达里仍显示 0.1.0**。已同步四处：`version.go`（0.2.0-dev）/
+`wails.json`（0.2.0）/ `frontend/package.json` / `frontend/package-lock.json`
+（根 + packages 两处），grep 校验 `0.1.0` 零残留。
+
+**发布执行**：
+```bash
+git commit -m "chore(release): 版本号升至 0.2.0"   # ed84b0a
+git push origin main
+git tag -a v0.2.0 -m "Inkmark v0.2.0 …"            # 附注 tag，正文列增量与已知限制
+git push origin v0.2.0
+```
+
+**结果（线上实测，非推断）**：
+- release workflow run `40442433239` → **success**，五个 job 全绿
+  （派生版本号 / 构建 Linux amd64 / 构建 Windows amd64 / 构建 macOS universal /
+  发布 GitHub Release）；
+- Release `Inkmark v0.2.0` 已发布（`2026-10-27T03:10:55Z`，非 draft / 非 prerelease），
+  四个资产：`inkmark-macos-universal.zip` (10.5MB) / `inkmark-windows-amd64.exe` (13.6MB) /
+  `inkmark-linux-amd64.tar.gz` (5.4MB) / `inkmark-linux-amd64.txt`；
+- 发布说明是 `generate_release_notes: true` 自动生成的
+  （只有一行 Full Changelog 链接），**tag 附注里的增量清单没有进 Release 正文** ——
+  想让人看到变更得手动编辑 Release 或改用 `body_path`。
+
+**顺带修掉的文档谎言**：§7 两条过期登记（「`release.yml` 一次都没跑过」
+「仓库无任何 Release」）已改正 —— 它们让本次接手一度对用户说「没有 Release」，
+与用户截图里明明白白的 v0.1.0 冲突。教训见该两行注记。
+
+**仍待办（发布侧）**：macOS 产物**未签名/未公证**（`release.yml` grep 无
+`codesign|notarize`），用户下载后 Gatekeeper 会拦，需右键打开或
+`xattr -d com.apple.quarantine`；要正经分发需 Apple 开发者账号（$99/年）。
+
+---
+
 ## 4. 已知的错误结论（别再重复）
 
 ### ① 「自建 Edit 菜单会让 ⌘C/⌘V 失效」——**错，已纠正**
@@ -1856,7 +1900,7 @@ WebKit 的默认粘贴行为就是**把它当纯文本插入**（这就是「粘
 | **关闭守卫待复验（§6 #4）** | 2026-10-15 `CloseWindow` 重构为带参（`CloseWindow(dirty)`，dirty 随关闭请求同一条 IPC 携带，消除 50ms sleep 时序补丁；判定本体抽 `confirmClose` 与红绿灯路径共用，见 ADR-005 §五）。**改动后未在真机复验**：脏文档点红绿灯 / 自绘 × 应弹「未保存的更改」，取消能留在应用。Linux/Windows 的自绘 × 路径本就未验 |
 | **真正的「系统打印面板」未实现** | Wails 的 WKWebView 不实现 `window.print()`，故 `⌘P` 落地为「生成 PDF」（见 §2 第十一轮）。真正的系统打印需原生 `NSPrintOperation`（macOS）/ `GTK` 打印（Linux），未做。**已知的重复**：`⌘P`（`file.print`）与 `⇧⌘P`（`file.exportPdf`）目前**同效**——保留两条是因为 `⇧⌘P` 在快捷键表/README 里是既有契约，删除会破坏用户肌肉记忆与门禁口径。若将来做原生打印，`⌘P` 应切回真打印、`⇧⌘P` 保持导出 |
 | **CI 的 runner 表现** | 已实测（2026-10-11）：`5ad7434`/`21771c7`/`a105c51` success，`6bdf3d6`/`f1343eb` failure（仅 `go` job），**`18c2f28` success**（run `38143580960`，五 job 全绿）。「本地绿、runner 绿」这一关现在是通过的；那两行 failure 是仓库自身回归（占位文件被删），已修 |
-| ✅ **`release.yml` 真 runner** | **已跑通（2026-10-21）**：push `v0.1.0` tag（指向 `70619fd`）触发 run `success`，三平台产物全部产出并上传为 Release 附件（`inkmark-macos-universal.zip` / `inkmark-windows-amd64.exe` / `inkmark-linux-amd64.tar.gz` + Linux 运行说明 txt）。**三平台构建的坑已被真 runner 验过**（Linux 的 `webkit2_41` tag、macOS ditto 打包、Windows exe 复制）。**未验的只剩签名/公证**（workflow 里**没有**任何 codesign / notarize 步骤，见下一行）。 |
+| ✅ **`release.yml` 真 runner** | **已两次跑通**：`v0.1.0`（2026-10-21，指向 `70619fd`）与 **`v0.2.0`（2026-10-27，run `40442433239`，指向 `ed84b0a`）** 各一次，五个 job 全 success，三平台产物自动上传。**三平台构建的坑已被真 runner 验过**（Linux 的 `webkit2_41` tag、macOS ditto 打包、Windows exe 复制）。**未验的只剩签名/公证**（workflow 里**没有**任何 codesign / notarize 步骤，见下下行）。⚠️ **坑（v0.2.0 实测）**：`generate_release_notes: true` 只生成一行 Full Changelog 链接，**附注 tag 的正文不会进 Release 说明** —— 想让人看到变更清单得手动编辑 Release 或改 `body_path`。 |
 | ✅ **检查更新** | **已闭环（2026-10-21 起可用）**：v0.1.0 发布后 `releases/latest` 返回 200 + `tag_name`，`CheckUpdate` 走的是真实比对路径（`app.go:624`），不再落到「暂无已发布的版本」。⚠️ **本条曾长期登记为「仓库无任何 Release」** —— 那是**过期登记**（发布早于登记更新），2026-10-27 核实线上后改写。**教训**：§7 属「如实登记」表，但**登记本身也会过期**；凡涉及线上状态的条目（Release / runner / CI），声称前应先查一次真实 API，别照抄文档。 |
 | **macOS 未签名分发** | Gatekeeper 会拦，需 Apple 开发者账号（$99/年）签名+公证。**注意 `release.yml` 目前无 codesign / notarize 步骤**（grep 无命中），macOS 产物是未签名 zip —— 分发即用户手动右键打开。 |
 | **「窗口 → 缩放」** | Wails 无「适配内容尺寸」API，用最大化近似（沿用既有裁决） |
