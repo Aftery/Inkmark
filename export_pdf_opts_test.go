@@ -1,6 +1,6 @@
 package main
 
-// export_pdf_opts_test.go — 导出契约的跨平台公共部分（默认文件名）。
+// export_pdf_opts_test.go — 导出契约的跨平台公共部分（默认文件名 + base URI）。
 // 与平台无关：darwin 与 linux 两条实现都读这一份，改名规则必须一致。
 
 import "testing"
@@ -33,5 +33,22 @@ func TestPdfExportDefaultName_截断到60字符(t *testing.T) {
 	want += ".pdf"
 	if got != want {
 		t.Fatalf("截断结果不符：%q（%d 个字符）", got, len([]rune(got)))
+	}
+}
+
+// TestFileURIForDir 原在 export_pdf_linux_test.go（//go:build linux）。
+// 2026-10-27 fileURIForDir 移入无平台标签的 export_pdf_opts.go 后并入本文件，
+// 使 macOS CI runner 也真跑它（原 linux 标签下 runner 永远跑不到）。
+func TestFileURIForDir(t *testing.T) {
+	cases := []struct{ in, want string }{
+		{"", ""},
+		{"   ", ""},
+		{"/tmp/opencode", "file:///tmp/opencode/"},
+		{"/home/me/我的 文档", "file:///home/me/%E6%88%91%E7%9A%84%20%E6%96%87%E6%A1%A3/"},
+	}
+	for _, c := range cases {
+		if got := fileURIForDir(c.in); got != c.want {
+			t.Errorf("fileURIForDir(%q) = %q, want %q", c.in, got, c.want)
+		}
 	}
 }

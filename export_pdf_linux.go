@@ -21,24 +21,11 @@ import "C"
 import (
 	"encoding/json"
 	"fmt"
-	"net/url"
-	"path/filepath"
-	"strings"
 	"sync"
 	"unsafe"
 
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 )
-
-// fileURIForDir 把文档目录转成 WebKit 的 base URI（相对路径图片据此解析）。
-// 末尾斜杠不能省：没有它，最后一段会被当成文件名而不是目录。
-func fileURIForDir(dir string) string {
-	if strings.TrimSpace(dir) == "" {
-		return ""
-	}
-	u := url.URL{Scheme: "file", Path: filepath.ToSlash(dir) + "/"}
-	return u.String()
-}
 
 // pdfExportState 串行化导出：GTK 的打印流程是单实例的，并发调用会互相踩。
 // done 只承载一次结果（缓冲 1，回调不会阻塞主线程）。
