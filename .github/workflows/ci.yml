@@ -40,6 +40,10 @@ jobs:
   frontend:
     name: 前端测试与构建
     runs-on: macos-latest
+    # 显式超时：不设时若测试网挂住，要等 runner 的 6 小时默认值才失败，
+    # 而且看不出是哪一步慢。本机实测（磁盘 I/O 病态时）单跑可达 14 分钟，
+    # CI runner 正常应 5 分钟内完成 —— 20 分钟是「明显异常」的判据线。
+    timeout-minutes: 20
     defaults:
       run:
         working-directory: frontend
