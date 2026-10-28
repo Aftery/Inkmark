@@ -195,17 +195,38 @@ describe('标签栏 · 装配契约', () => {
   const TAB_BAR = stripComments(
     readFileSync(new URL('../src/components/TabBar.vue', import.meta.url), 'utf8'),
   )
+  /**
+   * 取出 App.vue 里 `<TabBar … />` 那**一个**标签的文本。
+   *
+   * 【为什么不用 `/<TabBar\b[^>]*…/`】`[^>]*` 会在**属性值内部的 `>`** 处截断。
+   * 2026-10-28 已真实误报一次：`v-show="!focusOn && sessions.length > 1"` 里的
+   * `>` 让正则提前收尾，断言「TabBar 没拿到 sessions」——**接线是好的，判据坏了**。
+   * 这类误报比漏报更伤：会把人推向「退回一个本来正确的改动」。
+   * 故改为按标签边界切出整段（非贪婪跨行），再对整段做 includes 判断。
+   */
+  const tabBarTag = (APP.match(/<TabBar\b[\s\S]*?\/>/) || [''])[0]
 
   test('App.vue 真的 import 并渲染了 TabBar，且传了 sessions / activeId / select', () => {
     assert.match(
       APP, /import TabBar from '\.\/components\/TabBar\.vue'/,
       'App.vue 没有 import TabBar —— 组件存在但没接上',
     )
-    assert.match(APP, /<TabBar\b[^>]*:sessions="sessions"/, 'TabBar 没拿到 sessions（标签栏会是空的）')
-    assert.match(APP, /<TabBar\b[^>]*:active-id="activeId"/, 'TabBar 没拿到 activeId（无法高亮当前标签）')
+    // 锚点守卫：切不出标签就说明判据失效，此时下面的 includes 会在空串上恒真/恒假
+    assert.ok(
+      tabBarTag.length > 0,
+      'App.vue 里找不到 <TabBar … /> 标签 —— 判据锚点失效，结果不可采信',
+    )
+    assert.ok(
+      tabBarTag.includes(':sessions="sessions"'),
+      `TabBar 没拿到 sessions（标签栏会是空的）。实际标签：${tabBarTag}`,
+    )
+    assert.ok(
+      tabBarTag.includes(':active-id="activeId"'),
+      `TabBar 没拿到 activeId（无法高亮当前标签）。实际标签：${tabBarTag}`,
+    )
     assert.match(
-      APP, /<TabBar\b[^>]*@select="[^"]*activateSession"/,
-      'TabBar 的 select 没接到 activateSession —— 点标签不会有任何反应，且不报错',
+      tabBarTag, /@select="[^"]*activateSession"/,
+      `TabBar 的 select 没接到 activateSession —— 点标签不会有任何反应，且不报错。实际标签：${tabBarTag}`,
     )
   })
 

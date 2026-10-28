@@ -96,7 +96,7 @@ function onDocChange() {
   <div class="app" :class="{ focus: focusOn }">
     <TitleBar v-show="!focusOn" :filename="title" :is-dirty="dirty"
       :groups="menuGroups" @command="emitCommand" />
-    <TabBar v-show="!focusOn" :sessions="sessions" :active-id="activeId" @select="session.activateSession" />
+    <TabBar v-show="!focusOn && sessions.length > 1" :sessions="sessions" :active-id="activeId" @select="session.activateSession" />
 
     <div class="main">
       <!-- 侧栏：文件 / 大纲 双 tab。专注模式下整栏隐藏。 -->
