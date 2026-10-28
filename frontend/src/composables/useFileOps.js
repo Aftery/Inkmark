@@ -52,7 +52,9 @@ export function useFileOps(deps) {
     // 编辑器与文档
     getEditor, replaceDocument, syncAfterDocReplace,
     // 路径状态（owner 是 useEditorSession —— 文档会话的一部分）
-    filePath, folderPath, title,
+    // setActivePath 是路径的**唯一写入入口**（多标签页下 filePath 是
+    // activeSession.path 的派生值，直接赋值写不进去，见 useEditorSession 头注）
+    filePath, folderPath, title, setActivePath,
     // 侧栏（打开文件夹后自动展开文件 tab）
     sidebarOpen, sidebarTab,
     // 文档状态机（保存 / 快照 / 会话边界）
@@ -90,7 +92,7 @@ export function useFileOps(deps) {
   function loadDocument(content, path) {
     replaceDocument(getEditor(), content)
     syncAfterDocReplace(content)
-    filePath.value = path
+    setActivePath(path)
     docState.resetSession()
   }
 
@@ -163,7 +165,7 @@ export function useFileOps(deps) {
     if (!trimmed || trimmed === title.value) return
     try {
       const newPath = await api.RenameFile(filePath.value, trimmed)
-      filePath.value = newPath
+      setActivePath(newPath)
       showToast(t('toast.renamed'))
     } catch (err) {
       showToast(t('toast.renameFailed', { error: err?.message || err }), true)

@@ -548,8 +548,11 @@ describe('契约 3 · 打印样式存在性', () => {
       /display:\s*none/.test(block.body),
       'App.vue @media print 缺少 display:none'
     )
-    // 这两个 chrome 元素打印时都不该出现
-    for (const chrome of ['statusbar', 'history-panel']) {
+    // 这几个 chrome 元素打印时都不该出现
+    // [2026-10-28 多标签页 P1] 加入 tab-bar：标签栏是新 chrome，架构 §4.9 要求
+    // 打印隐藏。判据加强（从 2 项到 3 项）—— 已按 §9.4 做元测试：从 App.vue 的
+    // @media print 里删掉 .tab-bar → 本用例报红。
+    for (const chrome of ['tab-bar', 'statusbar', 'history-panel']) {
       assert.ok(
         block.body.includes(chrome),
         `App.vue @media print 应隐藏 ${chrome}，实际块:\n${block.body}`

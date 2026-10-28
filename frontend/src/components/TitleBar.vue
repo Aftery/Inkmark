@@ -356,13 +356,18 @@ const close = async () => {
   font-weight: var(--weight-emphasize);
   color: var(--fg);
 }
-/* 未保存标记：纯 CSS 圆点，不使用任何符号字形（P0 零 emoji / 零字符图标） */
+/* 未保存标记：纯 CSS 圆点，不使用任何符号字形（P0 零 emoji / 零字符图标）。
+   颜色用 --meta 而非 --danger（MD-04，2026-10-28）：dirty 是常态，「一直红着」
+   会让红色失去「异常」的含义；异常态（保存失败）才用 --danger。实测算过：
+   --meta 三主题对 --surface 为 3.11 / 3.66 / 3.07 : 1，而 --muted 是
+   4.78 / 5.70 / 4.83 : 1 —— --muted 反而更强，「降级用 --muted」不构成降级。
+   标签栏的 dirty 点与这里同色同名同义（TabBar.vue），两处 chrome 必须一致。 */
 .tb-dirty {
   flex: none;
   width: 7px;
   height: 7px;
   border-radius: 50%;
-  background: var(--danger);
+  background: var(--meta);
 }
 
 .tb-right { display: flex; justify-content: flex-end; gap: var(--space-1); }

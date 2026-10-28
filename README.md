@@ -206,7 +206,7 @@ inkmark/
     │   └── themes/          # tokens/design-tokens.css（Token 唯一真源）+ index.css（唯一样式入口）
     │                        #   + app-shell.css / platform-darwin.css / editor-wysiwyg.css
     │                        #   + theme.js（主题解析）/ prefs.js（偏好唯一真源）
-    ├── tests/           # node:test 测试网（671 条测试 / 157 个 suite，零第三方依赖），需 Node ≥22
+    ├── tests/           # node:test 测试网（698 条测试 / 169 个 suite，零第三方依赖），需 Node ≥22
     └── wailsjs/         # Wails 自动生成的 IPC 绑定（勿手改）
 ```
 
@@ -240,7 +240,7 @@ npm install
 
 npm run dev      # 本地开发服务器
 npm run build    # 生产构建 → frontend/dist
-npm test         # 测试网（671 条测试，零第三方依赖），【需 Node ≥22】
+npm test         # 测试网（698 条测试，零第三方依赖），【需 Node ≥22】
 ```
 
 > - `npm test` 用的是 Node **内置** `node:test`（无第三方测试依赖），因此**必须 Node ≥22**；低版本会报 `node --test` 不可用。
@@ -251,7 +251,7 @@ npm test         # 测试网（671 条测试，零第三方依赖），【需 No
 ### 门禁脚本（与 CI 同口径）
 
 ```bash
-cd frontend && npm test                                    # 测试网，期望 671/671
+cd frontend && npm test                                    # 测试网，期望 698/698
 node scripts/verify/verify-readme-claims.mjs               # README 数字声明 ↔ 实测（自己会再跑一遍测试网；退出码 1=漂移 / 2=测量失效）
 node scripts/verify/verify-shortcuts.mjs                   # 快捷键三方对齐（README ↔ 速查表 ↔ COMMANDS）
 node scripts/verify/scan-i18n-residue.mjs                  # i18n 文案残留
@@ -329,7 +329,7 @@ node scripts/probe/probe-r11-fixes.mjs             # 第十一轮修复：全角
 | 13 | **零多标签页 / 多文档** | 当前一次只开一个文档。ADR-005 已预留 `dirty` 语义的升级路径，多文档需重新定义「关闭哪个文档」的判定 |
 | 14 | **无拼写检查（刻意不做）** | CodeMirror 的 lint 对 CJK 基本无效，中文写作场景是**伪需求**，故不引入。英文拼写需自行接第三方 lint 扩展 |
 | 15 | **导出模板文案未国际化** | `export/exporters.js` 的 HTML 模板未接 `t()`（Spec 明确留待后续） |
-| 16 | **`App.vue` 行数余量极小** | 装配层硬上限 **总行数** 150 行、当前 144 行（契约 5 实测；2026-10-28 P0 地基阶段腾出 6 行余量，多标签页装配要用）。新增行为一律先下沉到 composables/，门禁口径是**总行数**（含注释与空行，比有效行更严） |
+| 16 | **`App.vue` 行数余量极小** | 装配层硬上限 **总行数** 150 行、当前 148 行（契约 5 实测；2026-10-28 P0 地基阶段腾出 6 行、P1 标签栏骨架用掉 4 行，**现余 2 行**）。新增行为一律先下沉到 composables/，门禁口径是**总行数**（含注释与空行，比有效行更严） |
 | 17 | **Go 侧错误串仍是中文（已裁决的残余）** | 2026-10 复查：原生**对话框**文案已全部本地化（`dialogs.go`，按前端传入的 locale 取表；`OnBeforeClose` 读 `SetLocale` 镜像）。但各方法的**错误信息**（如「同名文件已存在: x」）仍是中文，经 IPC 回到前端后被嵌进本地化模板显示为「保存失败：<中文原因>」。裁决见 `dialogs.go` 文件头：模态对话框必须本地化，错误细节保留技术原文；彻底解决的正确方向是 Go 返回**错误码**由前端查表，属独立协议改造 |
 | 18 | **Windows 路径处理未真机验证** | 2026-10 复查修掉了三处只认 `/` 的路径切分（标题栏文件名、侧栏文件夹名、字数统计无关），改为同时认 `\`；逻辑已由 `frontend/src` 内的实现覆盖，但 Windows 真机路径仍未跑过（与 #1 同源） |
 

@@ -18,6 +18,8 @@ export default {
   'common.unsaved': '未保存',
   'common.saveFailed': '保存に失敗しました',
   'common.untitled': '無題',
+  // ---- タブバー（複数ドキュメント）----
+  'tabbar.label': '開いている文書',
 
   // ---- タイトルバー ----
   'doc.title': 'ドキュメント',

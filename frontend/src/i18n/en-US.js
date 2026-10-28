@@ -18,6 +18,8 @@ export default {
   'common.unsaved': 'Unsaved',
   'common.saveFailed': 'Save failed',
   'common.untitled': 'Untitled',
+  // ---- Tab bar (multi-document) ----
+  'tabbar.label': 'Open documents',
 
   // ---- Document title bar ----
   'doc.title': 'Document',

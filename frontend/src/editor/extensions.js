@@ -23,22 +23,22 @@ import { search, searchKeymap, openSearchPanel } from '@codemirror/search'
 import { syntaxHighlighting, HighlightStyle, syntaxTree } from '@codemirror/language'
 import { markdown, markdownLanguage } from '@codemirror/lang-markdown'
 import { tags as t } from '@lezer/highlight'
-import codeLanguages from './markdownHighlight'
-import { wysiwygField, wysiwygPlugin, wysiwygAtomicRanges } from './wysiwyg'
-import { taskToggleHandlers } from './taskToggle'
+import codeLanguages from './markdownHighlight.js'
+import { wysiwygField, wysiwygPlugin, wysiwygAtomicRanges } from './wysiwyg.js'
+import { taskToggleHandlers } from './taskToggle.js'
 import { codeLinePlugin, codeCopyPlugin } from './codeBlock.js'
 
-import { tableRenderField, tableScanKick, tableSelectionGuard } from './tableRender'
-import { tableInputGate } from './tableInputGate'
+import { tableRenderField, tableScanKick, tableSelectionGuard } from './tableRender.js'
+import { tableInputGate } from './tableInputGate.js'
 // 块级即时渲染（折叠块 <details> + 多行公式）与它依赖的区间登记处。
 // 【顺序】blockRangesField 声明在 wysiwygBlocksField 之前，wysiwygBlocksField 在
 // tableRenderField 之后 —— 依赖方向是「区间登记 → 块 widget」「表格区间 → 块 widget」。
 // CM 的 StateField 是惰性求值，实测倒序声明也能读到正确的依赖值，所以这不是硬
 // 约束而是**可读性约定**：声明顺序与依赖方向一致，读代码时不必回头查谁依赖谁。
-import { blockRangesField } from './blockRanges'
-import { wysiwygBlocksField, blockScanKick } from './wysiwygBlocks'
-import { slashCommandExtension } from './slashCommand'
-import { imageDropHandlers } from './imageDrop'
+import { blockRangesField } from './blockRanges.js'
+import { wysiwygBlocksField, blockScanKick } from './wysiwygBlocks.js'
+import { slashCommandExtension } from './slashCommand.js'
+import { imageDropHandlers } from './imageDrop.js'
 import { smartInputExtension } from './smartInput.js'
 import { listIndentExtension } from './listIndentKeymap.js'
 import { getPrefs } from '../themes/prefs.js'
@@ -190,13 +190,46 @@ export const zoomCompartment = new Compartment()
  * 构建编辑器扩展清单。**整个应用只应有一份**，由调用方构建一次后共享给
  * 所有 EditorState（多标签页的 N 份 state 共用它）。
  *
+ * 【为什么两个 updateListener 也在这里（架构 §4.2 的「留在 view 侧」已作废）】
+ * `activateSession` 用的是 `view.setState(target.state)`，而 setState **整体替换
+ * state** —— 扩展是 state 的一部分，所以「只装在 view 初始 state 里」的监听器
+ * 会在**第一次切标签后永久消失**：表现为切过去之后打字不标脏、预览不更新
+ * （全都不报错）。故监听器必须与其余扩展一起进共享清单，每一份 state 都带着它。
+ * 这不违反抽出来的初衷：它们仍然只回调「当前激活会话」（闭包里的
+ * getActiveSession），不持有任何标签专属状态。
+ *
  * @param {object} deps
  * @param {() => object|null} deps.slashHost 斜杠面板宿主（延迟求值：面板组件在编辑器之后挂载）
  * @param {(file: File|string) => void} [deps.onImageFile] 图片数据 / file URL 落盘回调
  * @param {() => void} [deps.onClipboardImage] 通道③：问系统剪贴板取图片
+ * @param {(doc: string) => void} [deps.onDocChange] 文档变更回调（标脏 / 预览防抖）
+ * @param {(update: object) => void} [deps.onUpdate] 选区 / 光标变化回调（行列 / 表格提示）
  * @returns {Array} CM6 扩展数组
  */
-export function buildExtensions({ slashHost, onImageFile, onClipboardImage }) {
+export function buildExtensions({
+  slashHost,
+  onImageFile,
+  onClipboardImage,
+  onDocChange,
+  onUpdate,
+}) {
+  // 只监听文档变化。滚动不要在这里监听 —— CM6 的 ViewUpdate 根本没有 scrollChanged
+  // 这个属性（真实属性只有 docChanged/selectionSet/focusChanged/viewportChanged/
+  // heightChanged/geometryChanged 等），写了永远是 undefined，滚动联动会静默失效。
+  // 滚动用 createEditor 里的原生 scroll 事件，与预览侧的 @scroll 完全对称。
+  const updateListener = onDocChange
+    ? EditorView.updateListener.of((update) => {
+        if (update.docChanged) onDocChange(update.state.doc.toString())
+      })
+    : []
+  // 选区/光标变化（状态栏行列、工具条选中态）。与 onDocChange 分开，避免每个
+  // 光标移动都触发文档字符串拷贝。
+  const selectionListener = onUpdate
+    ? EditorView.updateListener.of((update) => {
+        if (update.docChanged || update.selectionSet) onUpdate(update)
+      })
+    : []
+
   return [
     highlightSpecialChars(),
     history(),
@@ -322,6 +355,12 @@ export function buildExtensions({ slashHost, onImageFile, onClipboardImage }) {
       // 迁移原因见该文件头注：把纯 CSS 塞进本对象会顶破行数棘轮。
       // 引用块 / 代码块刻意不附着行内底色（见 editor-wysiwyg.css 同处注释）。
     }),
+    // 两个监听器放在这里（theme 之后、focusField 之前）：与它们搬家前的相对
+    // 位置一致，读代码时不必重新建立「谁在谁前面」的心智。顺序对 facet 无影响。
+    // 【不可省】见本函数头注：setState 会整体替换 state，只装在初始 state 上的
+    // 监听器会在第一次切标签后消失。
+    updateListener,
+    selectionListener,
     focusField,
     focusPlugin,
     // WYSIWYG：开关字段 → 装饰插件 → atomicRanges（顺序要求：facet 须能

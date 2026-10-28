@@ -17,11 +17,11 @@
 // 缩放 / 打字机 / 整份替换三个动作。
 import { EditorView } from '@codemirror/view'
 import { EditorState } from '@codemirror/state'
-import { zoomCompartment } from './extensions'
+import { zoomCompartment } from './extensions.js'
 
 // 专注模式开关（StateEffect）与扩展清单同住 extensions.js，这里保留导出路径 ——
 // 既有导入方不因搬家而断（多标签页切换时也要用它重放窗口级开关）。
-export { setFocusMode } from './extensions'
+export { setFocusMode } from './extensions.js'
 
 // ---------- 缩放：状态栏 90/100/110/125% 用（App.vue 调 setEditorZoom） ----------
 export function setEditorZoom(view, scale) {
@@ -80,35 +80,14 @@ export function replaceDocument(view, content) {
  * @param {string} [opts.doc] 初始文档
  * @param {Array} [opts.extensions] 扩展清单 —— **由调用方构建并共享**
  *        （见 editor/extensions.js 的 buildExtensions：多标签页的 N 份 state 共用一份）
- * @param {(doc: string) => void} [opts.onDocChange] 文档变更回调
- * @param {(update: object) => void} [opts.onUpdate] 选区 / 光标变化回调
  * @param {(top: number, max: number) => void} [opts.onScroll] 滚动回调
  */
-export function createEditor(parent, { doc = '', extensions, onDocChange, onUpdate, onScroll }) {
-  // 只监听文档变化。滚动不要在这里监听 —— CM6 的 ViewUpdate 根本没有 scrollChanged
-  // 这个属性（真实属性只有 docChanged/selectionSet/focusChanged/viewportChanged/
-  // heightChanged/geometryChanged 等），写了永远是 undefined，滚动联动会静默失效。
-  // 滚动用下面的原生 scroll 事件，与预览侧的 @scroll 完全对称。
-  const updateListener = EditorView.updateListener.of((update) => {
-    if (update.docChanged && onDocChange) onDocChange(update.state.doc.toString())
-  })
-  // 选区/光标变化（状态栏行列、工具条选中态）。与 onDocChange 分开，避免每个
-  // 光标移动都触发文档字符串拷贝。
-  const selectionListener = onUpdate
-    ? EditorView.updateListener.of((update) => {
-        if (update.docChanged || update.selectionSet) onUpdate(update)
-      })
-    : []
-
-  // 两个监听器留在 view 侧、不进共享的扩展清单：它们要回调「当前激活标签」，
-  // 由 useEditorSession 用 getActiveSession() 闭包动态解析。
-  // 【顺序无副作用】它们原本位于扩展数组中部，现追加到末尾 —— CM6 的
-  // updateListener 是 facet（多输入全量调用），与 keymap / decorations 的
-  // 「按声明顺序定优先级」规则无关，故移动不改变任何行为。
-  const state = EditorState.create({
-    doc,
-    extensions: [...extensions, updateListener, selectionListener],
-  })
+export function createEditor(parent, { doc = '', extensions, onScroll }) {
+  // 文档变更 / 选区变化两个 updateListener **在 extensions 里**（不在本文件）：
+  // `activateSession` 用 setState 换 state，扩展随 state 走 —— 只装在初始 state
+  // 上的监听器切一次标签就没了（打字不标脏、预览不更新，且不报错）。
+  // 详见 editor/extensions.js 的 buildExtensions 头注。
+  const state = EditorState.create({ doc, extensions })
 
   const view = new EditorView({ state, parent })
 

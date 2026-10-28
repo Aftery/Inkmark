@@ -8,6 +8,7 @@ import { ref, shallowRef } from 'vue'
 import { replaceDocument } from './editor/createEditor'
 import { extractOutline } from './editor/outline'
 import TitleBar from './components/TitleBar.vue'
+import TabBar from './components/TabBar.vue'
 import Sidebar from './components/Sidebar.vue'
 import StatusBar from './components/StatusBar.vue'
 import CommandPalette from './components/CommandPalette.vue'
@@ -48,18 +49,20 @@ const session = useEditorSession({
   onImageFile: (file) => assets.saveImageFile(file),
   onClipboardImage: () => assets.saveImageFromClipboard(),
   typewriterOn: workspace.typewriterOn, onEditorReady: () => prefs.syncZoomToEditor(),
+  zoom, focusOn: workspace.focusOn, invalidateOutline: outlineSync.invalidateMeasure,
 })
-const { editorEl, slashRef, filePath, folderPath, title, caret, wordCount, previewHtml, exportHtml } = session
+const { editorEl, slashRef, filePath, folderPath, title, caret, wordCount, previewHtml, exportHtml, sessions, activeId } = session
 const { focusOn, focusToast, sidebarOpen, sidebarTab, showSidebarTab } = workspace
 const assets = useFileAssets({ getFilePath: () => filePath.value, notify: showToast })
 const docState = useDocumentState({
-  getEditor, filePath, title, renderedHtml: exportHtml, theme: prefs.resolvedTheme,
+  getEditor, filePath, title, setActivePath: session.setActivePath, renderedHtml: exportHtml, theme: prefs.resolvedTheme,
   notify: showToast, onDocReplaced: session.syncAfterDocReplace,
 })
+session.bindDocState(docState)
 const { saveState, dirty, showHistory, snapshots, historyLoading } = docState
 const { dialog, askInput, closeDialog } = useDialog()
 const fileOps = useFileOps({
-  getEditor, replaceDocument, syncAfterDocReplace: session.syncAfterDocReplace, filePath, folderPath, title, sidebarOpen, sidebarTab, docState, showToast, askInput, ReadFile, OpenFileDialog, OpenDirectoryDialog,
+  getEditor, replaceDocument, syncAfterDocReplace: session.syncAfterDocReplace, setActivePath: session.setActivePath, filePath, folderPath, title, sidebarOpen, sidebarTab, docState, showToast, askInput, ReadFile, OpenFileDialog, OpenDirectoryDialog,
 })
 const { openFile, openFolder, openTreeFile, treeSignal } = fileOps
 if (import.meta.env.DEV) {
@@ -93,6 +96,7 @@ function onDocChange() {
   <div class="app" :class="{ focus: focusOn }">
     <TitleBar v-show="!focusOn" :filename="title" :is-dirty="dirty"
       :groups="menuGroups" @command="emitCommand" />
+    <TabBar v-show="!focusOn" :sessions="sessions" :active-id="activeId" @select="session.activateSession" />
 
     <div class="main">
       <!-- 侧栏：文件 / 大纲 双 tab。专注模式下整栏隐藏。 -->
@@ -138,7 +142,7 @@ function onDocChange() {
 /* 打印：只输出 .export-preview 的正文。布局与弹层样式在 themes/app-shell.css；
    各弹层组件另有自己的 @media print（Vue scoped 打不到子组件内部，契约 3 强制两份都在）。 */
 @media print {
-  .titlebar, .sidebar, .editor-pane, .focus-toast, .statusbar, .history-panel { display: none !important; }
+  .titlebar, .tab-bar, .sidebar, .editor-pane, .focus-toast, .statusbar, .history-panel { display: none !important; }
   .export-preview { position: static !important; left: auto !important; width: auto !important; display: block !important; }
 }
 </style>

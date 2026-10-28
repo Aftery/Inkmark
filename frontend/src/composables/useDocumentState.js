@@ -50,6 +50,9 @@ function errText(err) {
  * @param {Function} deps.getEditor   () => EditorView|null（onMounted 后才有值）
  * @param {import('vue').Ref<string>} deps.filePath  文档绝对路径（空 = 未落盘）
  * @param {import('vue').Ref<string>} deps.title     文件名（保存对话框默认名）
+ * @param {Function} deps.setActivePath (path) => void 路径的**唯一写入入口**
+ *                   （多标签页下 filePath 是 activeSession.path 的派生值，
+ *                   直接赋值会写不进去 —— 见 useEditorSession 头注的不变式）
  * @param {import('vue').Ref<string>} deps.renderedHtml 渲染好的 HTML（导出用；
  *                   与预览同一渲染器但不改写图片 src，见 useEditorSession）
  * @param {import('vue').Ref<string>} deps.theme     当前已解析主题（theme.js 真源）
@@ -57,7 +60,7 @@ function errText(err) {
  * @param {Function} deps.onDocReplaced (content) => void 整份替换文档后的外部状态同步
  *                   （replaceDocument 走 setState，不触发 updateListener）
  */
-export function useDocumentState({ getEditor, filePath, title, renderedHtml, theme, notify, onDocReplaced }) {
+export function useDocumentState({ getEditor, filePath, title, setActivePath, renderedHtml, theme, notify, onDocReplaced }) {
   // 状态机：unsaved（有改动未落盘）→ saving（写入中）→ saved；写入失败 → error。
   // 四态在状态栏用「图标形状 + 文案 + 颜色」三重表达（AC-20）。
   const saveState = ref('unsaved')
@@ -210,7 +213,7 @@ export function useDocumentState({ getEditor, filePath, title, renderedHtml, the
       // 先落盘再切路径：writeAndSettle 用 filePath 判定「是否仍是当前文档」，
       // 故切路径前必须完成写入，否则等于拿新路径当旧路径比对。
       await WriteFile(path, docText())
-      filePath.value = path
+      setActivePath(path)
       dirty.value = false
       saveState.value = 'saved'
       lastSnapshotAt = Date.now()

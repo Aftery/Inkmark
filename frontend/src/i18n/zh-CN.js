@@ -33,6 +33,8 @@ export default {
   'common.unsaved': '未保存',
   'common.saveFailed': '保存失败',
   'common.untitled': '未命名',
+  // ---- 标签栏（多标签页）----
+  'tabbar.label': '打开的文档',
 
   // ---- 文档标题栏（App.vue 顶栏）----
   'doc.title': '文档',
