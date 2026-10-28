@@ -188,9 +188,9 @@ inkmark/
     ├── src/
     │   ├── App.vue          # 装配层（≤150 行硬上限）：实例槽 + 依赖序装配 + 模板，逻辑全在 composables/
     │   ├── i18n/            # 三语字典（zh-CN / en-US / ja-JP）+ t()
-    │   ├── editor/          # CodeMirror 封装：createEditor / wysiwyg / slashCommand / outline /
-    │   │                    #   commands / anchors / imageDrop / markdownHighlight / sampleDocs /
-    │   │                    #   tableHint（表格未渲染的检测，纯函数）
+│   ├── editor/          # CodeMirror 封装：createEditor（view 侧）/ extensions（扩展清单唯一真源）
+│   │                    #   / wysiwyg / slashCommand / outline / commands / anchors / imageDrop
+│   │                    #   / markdownHighlight / sampleDocs / tableHint（表格未渲染的检测，纯函数）
     │   ├── preview/         # markdown-it 渲染配置（highlight.js 按需注册 79 种语言、GFM 任务列表）
     │   ├── markdown/        # 扩展语法**共享口径模块**（html 白名单 / footnote / math / emoji）——
     │   │                    #   渲染器与编辑器装饰两侧同源消费，避免「同一文档两副面孔」
@@ -329,7 +329,7 @@ node scripts/probe/probe-r11-fixes.mjs             # 第十一轮修复：全角
 | 13 | **零多标签页 / 多文档** | 当前一次只开一个文档。ADR-005 已预留 `dirty` 语义的升级路径，多文档需重新定义「关闭哪个文档」的判定 |
 | 14 | **无拼写检查（刻意不做）** | CodeMirror 的 lint 对 CJK 基本无效，中文写作场景是**伪需求**，故不引入。英文拼写需自行接第三方 lint 扩展 |
 | 15 | **导出模板文案未国际化** | `export/exporters.js` 的 HTML 模板未接 `t()`（Spec 明确留待后续） |
-| 16 | **`App.vue` 行数余量极小** | 装配层硬上限 **总行数** 150 行、当前 150 行（契约 5 实测）。新增行为一律先下沉到 composables/，门禁口径是**总行数**（含注释与空行，比有效行更严） |
+| 16 | **`App.vue` 行数余量极小** | 装配层硬上限 **总行数** 150 行、当前 144 行（契约 5 实测；2026-10-28 P0 地基阶段腾出 6 行余量，多标签页装配要用）。新增行为一律先下沉到 composables/，门禁口径是**总行数**（含注释与空行，比有效行更严） |
 | 17 | **Go 侧错误串仍是中文（已裁决的残余）** | 2026-10 复查：原生**对话框**文案已全部本地化（`dialogs.go`，按前端传入的 locale 取表；`OnBeforeClose` 读 `SetLocale` 镜像）。但各方法的**错误信息**（如「同名文件已存在: x」）仍是中文，经 IPC 回到前端后被嵌进本地化模板显示为「保存失败：<中文原因>」。裁决见 `dialogs.go` 文件头：模态对话框必须本地化，错误细节保留技术原文；彻底解决的正确方向是 Go 返回**错误码**由前端查表，属独立协议改造 |
 | 18 | **Windows 路径处理未真机验证** | 2026-10 复查修掉了三处只认 `/` 的路径切分（标题栏文件名、侧栏文件夹名、字数统计无关），改为同时认 `\`；逻辑已由 `frontend/src` 内的实现覆盖，但 Windows 真机路径仍未跑过（与 #1 同源） |
 

@@ -40,16 +40,12 @@ const prefs = usePrefs(() => editorRef.value)
 const { toast, showToast } = useToast()
 const workspace = useWorkspace({ getEditor, notify: showToast })
 const outline = ref([])
-const outlineSync = useOutline({
-  getEditor, sidebarOpen: workspace.sidebarOpen, outline,
-})
+const outlineSync = useOutline({ getEditor, sidebarOpen: workspace.sidebarOpen, outline })
 // 【顶层解包】Vue 只解包顶层 ref；composables 实例是普通对象，字段读 .value 无响应性
 const { outlineActive } = outlineSync, { zoom } = prefs
 const session = useEditorSession({
   editorRef, onDocChange, onOutlineRefresh: refreshOutline,
-  // 惰性：粘贴 / 拖拽真实发生在 mount 之后，届时 assets 已初始化
   onImageFile: (file) => assets.saveImageFile(file),
-  // 通道③：WKWebView 不暴露剪贴板图片，只能问系统剪贴板（见 imageDrop.js）
   onClipboardImage: () => assets.saveImageFromClipboard(),
   typewriterOn: workspace.typewriterOn, onEditorReady: () => prefs.syncZoomToEditor(),
 })
@@ -63,9 +59,7 @@ const docState = useDocumentState({
 const { saveState, dirty, showHistory, snapshots, historyLoading } = docState
 const { dialog, askInput, closeDialog } = useDialog()
 const fileOps = useFileOps({
-  getEditor, replaceDocument, syncAfterDocReplace: session.syncAfterDocReplace,
-  filePath, folderPath, title, sidebarOpen, sidebarTab, docState, showToast,
-  askInput, ReadFile, OpenFileDialog, OpenDirectoryDialog,
+  getEditor, replaceDocument, syncAfterDocReplace: session.syncAfterDocReplace, filePath, folderPath, title, sidebarOpen, sidebarTab, docState, showToast, askInput, ReadFile, OpenFileDialog, OpenDirectoryDialog,
 })
 const { openFile, openFolder, openTreeFile, treeSignal } = fileOps
 if (import.meta.env.DEV) {
