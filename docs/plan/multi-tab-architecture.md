@@ -336,8 +336,8 @@ export function createEditorState({ doc, extensions, selection }) {
 `createEditor` 改为接受外部传入的 extensions：
 
 ```js
-export function createEditor(parent, { doc = '', extensions, onDocChange, onUpdate, onScroll, onImageFile, onClipboardImage, slashHost }) {
-  // …updateListener / selectionListener 原样不动…
+export function createEditor(parent, { doc = '', extensions, onScroll }) {
+  // 两个 updateListener **不在这里**（见下方「2026-10-28 更正」）
   const state = EditorState.create({ doc, extensions })
   const view = new EditorView({ state, parent })
   // …scroll 监听原样…
@@ -345,7 +345,23 @@ export function createEditor(parent, { doc = '', extensions, onDocChange, onUpda
 }
 ```
 
-**注意**：`updateListener` 与 `selectionListener`（`createEditor.js:232-241`）**留在 view 侧**（不进 `buildExtensions`），因为它们要回调「当前激活标签」——由 `useEditorSession` 用 `getActiveSession()` 闭包动态解析。
+**2026-10-28 更正：本节原写的「`updateListener` / `selectionListener` 留在 view 侧（不进 `buildExtensions`）」是错的，实装时已推翻。**
+
+| 项 | 原（错误）判断 | 实际 |
+|---|---|---|
+| 两个监听器放哪 | 留在 `createEditor` 里，只装在 view 的**初始** state 上 | **必须进 `buildExtensions` 的扩展数组**，由每一份 state 自带 |
+| 原判断的理由 | 「它们要回调**当前激活标签**，留在 view 侧更省」 | 该目标靠 `getActiveSession()` **闭包**达成，与「放不放进扩展数组」无关 —— 理由本身不成立 |
+
+**为什么原写法是静默故障**：`activateSession` 用的是 `view.setState(target.state)`，而 `setState` **整体替换 state**，**扩展是 state 的一部分**（CM6 没有「view 级扩展」这层机制）。只装在初始 state 上的监听器，会在**第一次切标签后永久消失**：
+
+- 切过去之后打字 → `onDocChange` 不再触发 → **不标脏、预览不更新、自动保存不启动**；
+- **全程不报错**，测试若无专门判据也全绿。
+
+**现在的形态**（`extensions.js:220-228` 创建、`:362` 进数组、`createEditor.js:86` 有注记）：`buildExtensions({ …, onDocChange, onUpdate })` 接这两个回调并建监听器放进数组，位置与搬家前的相对顺序一致（theme 之后、`focusField` 之前）。它们仍只回调「当前激活会话」（闭包 `getActiveSession()`），**不持有任何标签专属状态** —— 所以放进共享清单不会串档。
+
+**守着它的判据**：`tab-activate.test.mjs` 的 `切标签 · 监听器必须活在每一份 state 里`。元测试已实做：把 `updateListener,` 从扩展数组移除（即模拟回退到旧写法）⇒ `not ok 2` 报红，sha256 还原一致。
+
+> **这条更正的教训值得单独记**：**「扩展是不是 state 的一部分」这个事实决定了「监听器能不能只装在 view 上」。** 本仓此前所有换文档路径都是 `view.setState`（`replaceDocument`），也就是说 **P0 之后、P1 之前，单文档形态下这套「留在 view 侧」的写法是成立的**（没有第二次 `setState`）；一旦引入多标签，它立刻变成静默丢功能。**「当前成立」不等于「架构上成立」—— 一个只在单实例下成立的假设，会在第一个实例化的地方崩。**
 
 **行数账**：`createEditor.js` 有效行从 257 降到约 105（157 行的 extensions 数组搬走），**豁免阈值 260 可以顺势下调**（棘轮只许降不许升，`contracts.test.mjs:903-918` 会守）。建议登记新阈值 **120**，并把 `extensions.js` 纳入常规 300 行门禁。
 
