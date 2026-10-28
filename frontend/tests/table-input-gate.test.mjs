@@ -71,7 +71,9 @@ function gateHandlerOf(state) {
 
 describe('tableInputGate · 拦截 CM 对单元格内容的默认读回', () => {
   test('接线契约：inputHandler 必须注册进 createEditor（防拆文件后忘接线）', () => {
-    assert.match(src(join('editor', 'createEditor.js')), /tableInputGate,/)
+    // 【锚点随实现搬迁 · 2026-10-28】扩展清单整体搬到 editor/extensions.js
+    // （多标签页要造 N 份 EditorState，不能内联在 createEditor 的函数体里）。
+    assert.match(src(join('editor', 'extensions.js')), /tableInputGate,/)
   })
 
   test('读回事务落在表格 range 内（打字/删除的两种坐标来源）⇒ 吞掉', () => {

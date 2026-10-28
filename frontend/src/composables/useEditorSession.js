@@ -16,9 +16,18 @@
 // setup 期就拿到「取实例的方式」。故约定：调用方声明 shallowRef 槽位并传进来，
 // 本模块在 onMounted 填入；装配层与各模块之间只通过 getEditor 闭包互传。
 // 这样也顺带保住了「第三类 TDZ」的守卫样本：槽位声明必须早于任何 composable 调用。
+//
+// 【图片两条通道的注记（2026-10-28 从 App.vue 搬来）】装配层腾行数（≤150 硬上限）
+// 时把下面两条注记从调用点移到了本模块头注 —— 它们解释的是**本模块的参数**，
+// 挂在装配层只会让那两行越看越像「这里有玄机」：
+//   - onImageFile 是**惰性**的：粘贴 / 拖拽真实发生在 mount 之后，届时 assets
+//     已初始化；
+//   - onClipboardImage 是通道③：WKWebView 不暴露剪贴板图片，只能问系统剪贴板
+//     （见 imageDrop.js）。
 
 import { ref, computed, watch, nextTick, onMounted, onBeforeUnmount } from 'vue'
 import { createEditor, centerCursor } from '../editor/createEditor'
+import { buildExtensions } from '../editor/extensions'
 import { createRenderer, render } from '../preview/markdown'
 import { DEFAULT_DOC } from '../editor/sampleDocs'
 import { t } from '../i18n/index.js'
@@ -73,6 +82,14 @@ export function useEditorSession({
 }) {
   const editorEl = ref(null)   // 模板 ref：CM 挂载点
   const slashRef = ref(null)   // 斜杠命令面板（CM 扩展经 host 协议回调它）
+  // 扩展清单**只构建一次**：多标签页要造 N 份 EditorState，它们共用这一份实例
+  // （撤销栈 / 装饰字段按 state 隔离，见 editor/extensions.js 头注的「不变式」段）。
+  // 绝不能每个标签各建一份 —— 那正是本文件被抽出来的原因。
+  const extensions = buildExtensions({
+    slashHost: () => slashRef.value,
+    onImageFile,
+    onClipboardImage,
+  })
   const markdown = ref('')
   const filePath = ref('')
   const folderPath = ref('')
@@ -195,12 +212,11 @@ export function useEditorSession({
   onMounted(() => {
     const view = createEditor(editorEl.value, {
       doc: DEFAULT_DOC,
+      // 共享的那一份扩展清单（见上方 extensions 的构建点）
+      extensions,
       // 文档变更的两条分支：预览防抖在本模块内，标脏 / 快照交调用方（onDocChange）
       onDocChange: (doc) => { queuePreview(doc); onDocChange?.() },
       onUpdate: onEditorUpdate,
-      onImageFile,
-      onClipboardImage,
-      slashHost: () => slashRef.value,
     })
     editorRef.value = view
     // 应用级拖拽兜底：文件落在编辑器外时不让 webview 导航到 file://（见 imageDrop.js）

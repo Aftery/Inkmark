@@ -197,7 +197,9 @@ describe('语言映射 · 编辑器侧高亮', () => {
 // ---------------------------------------------------------------------------
 describe('代码块 · 接线契约', () => {
   test('createEditor 注册了行号插件与复制按钮装饰', () => {
-    const src = read(join('editor', 'createEditor.js'))
+    // 【锚点随实现搬迁 · 2026-10-28】扩展清单整体搬到 editor/extensions.js
+    // （多标签页要造 N 份 EditorState，不能内联在 createEditor 的函数体里）。
+    const src = read(join('editor', 'extensions.js'))
     assert.match(src, /codeLinePlugin/, '必须注册行号插件')
     assert.match(src, /codeCopyPlugin/, '必须注册复制按钮装饰')
   })

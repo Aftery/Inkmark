@@ -38,7 +38,10 @@ const imageWidget = read('editor', 'imageWidget.js')
 const slashExt = read('editor', 'slashCommand.js')
 const slashComp = read('components', 'SlashCommand.vue')
 const appVue = read('App.vue')
-const createEditor = read('editor', 'createEditor.js')
+// 【锚点随实现搬迁 · 2026-10-28】扩展清单（含 EditorView 排版 theme）整体搬到
+// editor/extensions.js —— 多标签页要造 N 份 EditorState，扩展数组不能内联在
+// createEditor 的函数体里。故下面针对 theme 的断言改读新文件。断言强度未变。
+const extensions = read('editor', 'extensions.js')
 const wysiwygCss = read('themes', 'editor-wysiwyg.css')
 
 /**
@@ -61,7 +64,7 @@ const wysiwygCode = stripComments(wysiwyg)
 const imageWidgetCode = stripComments(imageWidget)
 const slashCompCode = stripComments(slashComp)
 const appVueCode = stripComments(appVue)
-const createEditorCode = stripComments(createEditor)
+const extensionsCode = stripComments(extensions)
 
 // ===========================================================================
 // 1) 斜杠面板：confirm 的取上下文顺序
@@ -168,16 +171,26 @@ describe('wysiwyg 装饰 · 表格 / 分割线 / 图片', () => {
   })
 
   test('.cm-md-* 的视觉定义只允许出现在 editor-wysiwyg.css（不得与 theme 重复）', () => {
-    // 迁移原因见该文件头注：写进 createEditor.js 的 theme 会顶破行数棘轮。
+    // 迁移原因见该文件头注：写进编辑器 theme 的 .cm-md-* 会顶破行数棘轮。
     // 风险从「同键覆盖」转移到「两处并存」，故用断言守住唯一定义处。
-    const themeBody = createEditorCode.slice(
-      createEditorCode.indexOf('EditorView.theme({'),
-      createEditorCode.indexOf('updateListener,'),
-    )
+    // 【尾锚点随搬迁调整】theme 现在住在 editor/extensions.js，紧跟其后的是
+    // focusField（两个 updateListener 留在 createEditor.js 的 view 侧，不进清单）。
+    const themeStart = extensionsCode.indexOf('EditorView.theme({')
+    const themeEnd = extensionsCode.indexOf('focusField,')
+    // 锚点守卫：切片若为空（尾锚点跑到起点之前），下面四条 !includes 会在**空串**上
+    // 恒真 —— 判据失效却全绿，正是本仓反复记在案的假绿灯形态。
+    // 故先钉死「两个锚点都在、且顺序正确、且区间不短于 1KB」。
+    assert.ok(themeStart > 0, `找不到 theme 起点锚点（EditorView.theme({），判据失效不得假绿`)
+    assert.ok(themeEnd > themeStart,
+      `尾锚点（focusField,）必须在 theme 起点之后：${themeEnd} 应 > ${themeStart}；` +
+      '若主题被移动，本条判据的切片区间会失效，必须同步调整锚点')
+    assert.ok(themeEnd - themeStart > 1024,
+      `theme 体只有 ${themeEnd - themeStart} 字符，可疑（预期 1KB 以上）—— 判据可能打在空区间上`)
+    const themeBody = extensionsCode.slice(themeStart, themeEnd)
     for (const cls of ['cm-md-bullet', 'cm-md-task-box', 'cm-md-hr', 'cm-md-img']) {
       assert.ok(
         !themeBody.includes(cls),
-        `${cls} 的样式不应再出现在 createEditor.js 的 theme 里（已迁至 themes/editor-wysiwyg.css）`,
+        `${cls} 的样式不应再出现在编辑器的 theme 里（已迁至 themes/editor-wysiwyg.css）`,
       )
     }
   })

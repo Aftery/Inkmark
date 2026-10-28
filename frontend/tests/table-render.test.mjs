@@ -209,8 +209,10 @@ test('StateField：引用块内的表格不渲染（行首有前缀，block 替�
 })
 
 test('接线契约：createEditor 注册 tableRenderField，wysiwyg 退位', () => {
+  // 【锚点随实现搬迁 · 2026-10-28】扩展清单整体搬到 editor/extensions.js
+  // （多标签页要造 N 份 EditorState，不能内联在 createEditor 的函数体里）。
   assert.match(
-    src(join('editor', 'createEditor.js')),
+    src(join('editor', 'extensions.js')),
     /tableRenderField/,
     'createEditor 必须注册 tableRenderField',
   )

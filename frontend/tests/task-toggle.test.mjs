@@ -54,8 +54,9 @@ describe('toggledMarker · 标记翻转语义', () => {
 // 2. 接线契约：交互必须挂在编辑器上，且**必须改文档**
 // ---------------------------------------------------------------------------
 describe('任务勾选 · 接线契约', () => {
-  test('createEditor 注册了 taskToggleHandlers', () => {
-    assert.match(read(join('editor', 'createEditor.js')), /taskToggleHandlers\(\)/)
+  test('编辑器注册了 taskToggleHandlers', () => {
+    // 【锚点随实现搬迁 · 2026-10-28】扩展清单整体搬到 editor/extensions.js。
+    assert.match(read(join('editor', 'extensions.js')), /taskToggleHandlers\(\)/)
   })
 
   test('交互层必须 dispatch 文档变更（只改 DOM 会在装饰重算时弹回原状）', () => {

@@ -803,13 +803,15 @@ const LINE_LIMIT = 300
  */
 const LINE_EXEMPTIONS = {
   'frontend/src/editor/createEditor.js': {
-    limit: 260,
-    totalAtRegistration: 350,
+    limit: 120,
+    totalAtRegistration: 124,
     reason:
-      '有效代码行 260 / 总行数 350（2026-10-06 单栏重构时重新登记：新增 Slash 面板扩展接入，' +
-      '同时把「图片粘贴 / 拖拽」整块抽到 editor/imageDrop.js —— 该职责与编辑器语法高亮 / ' +
-      '键位无关，却长期占着本文件预算）。已低于 300 红线，**下一轮整理白名单时应摘除**；' +
-      '暂留作棘轮基线。',
+      '有效代码行 47 / 总行数 124（2026-10-28 多标签页 P0 地基阶段重新登记：把 157 行的 ' +
+      'extensions 数组**整体抽到 editor/extensions.js** —— 多标签页要造 N 份 EditorState，' +
+      '扩展数组不能内联在 createEditor 的函数体里，且 N 份 state 必须**共用同一份扩展实例**' +
+      '（history / wysiwygField / tableRenderField / blockRangesField 都是模块级 StateField，' +
+      '值随 state 走）。本次是纯搬迁，零行为变化）。有效行已远低于 300 红线，' +
+      '**下一轮整理白名单时应整条摘除**；暂留作棘轮基线。',
   },
   'frontend/src/editor/commands.js': {
     limit: 264,

@@ -1,7 +1,7 @@
 /**
  * writing-surface.test.mjs — 正文写作面排版一体化（Typora 化 A）的静态契约
  * ---------------------------------------------------------------------------
- * 被测对象：createEditor.js 的 EditorView 排版段、tokens/design-tokens.css、
+ * 被测对象：editor/extensions.js 的 EditorView 排版段、tokens/design-tokens.css、
  *           themes/preview.css
  *
  * 【为什么这组必须是机检 —— 全部是「静默失败」型】
@@ -36,14 +36,14 @@ import { dirname, join } from 'node:path'
 const SRC = join(dirname(fileURLToPath(import.meta.url)), '..', 'src')
 const read = (...p) => readFileSync(join(SRC, ...p), 'utf8')
 
-const createEditor = read('editor', 'createEditor.js')
+const extensions = read('editor', 'extensions.js')
 const tokens = read('themes', 'tokens', 'design-tokens.css')
 const previewCss = read('themes', 'preview.css')
 const appShellCss = read('themes', 'app-shell.css')
 
 /**
  * 剥注释。本仓已因「匹配到注释里的代码」栽过 8 次（见 wysiwyg-decor.test.mjs
- * 的 stripComments 头注）—— 尤其本轮我在 createEditor.js 的注释里**大段引用了**
+ * 的 stripComments 头注）—— 尤其本轮我在 extensions.js 的注释里**大段引用了**
  * `white-space:pre` / `maxWidth` 这些词，不剥注释的话下面每条断言都会被自己的
  * 说明文字误命中，得到「代码没改也全绿」的假绿灯。
  */
@@ -55,14 +55,22 @@ function stripComments(src) {
     .replace(/\/\*[\s\S]*?\*\//g, '')
 }
 
-const createEditorCode = stripComments(createEditor)
+const extensionsCode = stripComments(extensions)
 
-/** 取 createEditor.js 里 EditorView.theme({...}) 的对象体（到 updateListener 为止） */
+/**
+ * 取 extensions.js 里 EditorView.theme({...}) 的对象体（到 focusField 为止）。
+ *
+ * 【锚点随实现搬迁 · 2026-10-28】扩展清单整体搬到 editor/extensions.js 后，
+ * 排版 theme 也在那里；原来「到 updateListener 为止」这个尾锚点随两个监听器
+ * 一起留在了 createEditor.js（它们是 view 侧的，不进共享扩展清单），
+ * 故尾锚点改为 extensions.js 里紧跟 theme 之后的 focusField。
+ * 断言强度未变（取的仍是同一个 theme 对象体）。
+ */
 function themeBlock() {
-  const start = createEditorCode.indexOf('EditorView.theme({')
-  const end = createEditorCode.indexOf('updateListener,')
+  const start = extensionsCode.indexOf('EditorView.theme({')
+  const end = extensionsCode.indexOf('focusField,')
   assert.ok(start >= 0 && end > start, `定位 EditorView.theme 失败（${start}/${end}）—— 判据锚点消失，结论不可采信`)
-  return createEditorCode.slice(start, end)
+  return extensionsCode.slice(start, end)
 }
 
 /**
@@ -90,7 +98,7 @@ function rootBlockDefining(token) {
 describe('编辑区 · 软换行', () => {
   test('必须安装 EditorView.lineWrapping（否则 max-width 会把长段落变成横向滚动）', () => {
     assert.match(
-      createEditorCode,
+      extensionsCode,
       /EditorView\.lineWrapping\b/,
       '缺少 EditorView.lineWrapping：.cm-content 的 white-space 仍是 pre，' +
         '长段落不换行而是横向溢出，窄栏下表现为「文字被截断 + 底部横向滚动条」',

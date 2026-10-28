@@ -64,11 +64,13 @@ describe('接线 · 列表缩进 keymap', () => {
 
   test('该扩展必须先于 indentWithTab 声明（顺序错了 Tab 会被通用缩进抢走）', async () => {
     const src = await import('node:fs').then((fs) =>
-      fs.readFileSync(new URL('../src/editor/createEditor.js', import.meta.url), 'utf8'),
+      fs.readFileSync(new URL('../src/editor/extensions.js', import.meta.url), 'utf8'),
     )
-    // 只在 extensions 数组体内找锚点：注释里也出现过这两个词，全文 indexOf 会
+    // 只在扩展清单体内找锚点：注释里也出现过这两个词，全文 indexOf 会
     // 匹到注释（本仓「注释抢先命中」已经坑过一次门禁自证）。
-    const body = src.slice(src.indexOf('extensions: ['))
+    // 【锚点随实现搬迁 · 2026-10-28】扩展清单整体搬到 editor/extensions.js
+    // （多标签页要造 N 份 EditorState，不能内联在 createEditor 的函数体里）。
+    const body = src.slice(src.indexOf('export function buildExtensions('))
     const expand = body.indexOf('listIndentExtension()')
     const tab = body.indexOf('indentWithTab,')
     assert.ok(expand > 0 && tab > 0, `两处锚点都必须存在（否则判据失效，不得假绿）：${expand}/${tab}`)
