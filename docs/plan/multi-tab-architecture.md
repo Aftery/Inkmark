@@ -413,10 +413,10 @@ export function useEditorSession({
 **派生状态全部改为「由激活会话算出」**：
 
 ```js
-  // 路径：激活会话的路径；**空状态**（无激活会话）时为 ''
+  // 路径：激活会话的路径
   const filePath = computed(() => activeSession.value?.path ?? '')
   const title = computed(() => filePath.value ? baseName(filePath.value) : t('common.untitled'))
-  // 正文：激活会话的防抖预览源；空状态时为 ''
+  // 正文：激活会话的防抖预览源
   const markdown = computed(() => activeSession.value?.markdown ?? '')
   const previewHtml = computed(() => render(renderer, markdown.value, { resolveAssets: true }))
   const exportHtml = computed(() => render(renderer, markdown.value, { mathOutput: 'mathml' }))
@@ -430,28 +430,18 @@ export function useEditorSession({
 - 切 tab / 关 tab **不直接写 `filePath`** —— 它们改 `activeId`，`filePath` 作为 computed 自动跟随（§5.2 步骤 6 的连锁）。
 - 收敛后 `filePath` 只有一个**派生**来源（`activeSession.path`）与一个**写入**入口（`setActivePath`），不可能出现「两个写入者跳变」（同 `--zoom-scale` 的纪律，MEMORY 样式偏好第 6 条）。
 
-**空状态（零标签）的处理**：PM 缺口 3 的裁决（§5.3）要求关掉最后一个标签后应用保持运行并显示空状态。实现口径：
+**「关掉最后一个标签」的处理（MD-08）**：**保留一个空文档**，不进入「零标签」态。
 
-```js
-  /**
-   * 进入空状态：会话表清空，view 换上一份空 EditorState。
-   * 【为什么 view 永远有 state】CM6 的 view 持有 state；若把 state 抽走，
-   * 编辑器会进入「无文档」态，CM 需要空 doc、title 要退化、
-   * 「文档路径变化」这条唯一同步点的输入要新增分支 —— 净增复杂度。
-   * 故：注册表可以为空，**view 始终持有一份 state**（空态时是 doc:'' 的那份）。
-   */
-  async function enterEmptyState() {
-    sessions.value = []
-    activeId.value = null
-    view.setState(createEditorState({ doc: '', extensions }))   // 空 state
-    // 派生状态随之归位：filePath '' / title 未命名 / markdown '' / caret 1:1 / outline [] / tableHint null
+- 因此 **`activeSession` 永不为 `null`**（注册表恒有 ≥1 条），上文所有 `?? ''` / `?? 0` 兜底**只是防御**，不是主路径 —— 这比「零标签 + 空状态组件」少一整条分支（无 `EmptyState.vue`、无 `enterEmptyState`、无「无激活会话」的派生状态表）。
+- 关掉最后一个标签时，`closeTab` 把它替换成一个**未落盘、空内容**的 session（`path: ''`、`doc: ''`、`dirty: false` —— 与 MD-03 的口径一致），编辑器因此落到现状的空文档态。
+- **代价（如实登记）**：用户看到的是「一个空白编辑器」，而不是带「新建 / 打开」两个按钮的引导页（PM 缺口 3 原本想要的形态，MD-08 裁掉了专用组件以保 App.vue 行数预算）。若将来要补这两个入口，作为独立小特性复用现状的 `file.new` / `file.open` 命令即可，**不得**为此挤占 App.vue 的行数预算（§4.11）。
     clearTableHint()
     onOutlineRefresh?.()
   }
 ```
 
-- 空状态时 `activeSession` 为 `null` → 所有派生 computed 必须能处理 `null`（上面的 `?? ''` / `?? 0` 写法）。
-- **空状态不是「一个空文档会话」**：它不进 `sessions`（否则关掉最后一个标签后会凭空多出一个标签）。
+- 兜底写法 `?? ''` / `?? 0` 保留（防御性，MD-08 下 `activeSession` 恒非空，但 `getActiveSession()` 在 `onMounted` 之前确实可能返回 `null` —— 见下）。
+- **空文档态就是一个普通的未落盘 session**（`path: ''`、`doc: ''`），走完全相同的代码路径，不需要特殊分支。
 
 **事务回写（不可省）**：扩展列表里的 `updateListener` 已经在每次 `docChanged` 时回调（`createEditor.js:232-234`），但 `selectionSet` 不触发它。多标签下**光标移动也必须回写 state**（否则切走再切回，光标回到旧位置）。因此在 `onEditorUpdate`（`useEditorSession.js:151-164`）里补一行：
 
@@ -606,24 +596,33 @@ export function useTabLifecycle({ session, docState, confirmDiscard, notify }) {
 }
 ```
 
-**落点策略（`activate_on_close = history`）**：
+**落点策略（`activate_on_close = history`，MD-09）**：
 
 ```js
   /**
-   * 关闭后激活谁 —— Zed 的 activate_on_close = history：
+   * 关闭后激活谁 —— Zed 的 activate_on_close = history（MD-09）：
    * 回到「上一个访问过的标签」，而不是「左边那个」。
    * 实现：维护一条 MRU（最近访问顺序）栈，关闭时取栈里第一个「仍在注册表内且不是被关的那个」。
+   *
+   * 【MD-14 的回退规则】history 无候选时（只剩一个标签、或 MRU 里没有别的了）
+   * → 回退到「显示序里的第一个剩余标签」。
+   * 三档策略（history / neighbour / left_neighbour）**统一回退到 history** ——
+   * 拒绝 neighbour 的两级回退（有右邻取右邻、否则取左邻）：它创造了一个
+   * **等价变异** —— history 与 neighbour 在「切走顺序 == 排列顺序」时行为完全相同，
+   * 落点判据会假绿（两种实现都过，测不出真实差异）。
    */
   function pickLandingSession(closedId) {
     for (const id of session.mru.value) {
       if (id === closedId) continue
-      if (session.sessions.value.some(s => s.id === id)) return session.sessions.value.find(s => s.id === id)
+      const s = session.sessions.value.find(x => x.id === id)
+      if (s) return s
     }
-    return null
+    // MD-14 回退：history 无候选 → 显示序里的第一个剩余标签
+    return session.sessions.value.find(s => s.id !== closedId) || null
   }
 ```
 
-**MRU（最近访问顺序）**：`useEditorSession` 维护 `mru = ref([])`（标签 id 数组，最近在前）。每次激活把目标移到头部。`Tab Switcher` 浮层直接按这个顺序渲染。
+**MRU（最近访问顺序）**：`useEditorSession` 维护 `mru = ref([])`（标签 id 数组，最近在前）。每次激活把目标移到头部。`Tab Switcher` 浮层按这个顺序渲染，但**「按住循环」走的是按下瞬间的快照**（§4.10，MD-10）—— 两者不可混。
 
 ### 4.6 `frontend/src/composables/useFileOps.js`（改）
 
@@ -720,22 +719,28 @@ const props = defineProps({
 const emit = defineEmits(['select', 'close', 'reorder', 'context'])
 ```
 
-**每个标签的视觉标记（严格按 team-lead 裁决：区分 dirty 与 error，只用既有 token）**：
+**每个标签的视觉标记（MD-04 的裁决：两个维度 + 单一优先级，互斥、同一时刻只显示一个）**：
 
-| 状态 | 判据 | 形态 | 用的 token | 非颜色信号 |
+| 维度 | 取值 | 判据 | 形态 | 用的 token |
 |---|---|---|---|---|
-| 干净 | `!dirty && saveState !== 'error' && path !== ''` | 无标记 | — | `data-state="clean"` |
-| **dirty**（内存 ≠ 磁盘，将被自动保存） | `dirty && saveState !== 'error'` | 5px 实心圆点，**低调、不抢焦点** | `background: var(--meta)` | `data-state="dirty"` + `aria-label` |
-| **未落盘**（无处可写，需用户处理） | `path === ''` | `AppIcon name="circle-dot"` | `color: var(--warn)` | `data-state="unsaved"` + `aria-label` |
-| **error**（自动保存失败 / 只读目录） | `saveState === 'error'` | `AppIcon name="circle-dot"` | `color: var(--danger)` | `data-state="error"` + `aria-label` |
+| 落盘状态 | **未落盘** | `path === ''` | `AppIcon name="circle-dot"` | `color: var(--warn)` |
+| 保存健康度 | **error** | `saveState === 'error'` | `AppIcon name="circle-dot"` | `color: var(--danger)` |
+| 保存健康度 | **dirty** | `dirty && saveState !== 'error'` | 5px 实心圆点，**低调、不抢焦点** | `background: var(--meta)` |
+| — | 干净 | 以上都不满足 | 无标记 | — |
+
+**优先级（MD-04）**：**error > 未落盘 > dirty**，**互斥 —— 同一时刻只显示一个**。
+
+- 也就是说：一个**未落盘且保存失败**的标签只显示 `--danger`（error 优先），不再叠加 `--warn` 的图标。
+- 每个标签根元素带 `data-state="clean|dirty|unsaved|error"`（**非颜色信道**，WCAG 1.4.1），标记元素带 `aria-label`（走 i18n）。**颜色不得是唯一信道**。
 
 - `circle-dot` 是**既有图标**（`frontend/src/components/icons/paths.js`，白名单内，Lucide 几何），不是新图标、不是字符符号、不是 emoji（满足 P0-1 与 ADR-001）。
 - **dirty 用 CSS 圆点而非图标**，是为了与 `StatusBar.vue` 的保存态三态（图标形状 + 文案 + 颜色，`StatusBar.vue:42-47`）区分开：标签栏只给「形状 + 颜色」两重表达，文案走 `title` / `aria-label`。
 - **必须同时有非颜色信号**（WCAG 1.4.1「不能只靠颜色传达信息」）：每个标签根元素带 `data-state="clean|dirty|unsaved|error"`，标记元素带 `aria-label`（走 i18n）。理由：`--meta` 与 `--danger` 的**对比度倍数只有 1.6~1.8 倍**（QA 文档 §3.13 实算：浅色 3.11:1 vs 5.55:1、深色 3.66:1 vs 6.06:1）—— **「对比度差 N 倍」不能当判据**，故 AC-72 强制要求语义信号。
-- **为什么 dirty 用 `--meta` 而不是 `--muted`**（QA 的分派建议，我核对后采纳）：`design-tokens.css` 里 `--meta` 是「元数据 / 三级前景」（最弱的一档，`design-tokens.css:48` 注释自记 3.31:1），而 `--muted` 是「弱化文字」（`:38`）—— 后者要承载 12px 菜单文字，对比度要求更高。**关键点：这两个 token 在明暗两套主题里的明暗关系是反的**（浅色主题 `--muted` 比 `--meta` 深，深色主题 `--muted` 比 `--meta` 浅）—— 只有 `--meta` 在**两个主题下都是最弱的一档**，用它做「低调小圆点」在明暗两种主题下都成立。零新增色值。
+- **为什么 dirty 用 `--meta` 而不是 `--muted`**（MD-04 的裁决，实测依据见 MD 文件 §2）：`--muted` 是「弱化文字」token，要承载 12px 菜单文字；`--meta` 是「元数据 / 三级前景」。**实测对比度（各自对 `--surface`）**：`--meta` 三主题为 3.11:1 / 3.66:1 / 3.07:1，`--muted` 三主题为 4.78:1 / 5.70:1 / 4.83:1 —— **`--muted` 三主题均比 `--meta` 更强**，即「降级用 `--muted`」**不构成降级**（`--muted` ÷ `--danger` = 0.86~0.94×，几乎一样强）。`--meta` ÷ `--danger` = 0.55~0.60×，才是真正的「明显更弱」。零新增色值。
+- **教训（写进本文以免复发）**：涉及视觉「强弱」的裁决，**先查 token 的实际对比度，不要凭 token 名字的字面意思**。本次裁决正是「降级反被降级」的形态 —— 由 PM 在一致性检查中用实算数据推翻，team-lead 复核后改判（MD 文件 §2 的留痕）。
 - 三态用**不同形态 + 不同颜色 + 不同 `data-state`** 三重区分，灰度/色盲下仍可区分。
 - `error` 与 `dirty` **不同时出现**（error 优先），避免一个标签上两个标记互相干扰。
-- **标题栏现有的红点**（`TitleBar.vue:360-366`，`var(--danger)`）与标签栏 dirty 标记**不同档**，QA 已为此立 **AC-73**（标题栏脏点必须与标签栏 dirty 标记同档视觉，否则「同一语义两套表现」）。**建议随 D4 一并裁决为降级**（两处都用 `var(--meta)`），这样 AC-73 与 team-lead「dirty 视觉须克制」的裁决同时满足，且只改一处 CSS。
+- **标题栏现有的红点**（`TitleBar.vue:360-366`，`var(--danger)`）**须一并降为 `var(--meta)`** —— MD-04 同时约束标题栏与标签栏（两处 chrome 统一），异常态才用 `var(--danger)`。此项属**既有视觉契约变更**，须进目视验收。
 
 **打印**：标签栏是 chrome，打印时必须隐藏。App.vue 的 `@media print` 块（`App.vue:146-149`）要加 `.tab-bar`；同时建议把 `'tab-bar'` 加进契约 3 的 chrome 清单（`contracts.test.mjs:552`，现为 `['statusbar', 'history-panel']`）——**门禁加强，必须按 §9.4 做元测试**。
 
@@ -1023,7 +1028,7 @@ openPath(path)
 |---|---|---|
 | **0** | **IME 合成守卫（P0 · PM 缺口 2 的裁决）**：<br>若 `view.composing === true` → **不切换**，把切换请求挂起；等合成结束（`update.view.composing` 由 true 变 false 的那笔事务）后再执行步骤 1 | `EditorView.composing` 是公开 API（`@codemirror/view` 的 `index.d.ts:776`：`get composing(): boolean`）。合成中的预编辑文本**只存在于 DOM**，`setState` 会重建 `docView` → **未上屏的那几个字直接消失**。zh-CN / ja-JP 是本仓已发布的两个 locale，IME 是它们的主输入路径 → 这是主路径上的**数据丢失类缺陷**，不是边缘 locale 的体验问题 |
 | 1 | **守卫**：`target.id === activeId` → 直接返回 | 重复激活会白白重建整棵 docView |
-| 2 | **捕获当前标签**：<br>`cur = getActiveSession()`<br>`cur.state = view.state`（保险，事务回写之外的兜底）<br>`cur.scrollTop = view.scrollDOM.scrollTop`<br>（**若 D7 裁决为「留底」**：此处追加 `await writeSnapshot(cur, true)`） | 滚动位置不在 `EditorState` 里（view.js:8094-8124 的 `setState` 会归零），必须先存。快照留底的位置同理：必须在**内容还在内存里**时写 |
+| 2 | **捕获当前标签**：<br>`cur = getActiveSession()`<br>`cur.state = view.state`（保险，事务回写之外的兜底）<br>`cur.scrollTop = view.scrollDOM.scrollTop`<br>**若 `cur.dirty` → `await writeSnapshot(cur, true)`**（**MD-07：切走时留底**） | 滚动位置不在 `EditorState` 里（view.js:8094-8124 的 `setState` 会归零），必须先存。快照留底同理：必须在**内容还在内存里**时写；与既有 `switchFile()` 语义一致（`useDocumentState.js:175-178`），既有快照回归集可零改动复用。Go 侧按内容哈希去重，来回切同一份未改内容不会产生快照膨胀 |
 | 3 | **丢弃待渲染预览**：`cancelPendingPreview()` | 现实现 `syncAfterDocReplace` 的第一行就是它（`useEditorSession.js:174`）：旧文档的防抖预览若稍后落地，会覆盖新标签的 markdown |
 | 4 | **清表格提示**：`clearTableHint()` | `tableHint` 是模块级单例（`useTableHint.js:30`），不清会残留上一个文档的提示（`syncAfterDocReplace` 手工补算的同一原因，`useEditorSession.js:177-179`） |
 | 5 | **装入新 state**：`view.setState(target.state)` | 必须在 `activeId` 切换**之前**：`applyDocPath` 会 dispatch 一个事务，那个事务必须作用在新 state 上 |
@@ -1068,38 +1073,25 @@ closeTab(id)
   │      │                 └─ 失败 → return false（不关）
   │      └─ 'discard' → 把 { path, title, content, scrollTop, selection } 压进 closedStack（供 ⌘⇧T 恢复）
   ├─ ③ clearTimeout(s.saveTimer)
-  ├─ ④ 落点：next = pickLandingSession(id)   ← history 策略：上一个访问过的标签
+  ├─ ④ 落点：next = pickLandingSession(id)   ← history 策略（MD-09）
   │      ├─ 若当前激活的就是 s：
   │      │    ├─ 有其他标签 → await activateSession(next)
-  │      │    └─ **没有其他标签（关的是最后一个）** → 进入【空状态】（见下）
-  │      └─ 否则不动当前激活标签
+  │      │    └─ **没有其他标签（关的是最后一个）** → 落到【空文档】态（MD-08，见下）
+  │      └─ 否则**不动当前激活标签**（MD-15：关闭后台标签不应把用户从正在编辑的文档里拽走）
   ├─ ⑤ session.removeSession(id)
   └─ ⑥ Go 侧清映射条目：ForgetDoc(identity(s))
 ```
 
-**【关掉最后一个标签 → 空状态，应用保持运行】（PM 缺口 3 的裁决，2026-10-28）**
+**【关掉最后一个标签 → 空文档态，应用保持运行】（MD-08 的裁决，2026-10-28）**
 
-**产品结论**：关闭最后一个标签后，**应用窗口保持运行，显示空状态，不退出进程**。
+**裁决内容**：关闭最后一个标签后，**应用窗口保持运行**，编辑器落到**一个空文档**（沿用现状 `filePath === ''` 的空态），**不新增专用空状态组件**。
 
-- 「关掉这个文档」与「退出 Inkmark」是两件事，不该绑死 —— 这与本方案 D2 拒绝把 `⌘W` 绑成「关标签」是**同一条原则**（绑定它等于把两个动作绑成一件事）。
-- 主流一致行为：VS Code 关掉最后一个标签后窗口仍在（空编辑器）、Obsidian / MarkText 同。只有浏览器会关窗口，而浏览器本就是「多标签即窗口」的模型，Inkmark 不是。
-- **退出只由显式动作触发**：`⌘Q`、菜单「退出」、标题栏的 ×（走既有的 `CloseWindow(dirty)` + `OnBeforeClose` 守卫）。这些既有链路**不动**。
-- 反向风险（若关最后标签会退出应用）：用户想「关掉这个文档腾个空」却连带退出应用；本仓又有自动保存 + 未落盘文档 → 极易出「我只是想关个标签，应用怎么没了，我刚写的那段呢」的事故。
-
-**空状态的实现口径**：
-
-| 方面 | 口径 |
-|---|---|
-| 视图 | 编辑区保留，**持有一份空 `EditorState`**（`doc: ''`）—— view 永远有 state，不存在「无 state」的编辑器 |
-| 注册表 | `sessions` 允许为空；`activeId = null`；`activeSession = null` |
-| 派生状态 | `filePath = ''`、`title = t('common.untitled')`、`markdown = ''`、`previewHtml = render('')`、`wordCount = 0`、`caret = {1,1}`、`outline = []`、`tableHint = null`、`dirty = false`、`saveState = 'saved'` |
-| 入口 | **只有两个**：「新建文档」「打开文件」（新建 `frontend/src/components/EmptyState.vue`）。**不得**放「恢复上次打开的文档」—— 「最近打开」当前是**已下线**状态（`README.md:321`，`app.go` 无 `AddRecent` / `GetRecents`），放进去会是一个点了没反应的入口 |
-| 资源链路 | `filePath = ''` → `applyDocPath('', view)` → `hasDocDir = false` → 图片不请求 `/doc-assets/`（既有行为，`assetUrl.js:45-53`） |
-| 未落盘且有内容 | 关闭时**必须**先走未保存拦截（§5.3 步骤 ②），不得静默丢弃 |
-| 未落盘且无内容 | 直接关闭、不弹确认（与 D3 的口径一致） |
-| 不退出 | `CloseWindow` / `OnBeforeClose` 链路**完全不变**；空状态下点标题栏 × 仍走原守卫（此时无脏文档 → 直接退出） |
-
-**为什么不是「保留一个空文档」**（我原先 D8 的选项 (i)）：保留空文档实现代价低，但产品上「关掉最后一个标签」与「得到一个空白的新文档」不是同一件事 —— 用户预期是「这个文档没了，编辑器空着」，而不是「这个文档没了，但编辑器里躺着一个新文档」。空状态给出明确的「新建 / 打开」入口，比一个无来由的空白编辑器更可自解释。**代价**是派生状态链要多处理一个「无激活会话」分支（`activeSession === null`），已在本方案的 §4.3 / §7 逐处标注。
+- **产品结论一致**：退出应用是窗口行为，与标签管理不是一回事 —— PM 缺口 3 与 MD-08 在这一点上完全一致（「关掉这个文档」≠「退出 Inkmark」）。
+- **实现形态**：MD-08 明确**不新增 `EmptyState.vue`**，理由是保住 `App.vue` 的行数预算（§4.11：实测 150 / 上限 150，余量为 0）。故走「保留一个空文档」这条路：`closeTab` 关掉最后一个标签后，等价于「回到一个未落盘、空内容的文档」。
+- **与 PM 缺口 3 提法的差异（如实登记）**：PM 提的是「显示空状态 + 「新建文档」「打开文件」两个入口」的**专用组件**；MD-08 裁掉了专用组件（行数预算），改用**现状的空文档态**。**功能差异**：用户看到的是一个空白编辑器，而不是带两个按钮的引导页。**若将来要补这两个入口**，应作为独立小特性（复用现状的 `file.new` / `file.open` 命令，不新增组件），不得为此挤占 App.vue 的行数预算。
+- **退出链路不变**：`CloseWindow` / `OnBeforeClose` 完全不动；空文档态下点标题栏 × 仍走原守卫（此时无脏文档 → 直接退出）。
+- **未落盘且有内容**：关闭时**必须**先走未保存拦截（§5.3 步骤 ②），不得静默丢弃。
+- **未落盘且无内容**：直接关闭、不弹确认（与 MD-03 的口径一致）。
 
 **为什么 ① 在 ② 之前**：和现实现 `switchFile()` 同一口径（`useDocumentState.js:175-178`）：脏文档先强行写一份快照留底，旧稿此刻还在编辑器里，错过就永远写不回去了。即使用户选了「不保存」，也留一份底 —— 代价是快照目录多一份文件，收益是「关错了还能救」。
 
@@ -1122,8 +1114,9 @@ closeTab(id)
 |---|---|---|
 | 下一个标签 | `⌘⌥→` | 在 **MRU 顺序**里往后移一个并激活 |
 | 上一个标签 | `⌘⌥←` | 在 MRU 顺序里往前移一个并激活 |
-| 按住 | 同上 | `keydown` 重复触发 → 持续移动；`TabSwitcher` 浮层同步显示候选（Zed 式） |
-| 松开 | — | 停在当前候选（`keyup` 丢失也不影响结果，因为每次 `keydown` 已完成切换） |
+| 按住 | 同上 | `keydown` 重复触发 → **在「按下瞬间的 MRU 快照」内**持续遍历（§4.10，PM 缺口 1）；`TabSwitcher` 浮层同步显示候选（Zed 式） |
+| 松开 | — | 停在当前候选（`keyup` 丢失也不影响结果，因为每次 `keydown` 已经完成了切换） |
+| 下一次独立按住 | 同上 | 重新取一次 MRU 快照 → 「回到上上个文件」（正确的 MRU 语义，Sublime 同款） |
 | 精确选一个 | 鼠标点标签 | 兜底路径 |
 | 数字直跳 | **不提供** | `⌘1..⌘6` 已被标题占用（§0.4-2） |
 
@@ -1365,23 +1358,9 @@ sessions[]（注册表）
 
 **要点**：整张图只有**一个**「当前是谁」的判定点（`activeId`）。所有派生状态都从它出发 → 不存在「五处各判一次是不是激活的」这类不一致源（这正是方案 B 被否决的首要理由，§2.4）。
 
-**空状态（零标签）的派生状态**：PM 缺口 3 的裁决要求 `activeSession` 可以为 `null`。此时整条派生链落到「空值档」：
+**关于「关掉最后一个标签」（MD-08）**：**不引入「零标签」态** —— 注册表恒有 ≥1 条（最后一个标签被替换成一个未落盘、空内容的 session）。因此这张图**不需要**额外的「无激活会话」分支：所有派生量都从 `activeSession` 算出，空文档态只是一个 `path === ''` 的普通 session。
 
-| 派生量 | 空状态取值 | 谁负责 |
-|---|---|---|
-| `filePath` | `''` | computed 的 `?? ''` |
-| `title` | `t('common.untitled')` | computed 读 `filePath` |
-| `markdown` / `previewHtml` / `exportHtml` | `''` / 空渲染 | computed 的 `?? ''` |
-| `wordCount` | `0` | computed 的 `?? 0` |
-| `caret` | `{ line: 1, col: 1 }` | `enterEmptyState` 显式复位 |
-| `outline` | `[]` | `onOutlineRefresh()` 重算（空 doc → 空数组） |
-| `tableHint` | `null` | `clearTableHint()` |
-| `dirty` / `saveState` | `false` / `'saved'` | computed 的 `?? false` / `?? 'saved'` |
-| 视图 | 空 `EditorState`（`doc: ''`） | `view.setState(createEditorState({ doc: '', extensions }))` |
-| `/doc-assets/` | 不请求 | `applyDocPath('', view)` → `hasDocDir = false`（`assetUrl.js:45-53`） |
-| 界面 | `EmptyState.vue`（新建 / 打开两个入口） | App.vue 模板分支 |
-
-**这是本仓全新的形态**（此前 `filePath` 恒有值），每个读 `activeSession` 的地方都要能处理 `null` —— §4.3 已把「空状态不是『一个空文档会话』」写死（它不进 `sessions`，否则关掉最后一个标签后会凭空多出一个标签）。
+唯一需要 `null` 兜底的是 `getActiveSession()` 在 **`onMounted` 之前**返回 `null` 的那一小段窗口（编辑器尚未创建）—— 这是本仓既有的形态（`useEditorSession.js:74-83` 的 `editorEl` / `filePath` 初值），不是新增分支。
 
 ---
 
@@ -1397,7 +1376,7 @@ sessions[]（注册表）
 | `frontend/src/components/TabSwitcher.vue` | Zed 式 Tab Switcher 浮层（MRU 排序） | 约 90 |
 | `frontend/src/components/TabContextMenu.vue` | 标签右键菜单：关闭 / 关闭其他 / 关闭右侧 | 约 90 |
 | `frontend/src/components/ConfirmDialog.vue` | 关闭脏标签的三选一确认弹层 | 约 80 |
-| `frontend/src/components/EmptyState.vue` | **零标签时的空状态**（PM 缺口 3 的裁决）：「新建文档」「打开文件」两个入口；**不得**放「恢复上次打开」（该能力已下线，见 §5.3） | 约 60 |
+| ~~`frontend/src/components/EmptyState.vue`~~ | **已取消** —— MD-08 裁定「关掉最后一个标签 → 保留一个空文档」，**不新增专用空状态组件**（保住 `App.vue` 的行数预算，§4.11） | — |
 | `frontend/src/composables/devHooks.js` | （可选）把 `App.vue` 的 DEV 调试块下沉，用于腾行数 | 约 10 |
 
 ### 8.2 修改文件
@@ -1469,7 +1448,8 @@ sessions[]（注册表）
 | 自动保存 / 写盘单元同源 | 断言「**每条** `(path, content)` 记录都满足 `content === 那个 path 对应 tab 的内容`」—— **不是**「写盘次数 == 1」。这是最危险的一类错写：后台 tab 的定时器拿激活 tab 的内容写进后台 tab 的文件，**数据损坏、零报错**（QA 文档 R-1）。另断言「写盘期间在别处编辑不得误判脏」 |
 | 关闭标签 | 断言「用户选取消后 `sessions.length` 不变且该 session 的 `dirty` 仍为 true」；断言落点是 **MRU 里上一个访问过的**标签（不是左边那个）；**注意 history 与 left_neighbour 在某些场景结果相同，判据必须取能区分二者的场景**（否则等价变异，HANDOFF §4 ㉒） |
 | 身份与映射键 | 前端侧断言**身份串形状**（`untitled:<id>`）；Go 侧断言 `dirtyKeyOf("untitled:t1")` 与 `dirtyKeyOf("/a/b.md")` **不相等**且前者以 `u:` 开头；断言前端**没有**自行实现 sha1 派生 |
-| 脏标记视觉 | 断言 **`data-state` 属性值**（`clean` / `dirty` / `unsaved` / `error`）与 `aria-label` 存在 —— **不靠对比度倍数**（`--meta` 与 `--danger` 只差 1.6~1.8 倍，倍数不是判据，WCAG 1.4.1）；颜色只断言「解析值精确不等」 |
+| 脏标记视觉 | **绝对相等判据**（MD-04）：脏标记的计算色必须**精确等于** `--meta` 的解析值，异常标记精确等于 `--danger` 的解析值 —— **不用相对判据**（「≥3:1 且 < danger 的对比度」过弱：任何更浅的颜色都能混过去，将来有人把 `--meta` 换成 `--muted` 仍会通过，而那正是 MD-04 要排除的）。对比度须**对 `--surface` 算**且**三个主题都验**（纸感主题 `--meta` 对 `--surface` 仅 3.07:1，只比 WCAG AA 对非文本图形对象的 3:1 下限高 0.07）。另断言 **`data-state` 属性值**（`clean` / `dirty` / `unsaved` / `error`）与 `aria-label` 存在 —— 颜色不得是唯一信道（WCAG 1.4.1，AC-72） |
+| 落点策略 | **区分性场景必须这样构造**（MD-14）：**用「按指定顺序点击标签」构造 MRU**，**不能**用「按顺序打开文件」（打开顺序天然等于 MRU 顺序，构造不出差异）。形态：**3 个标签，排列序 A–B–C，但按 C→A→B 的顺序点击过**（MRU = B, A, C）；然后关闭 C ⇒ 期望落点 **B**（MRU 里上一个访问过的），而**不是**排列上的邻居 A。按「排列相邻」实现的 ⇒ 落点 A ⇒ **报红**；按 MRU 实现的 ⇒ 落点 B ⇒ 通过。**该场景必须单列为一条测试**，不与通用用例混写（混写就会被「碰巧同过」淹没） |
 | Go 侧（`app_dirty_test.go`） | 断言：置脏后 `anyDirty()` 为真；`ForgetDoc` 后为假；`dirtyKeyOf` 的两分支不相交；`anyDirty` 遍历的是**映射**而不是某个单值 |
 
 ### 9.3 现有测试的修改点：**以 QA 文档 §6.1 为准**（本文不另列）
@@ -1569,7 +1549,9 @@ PM 指出：本方案新增的约 10 个真机依赖项里，有**四项的结�
 | 阶段 | 内容 | 完成判据 | 回滚代价 |
 |---|---|---|---|
 | **P0 地基** | ① `createEditor.js` 抽出 `editor/extensions.js`（`buildExtensions` + `createEditorState`）；② `createEditor` 接受外部 extensions；③ `createEditor.js` 豁免阈值下调（257 → 约 105）；④ App.vue 腾出 6 行（方案 b+c+d） | `npm test` 全绿 + `npm run build` 通过 + 契约 5 绿（`createEditor.js` 与 `App.vue` 行数均达标）+ **阈值下调的元测试已实做**（推过阈值 → 报红 → 还原转绿） | **低**。纯搬迁，无行为变化。`git revert` 一个提交即回 |
-| **P0b 行为定稿闸门** | **不写实现代码**，只做 4 项真机取证并回写本方案：① IME 合成中切标签（**P0，优先**）；② `⌘⌥→`/`⌘⌥←` 在 macOS 上是否被系统占用；③ 标签栏拖拽在 WKWebView 的行为（能否拖动 / 有无残影 / 需不需要改用 Pointer Events）；④ 右键菜单在 WKWebView 的行为（能否弹出 / 要不要 `preventDefault`） | 四项都有**书面结论**（结论 + 依据），并已回写：§5.2 步骤 0 的最终口径 / §4.12 的键位（若需换）/ §4.9 的拖拽与右键实现机制。**未完成不得进入 P1** —— 尤其 IME：§5.2 的时序不得在实现之后才改 | **零**（不产生代码）。但**不做的代价极高**：四项里三项会推翻已写的实现，IME 还会推翻 §5.2 时序 |
+| **P0b 行为定稿闸门** | **不写实现代码**，只做 3 项真机取证并回写本方案：① `⌘⌥→`/`⌘⌥←` 在 macOS 上是否被系统占用（占用则要换键位 → 影响 §4.12 与 README 速查节）；② 标签栏拖拽在 WKWebView 的行为（能否拖动 / 有无残影 / 需不需要改用 Pointer Events）；③ 右键菜单在 WKWebView 的行为（能否弹出 / 要不要 `preventDefault`） | 三项都有**书面结论**（结论 + 依据），并已回写 §4.12 / §4.9。**未完成不得进 P1** | **零**（不产生代码）。但三项里两项会推翻已写的实现 |
+| **P1 会话注册表 + 标签栏骨架** | ① `useEditorSession` 持有 `sessions` / `activeId` / `mru`；② `createSession` / `findByPath` / `activateSession` / `removeSession` / `setActivePath`；③ 派生状态改 computed + `filePath` 唯一写入者不变量；④ **IME 守卫（§5.2 步骤 0）**；⑤ **空文档态**（MD-08：关掉最后一个标签 → 保留一个未落盘、空内容的 session，**不新增组件**）；⑥ `TabBar.vue`（渲染 + 关闭按钮 + `data-state` 标记，拖拽与右键菜单留 P4）；⑦ 装配进 App.vue | ① 能开两个标签并来回切换，**内容与光标各自独立**；② 同路径幂等；③ 表格提示 / 大纲 / 预览 / 行列全部随标签正确切换（**等 ≥150ms 再断言**，防漏掉 120ms 延迟失败）；④ IME 守卫：合成中请求切换**不立即换 state**，合成结束后切换发生且预编辑文本已提交；⑤ 关掉最后一个标签 → **应用不退出**、编辑器落到空文档态（MD-08）；⑥ App.vue ≤150；⑦ 变异自证方向 1/2/3/4 全部报红 | **中**。已改动 `useEditorSession` 的对外导出形态（`filePath` 从 ref 变 computed），回滚需连带回滚 `useFileOps` / `useDocumentState` 的跟随改动。**建议单独一个提交，不与 P2 混** |
+| **P1b IME 真机闸门（MD-11）** | **P1 之后立刻**做 IME 合成中切标签的真机验证（**不等 P2/P3**）。产出：真机 IME 行为结论 + 必要时修订 §5.2 步骤 0 的实现细节 | ① 真机上「合成中点另一个标签 → 预编辑文本**一个字不少**地提交进原文档」；② 结论回写本文 §5.2；③ 若机制不成立 → 修订 §5.2 步骤 0 并重跑 P1 的相关用例 | **低**（不改架构主体）。但**这一项是 P0 级风险**（MD-11 定为「P1 之后立刻」）；§5.2 的机制（延迟切换）已在 P1 之前定稿，故 P1 不是建在未知之上 |
 
 | **P1 会话注册表 + 标签栏骨架** | ① `useEditorSession` 持有 `sessions` / `activeId` / `mru`；② `createSession` / `findByPath` / `activateSession` / `removeSession` / `setActivePath`；③ 派生状态改 computed + `filePath` 唯一写入者不变量；④ **IME 守卫（§5.2 步骤 0）**；⑤ **空状态**（`enterEmptyState` + `EmptyState.vue`，PM 缺口 3）；⑥ `TabBar.vue`（仅渲染 + 关闭按钮 + `data-state` 标记，拖拽与右键菜单留 P4）；⑦ 装配进 App.vue | ① 能开两个标签并来回切换，**内容与光标各自独立**（`tab-activate.test.mjs` 绿）；② 同路径幂等（`tab-session.test.mjs` 绿）；③ 表格提示 / 大纲 / 预览 / 行列全部随标签正确切换（**等 ≥150ms 再断言**，防漏掉 120ms 延迟失败）；④ IME 守卫：合成中请求切换**不立即换 state**，合成结束后切换发生且预编辑文本已提交；⑤ 空状态：关掉最后一个标签 → `sessions.length === 0`、应用不退出、两个入口可见；⑥ App.vue ≤150；⑦ 变异自证方向 1/2/3/4 全部报红 | **中**。已改动 `useEditorSession` 的对外导出形态（`filePath` 从 ref 变 computed），回滚需连带回滚 `useFileOps` / `useDocumentState` 的跟随改动。**建议单独一个提交，不与 P2 混** |
 | **P2 per-session 持久化** | ① `useDocumentState` 状态改 per-session；② `switchFile` / `resetSession` 退役；③ `writeAndSettle` 按 session 取 path 与 content（**写盘单元同源**）；④ `useFileOps` 改为「打开 = 开标签」，`openSeq` 语义变更；⑤ `newFile` 改为新标签；⑥ `useTabLifecycle` 落地（关闭 / 落点 / 快照留底 / 确认弹层 / closedStack 存位置） | ① 每个标签的 dirty / saveState 互相独立（`tab-dirty.test.mjs` 绿）；② 后台标签的自动保存写到**它自己的文件**（判据：每条 `(path, content)` 记录都满足 `content === 那个 path 对应 tab 的内容`，**不是**「写盘次数 == 1」）；③ **状态栏显示的是「当前标签」的保存态**（PM 对 D1 的补充要求 —— 切到某个标签时必须显示**那个标签**的保存中/已保存/失败，否则用户看到「自己没动过的文档显示已保存」会困惑并诱发重复手动保存）；④ 关闭脏标签会弹确认，取消后内容不变（§9.5 负向用例绿）；⑤ 落点是 MRU 里上一个访问过的标签（`tab-close.test.mjs` 绿）；⑥ 变异自证方向 5/6 报红 | **中高**。`useDocumentState` 的语义面改动大，回滚需连带回滚 P1 的部分 |
@@ -1581,24 +1563,43 @@ PM 指出：本方案新增的约 10 个真机依赖项里，有**四项的结�
 
 **依赖关系**：P0 → **P0b** → P1 → P2 → P3 → P4 → P5 → P5b → P6。P4 与 P5 可并行（不同文件），但**不建议并行提交**（本仓的并发纪律：一时刻只允许一个人写仓库，见 `contracts.test.mjs:43-123` 的并发守卫）。**P0b 是闸门不是阶段**：它不产出代码，但未过闸不得进 P1。
 
-**总工作量估计**：按本仓既有节奏（参考 `docs/plan/focusiwyg-architecture.md` 的 6 步拆解），P0–P3 约 5–6 天、P4 约 2 天、P5 约 1 天、P5b 约 0.5 天、P6 约 0.5 天，合计 **9–11 个工作日**（单人）。**P0b 闸门另需 0.5–1 天真机取证**（不写代码，但 IME 一项就可能改写 §5.2 的时序）。开发成本模型（`references/cost-models/development-costs.md`「桌面端 MVP · 文档处理 4–8 周 / 2–4 人月」）显示本轮属该区间的**小增量**（约 0.35 人月），因为复用既有编辑器与持久化基建，不新建渲染栈。
+**总工作量估计**：按本仓既有节奏（参考 `docs/plan/focus-mode-architecture.md` 的 6 步拆解），P0–P3 约 5–6 天、P4 约 2 天、P5 约 1 天、P5b 约 0.5 天、P6 约 0.5 天，合计 **9–11 个工作日**（单人）。**P0b 闸门另需 0.5–1 天真机取证**（不写代码，但 IME 一项就可能改写 §5.2 的时序）。开发成本模型（`references/cost-models/development-costs.md`「桌面端 MVP · 文档处理 4–8 周 / 2–4 人月」）显示本轮属该区间的**小增量**（约 0.35 人月），因为复用既有编辑器与持久化基建，不新建渲染栈。
 
 ---
 
-## 12. 开放决策（待 team-lead 拍板）
+## 12. 决策：已全部裁决，本文只引用不定义
 
-| # | 议题 | 选项 | 我的建议 | 不拍板的后果 |
-|---|---|---|---|---|
-| **D1** | 后台标签是否自动保存 | (a) 也自动保存 / (b) 只保存激活标签 | **(a)**（§6.5 有完整理由） | P2 的 `saveTimer` 语义与标签标记的视觉都依赖它；晚改会牵动 §4.4 与 §4.9 |
-| **D2** | 关闭标签的键位 | (i) `⌘⌥W`（本方案默认） / (ii) Zettlr 式改写 `⌘W`（关标签，无标签时关窗口，关窗口改 `⌘⇧W`） | **(i)**。`⌘W` 在 macOS 是「关窗口」的通用肌肉记忆，而 Inkmark 是单窗口应用；绑定它会把两个动作绑成一件事。且 (ii) 需要新增「关窗口」命令与 `⌘⇧W`，并改写既有语义 | `COMMANDS` 表与 README 快捷键节无法定稿（两处门禁都卡着） |
-| **D3** | 未落盘新文档的 dirty 初值 | (i) `false`（本方案默认，§6.4） / (ii) 按 ADR-005 §一字面为 `true` | **(i)**。空文档无内容可丢；按字面则新建即弹确认，是噪音。**但这是与已接受的 ADR-005 的口径分歧，需裁决** | `createSession` 的初值写不下去；ADR-005 与实现会长期不一致 |
-| **D4** | 标题栏脏红点是否降级 | (i) 标题栏 `var(--danger)` + 标签栏 dirty `var(--meta)`（**两档不同**，QA 的 AC-73 判红） / (ii) **两处都用 `var(--meta)`** | **(ii)，建议直接裁决**。理由：team-lead 的裁决原文是「dirty 视觉必须克制、低调小圆点、不得高对比」，(i) 与之冲突；QA 的 **AC-73**（标题栏脏点必须与标签栏 dirty 标记同档视觉）也让 (i) 过不了。改法只有一处 CSS（`TitleBar.vue:360-366` 的 `var(--danger)` → `var(--meta)`）。附带说明：`--meta` 是三等前景，在**明暗两个主题下都是最弱的一档**（`--muted` 与 `--meta` 的明暗关系在两套主题里是反的，不能用它做「低调标记」），故降级后两个主题都成立 | 标题栏与标签栏一个红一个灰 —— **同一语义两套表现**，是看得见的割裂；而 QA 的 AC-73 已经把 (i) 判红 |
-| **D5** | 数字直跳第 N 个标签 | (i) 不提供（本方案默认） / (ii) `⌘⌥1..⌘⌥9` | **(i)**。`⌘1..⌘6` 已被标题占用；`⌘⌥` 家族已有 `⌘⌥F` / `⌘⌥C` / `⌘⌥↑↓`，再加 9 个数字键语义噪声大。MRU + Tab Switcher 已覆盖「精确选一个」 | 影响 `COMMANDS` 表与 README 速查节 |
-| **D6** | 标签状态持久化的存储位置 | (i) localStorage `inkmark-tabs`（本方案默认） / (ii) Go 侧 `os.UserConfigDir()/Inkmark/session.json` | **(i)**，**且范围要扩到「未落盘文档的内容」**（PM 补充要求）。理由：localStorage 同样能存未落盘内容，隐私姿态与 (i) 完全一致（都是本地），所以这不是「存哪」的问题而是「要不要存」的问题 —— PM 的产品立场是**要存**（VS Code Hot Exit / Zed `session.restore_unsaved_buffers` 都做；「新建文档写了几段，误关应用稿子没了」对写作工具不能接受）。**但不得阻塞多标签页本体**：若本轮窗口不够，未落盘内容持久化放 P5b，并在 `HANDOFF` §7 **显式登记为已知缺口**，不得默默不做 | 影响 P5 / P5b 的实现范围；不拍板则「未落盘内容是否跨重启保留」无定论 |
-| **D7** | 切走（切到别的标签）时，脏标签是否留底快照 | (i) 不留（本方案默认） / (ii) 留（与既有 `switchFile()` 语义严格一致） | **与 QA 文档口径不同**。QA 文档 D-4 倾向 (ii)（理由：与 `useDocumentState.js:175-178` 的既有语义一致，既有快照回归集可零改动复用；且 Go 侧按内容哈希去重，来回切同一份未改内容不会产生快照膨胀）。本方案倾向 (i)：多标签下**切走并不丢弃内容**，标签还在内存里，没有「错过就写不回去」的风险；(ii) 会在每次切换时多一次写盘。**若裁决为 (ii)**，`activateSession` 的步骤 2 之后要加一步 `writeSnapshot(session, true)`，且写盘目标必须绑定该 session（与 D1 的「写盘单元同源」是同一条要求） | 影响 `activateSession` 的步骤表与快照相关测试的条数；两份文档的快照语义必须统一，否则实现轮会各写各的 |
-| ~~D8~~ | ~~关到只剩一个标签时是否保留空文档~~ | — | **已裁决（PM 缺口 3，2026-10-28）**：关闭最后一个标签后**应用保持运行、显示空状态、不退出进程**；空状态只提供「新建文档」「打开文件」两个入口（**不得**放「恢复上次打开」—— 该能力已下线，见 §5.3）。本条不再是待裁决项，实现口径见 §5.3 与 §4.3 的 `enterEmptyState` | — |
+> **本节不再是「待裁决清单」。** 2026-10-28 的 Phase 1 一致性检查发现：决策被摊在三份文档的三个编号体系里（架构 `D1–D8`、测试计划 `D-1–D-10`、team-lead 首轮 `D1–D13`），**多数同号不同事** —— 会上说的「D5 定了」在两份文档里指两件完全不同的事（一致性复查 C-3）。
+>
+> ⇒ **决策的唯一真源 = `docs/decisions/MD-2026-10-28-multi-tab.md`（MD-01…MD-15）**。本文**引用** `MD-xx`，**不得定义**决策（该文件 §6 变更纪律）。
+> ⇒ **本文原先的 D1–D8 编号作废**，一律改用 `MD-xx` 引用（避免同号不同事再次发生）。
 
-> **与 QA 文档的合并口径**：决策点编号两边各自独立（D1–D6 ↔ D-1、D-10 等），**映射关系以 `docs/plan/multi-tab-test-plan.md` §10.1 为准**（该节已把两边的同一件事逐条对上）。裁决后**两处都要改**，不得只改一边。
+| 议题 | 决策（引用） | 本文对应章节 |
+|---|---|---|
+| 后台标签是否自动保存 | **MD-01**：也自动保存（选项 a） | §6.5、§11 的 P2 判据 |
+| 关闭标签的键位 | **MD-02**：`⌘⌥W`，**不绑定 `⌘W`** | §4.12 |
+| 未落盘新文档的 dirty 初值 | **MD-03**：`false` | §6.4 |
+| 脏 / 异常标记的 token 与互斥规则 | **MD-04**：dirty=`--meta` / error=`--danger` / 未落盘=`--warn`；**优先级 error > 未落盘 > dirty，互斥、同一时刻只显示一个** | §4.9、§9.2 |
+| `⌘1..9` 数字直跳 | **MD-05**：不提供 | §4.12、§5.5 |
+| 标签状态持久化 | **MD-06**：localStorage，**且必须存未落盘标签的内容**（最近 10 个，超出丢最旧）；**恢复过程只读不写** | §11 的 P5 |
+| 切走时脏标签是否留底快照 | **MD-07**：**留底** | §5.2 步骤 2、§5.3 步骤 ① |
+| 关到只剩一个标签 / 关闭最后一个标签 | **MD-08**：**保留一个空文档**（沿用现状 `filePath === ''` 空态），应用不退出；**不新增专用空状态组件** | §5.3 步骤 ④、§4.11 |
+| 关闭后的落点策略 | **MD-09**：history（MRU 里上一个访问过的） | §4.5、§5.3 步骤 ④ |
+| Tab Switcher「按住循环」的语义 | **MD-10**：用「**按下瞬间的 MRU 快照**」 | §4.10、§5.5 |
+| IME 合成期间切标签 | **MD-11**：**P0 级风险，P1 之后立刻真机验证**（不等 P2/P3） | §5.2 步骤 0、§10 的 R10、§11 |
+| 规格即契约 | **MD-12**：Spec 是唯一真源，AC 编号以 Spec 为准 | §9.2、§9.3 |
+| ADR-005 §一 的修订 | **MD-13**：**本轮即改**（不拖到 P6），状态改 `Accepted (Amended 2026-10-28)` | §6.4、§8.2、§11 的 P2/P3 |
+| 落点策略的**回退规则** | **MD-14**：三档统一回退 history；**history 无候选时回退到「显示序里的第一个剩余标签」**；**拒绝** neighbour 的两级回退（等价变异） | §4.5、§9.2 |
+| 关闭**非激活**标签是否改变当前激活标签 | **MD-15**：**不得改变** | §5.3 步骤 ④ |
+
+**已并入本文的裁决细节（不改历史行，只在本文引用）**：
+
+- **MD-04 的判据形态**：用**绝对相等**判据 —— 脏标记的计算色必须**精确等于** `--meta` 的解析值，异常标记精确等于 `--danger` 的解析值；**不用相对判据**（如「≥3:1 且 < danger 的对比度」过弱：任何更浅的颜色都能混过去，将来有人把 `--meta` 换成 `--muted` 仍会通过，而那正是 MD-04 要排除的）。且必须**对 `--surface` 算**、**三个主题都要验**（纸感主题 `--meta` 对 `--surface` 仅 3.07:1，只比 WCAG AA 对非文本图形对象的 3:1 下限高 0.07）。
+- **MD-04 同时约束标题栏与标签栏**（两处 chrome 统一）：`TitleBar.vue` 的 `.tb-dirty` 须一并降为 `var(--meta)`；异常态用 `var(--danger)`。属**既有视觉契约变更**，须进目视验收。
+- **MD-08 覆盖了 PM 缺口 3 中「新增专用空状态组件」的部分**：产品结论（应用不退出）一致，但实现形态按 MD-08 走 —— **保留一个空文档**、**不新增 `EmptyState.vue`**，理由是保住 `App.vue` 的行数预算（§4.11）。本文 §4.3 / §5.3 / §7 / §8.1 已按此改写。
+- **MD-13 使 ADR-005 的修订从 P6 前移到 P2/P3**（与 dirty 语义落地同批），不留口径分歧。
+
+**未决与外部条件**（不在 MD 文件裁决，见 `docs/decisions/OPEN-DECISIONS.md`）：macOS 签名与公证（外部条件）；29 项目视清单 + 标签页新增项的真机验收（需人工在真实窗口操作）；Typora 官方快捷键页内容（**未逐字核实**，不得进入任何 AC）。
 
 ---
 
