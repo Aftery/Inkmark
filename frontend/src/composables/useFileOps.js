@@ -28,6 +28,7 @@
  */
 import { ref, watch } from 'vue'
 import { t, getLocale } from '../i18n/index.js'
+import { useTabPersistence } from './useTabPersistence.js'
 
 /**
  * fs:changed 到来时是否该重载文件树（纯函数，导出供测试直接 import）。
@@ -196,6 +197,10 @@ export function useFileOps(deps) {
       showToast(t('toast.renameFailed', { error: err?.message || err }), true)
     }
   }
+
+  // 标签状态持久化（MD-06）：内容在 useTabPersistence.js，这里只接线一行 ——
+  // App.vue 的装配层余量已用尽（契约 5），挂载点只能落在已有 composable 里。
+  useTabPersistence({ session, getEditor, ReadFile })
 
   return { loadDocument, openFile, openFolder, openTreeFile, newFile, renameFile, treeSignal }
 }
