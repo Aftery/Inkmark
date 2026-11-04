@@ -32,6 +32,7 @@ import {
 } from './useShortcuts.js'
 import { WindowMinimise, WindowToggleMaximise } from '../../wailsjs/runtime/runtime.js'
 import { ClipboardGet, ClipboardSet, Version } from '../../wailsjs/go/main/App.js'
+import { useTabLifecycle } from './useTabLifecycle.js'
 import { t } from '../i18n/index.js'
 
 /**
@@ -67,6 +68,14 @@ export function useCommands(deps) {
   const showSettings = ref(false)
   const showAbout = ref(false)
   const aboutVersion = ref('')
+
+  // 标签页生命周期（关闭 / 落点 / 已关闭栈）。
+  // 【为什么建在这里而不是 App.vue】装配层是 ≤150 行的硬上限，P2 已把余量用尽
+  // （148 行时仅剩 2 行，正好留给 ConfirmDialog 的 import + 模板各行）。本模块
+  // 已被 App.vue 装配，且本来就持有 session / docState / getEditor 三件它需要的东西；
+  // 而 `closeTab` 的**唯一调用方就是 UI 上的关闭按钮**（本轮不加新命令，见 MD-02
+  // 的键位留到 P4），所以放在命令层不增加任何耦合。
+  const tabs = useTabLifecycle({ session, docState, getEditor })
 
   function closeSettings() {
     showSettings.value = false
@@ -200,7 +209,9 @@ export function useCommands(deps) {
 
   /** 帮助 → Markdown 语法示例：按破坏性边界处理（先给当前稿留快照） */
   async function loadSyntaxSample() {
-    await docState.switchFile()
+    // 整份替换当前标签的内容 → 替换前仍要留底（与 MD-07 同一口径）。
+    // 旧的 docState.switchFile() 已随 per-session 化退役（P2），留底改用 beforeDiscard。
+    await docState.beforeDiscard(session.getActiveSession())
     fileOps.loadDocument(SYNTAX_DOC, '')
     notify?.(t('toast.syntaxLoaded'))
   }
@@ -338,5 +349,7 @@ export function useCommands(deps) {
     showAbout, aboutVersion, closeAbout,
     showShortcuts: help.showShortcuts,
     shortcutRows: help.rows,
+    // 标签页生命周期（App.vue 用它渲染 TabBar 的 @close 与 ConfirmDialog）
+    tabs,
   }
 }

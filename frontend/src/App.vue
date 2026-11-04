@@ -16,6 +16,7 @@ import SlashCommand from './components/SlashCommand.vue'
 import HistoryPanel from './components/HistoryPanel.vue'
 import SettingsPanel from './components/SettingsPanel.vue'
 import InputDialog from './components/InputDialog.vue'
+import ConfirmDialog from './components/ConfirmDialog.vue'
 import ShortcutsDialog from './components/ShortcutsDialog.vue'
 import AboutDialog from './components/AboutDialog.vue'
 import { useToast } from './composables/useToast'
@@ -55,14 +56,14 @@ const { editorEl, slashRef, filePath, folderPath, title, caret, wordCount, previ
 const { focusOn, focusToast, sidebarOpen, sidebarTab, showSidebarTab } = workspace
 const assets = useFileAssets({ getFilePath: () => filePath.value, notify: showToast })
 const docState = useDocumentState({
-  getEditor, filePath, title, setActivePath: session.setActivePath, renderedHtml: exportHtml, theme: prefs.resolvedTheme,
-  notify: showToast, onDocReplaced: session.syncAfterDocReplace,
+  getEditor, getActiveSession: session.getActiveSession, anyDirty: session.anyDirty, setActivePath: session.setActivePath,
+  renderedHtml: exportHtml, theme: prefs.resolvedTheme, notify: showToast, onDocReplaced: session.syncAfterDocReplace,
 })
 session.bindDocState(docState)
 const { saveState, dirty, showHistory, snapshots, historyLoading } = docState
 const { dialog, askInput, closeDialog } = useDialog()
 const fileOps = useFileOps({
-  getEditor, replaceDocument, syncAfterDocReplace: session.syncAfterDocReplace, setActivePath: session.setActivePath, filePath, folderPath, title, sidebarOpen, sidebarTab, docState, showToast, askInput, ReadFile, OpenFileDialog, OpenDirectoryDialog,
+  getEditor, replaceDocument, syncAfterDocReplace: session.syncAfterDocReplace, setActivePath: session.setActivePath, filePath, folderPath, title, sidebarOpen, sidebarTab, session, showToast, askInput, ReadFile, OpenFileDialog, OpenDirectoryDialog,
 })
 const { openFile, openFolder, openTreeFile, treeSignal } = fileOps
 if (import.meta.env.DEV) {
@@ -77,7 +78,7 @@ const cmds = useCommands({
   hasClipboardImage: () => assets.clipboardHasImage(), canSaveImage: () => Boolean(filePath.value),
 })
 const { menuGroups, showSettings, closeSettings, showAbout, aboutVersion, closeAbout,
-  showShortcuts, shortcutRows } = cmds
+  showShortcuts, shortcutRows, tabs } = cmds
 
 // 下面两个是**函数声明**（提升），声明刻意晚于注入点：setup 期可安全引用，
 // tdz-order.test.mjs 的「函数声明豁免」用例正是覆盖这种写法。
@@ -96,7 +97,7 @@ function onDocChange() {
   <div class="app" :class="{ focus: focusOn }">
     <TitleBar v-show="!focusOn" :filename="title" :is-dirty="dirty"
       :groups="menuGroups" @command="emitCommand" />
-    <TabBar v-show="!focusOn && sessions.length > 1" :sessions="sessions" :active-id="activeId" @select="session.activateSession" />
+    <TabBar v-show="!focusOn && sessions.length > 1" :sessions="sessions" :active-id="activeId" @select="session.activateSession" @close="tabs.closeTab" />
 
     <div class="main">
       <!-- 侧栏：文件 / 大纲 双 tab。专注模式下整栏隐藏。 -->
@@ -128,6 +129,7 @@ function onDocChange() {
       @snapshot-now="docState.snapshotNow" @restore="docState.restoreSnapshot" />
     <SettingsPanel v-if="showSettings" @close="closeSettings" />
     <InputDialog :dialog="dialog" @close="closeDialog" />
+    <ConfirmDialog :state="tabs.confirmState" @choose="tabs.resolveConfirm" />
     <ShortcutsDialog v-if="showShortcuts" :rows="shortcutRows" @close="showShortcuts = false" />
     <AboutDialog v-if="showAbout" :version="aboutVersion" :notify="showToast" @close="closeAbout" />
 

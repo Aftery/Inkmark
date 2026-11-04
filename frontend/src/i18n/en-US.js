@@ -20,6 +20,12 @@ export default {
   'common.untitled': 'Untitled',
   // ---- Tab bar (multi-document) ----
   'tabbar.label': 'Open documents',
+  'tabbar.close': 'Close tab',
+  // ---- Confirm dialog for closing a dirty tab ----
+  'confirm.title': 'Unsaved changes',
+  'confirm.body': '"{title}" has unsaved changes. Save before closing?',
+  'confirm.save': 'Save',
+  'confirm.discard': "Don't save",
 
   // ---- Document title bar ----
   'doc.title': 'Document',

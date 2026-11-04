@@ -230,8 +230,10 @@ describe('标签栏 · 装配契约', () => {
     )
   })
 
-  test('TabBar 声明了 select 事件，脏点带非颜色信号（data-state + role=img + aria-label）', () => {
-    assert.match(TAB_BAR, /defineEmits\(\['select'\]\)/, 'TabBar 未声明 select 事件')
+  test('TabBar 声明了 select / close 事件，脏点带非颜色信号（data-state + role=img + aria-label）', () => {
+    // P2 起标签栏多一个 close（关闭按钮是第二个可点元素 —— 故标签根是 div、
+    // 内层才是 button[role=tab]，HTML 不允许按钮嵌套按钮）
+    assert.match(TAB_BAR, /defineEmits\(\['select', 'close'\]\)/, 'TabBar 未声明 select / close 事件')
     assert.match(TAB_BAR, /data-state=/, '缺 data-state：状态只剩颜色一条信道（WCAG 1.4.1）')
     assert.match(TAB_BAR, /role="img"/, '脏点缺 role=img，aria-label 不会被读屏播报')
     assert.match(TAB_BAR, /:aria-label="t\('common\.unsaved'\)"/, '脏点的 aria-label 必须走 i18n')

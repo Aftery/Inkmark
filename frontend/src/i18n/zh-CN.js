@@ -35,6 +35,12 @@ export default {
   'common.untitled': '未命名',
   // ---- 标签栏（多标签页）----
   'tabbar.label': '打开的文档',
+  'tabbar.close': '关闭标签页',
+  // ---- 关闭脏标签的三选一确认 ----
+  'confirm.title': '未保存的更改',
+  'confirm.body': '「{title}」有未保存的更改。关闭前要保存吗？',
+  'confirm.save': '保存',
+  'confirm.discard': '不保存',
 
   // ---- 文档标题栏（App.vue 顶栏）----
   'doc.title': '文档',

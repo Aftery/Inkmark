@@ -134,6 +134,14 @@ export function useEditorSession({
   )
   /** 供下游按需取当前会话（不注入 reactive 对象本身，避免它们误写） */
   const getActiveSession = () => activeSession.value
+  /**
+   * 全部标签里**是否还有脏的**。
+   * 【为什么必须有它】`dirty` 在 P2 变成「激活标签的 dirty」的派生值 —— 若 Go 侧
+   * 镜像还盯着它，后台标签脏了就不触发 SetDirty → 关窗口时 Go 以为干净、不弹
+   * 未保存确认、后台稿子静默丢失。聚合口径与 P3 的 Go 侧 anyDirty() 一致，
+   * 本阶段先在**前端**聚合（Go 一行不动）。
+   */
+  const anyDirty = computed(() => sessions.value.some((s) => s.dirty))
 
   /** 按路径找会话；找不到返回 null（同路径幂等的判据，见 useFileOps 的 openTab） */
   function findByPath(path) {
@@ -363,18 +371,24 @@ export function useEditorSession({
   }
 
   async function runActivation(view, target) {
-    // 步骤 2 · 捕获当前标签：state / 滚动位置 / 脏标记，脏则留底快照
+    // 步骤 2 · 捕获当前标签：state / 滚动位置，脏则留底快照
     const cur = getActiveSession()
     if (cur) {
       cur.state = view.state
       cur.scrollTop = view.scrollDOM.scrollTop
-      // P1：dirty 仍是全局单值 —— 切走时捕获进会话，切入时交回（P2 改 per-session）
-      if (docState) cur.dirty = docState.dirty.value
-      // switchFile = 「脏则强行写一份快照留底」+「复位会话（清自动保存防抖、
-      // 保存态归零）」。与打开另一个文件的边界同口径：旧稿此刻还在内存里，
-      // 错过这一刻就永远写不回去了。同时清掉定时器 —— 否则 800ms 后那笔自动
-      // 保存会拿**新标签**的内容去写（跨标签串写，P2 才彻底解决）。
-      await docState?.switchFile?.()
+      // dirty / saveState 自 P2 起是**会话自己的字段**（§4.4），不再从全局捕获、
+      // 也不再「交回」—— 切换只是换 state，不需要搬运脏标记。
+      // 【只写快照，**不**清该会话的自动保存定时器】这里是 P2 与「字面照抄
+      // beforeDiscard」的唯一分歧，依据三条：
+      //   ① 架构 §5.2 步骤 2 原文就是「若 cur.dirty → writeSnapshot(cur, true)」，
+      //      没有清定时器这一动作；§4.4 又说 beforeDiscard「只在关闭标签时调用」；
+      //   ② MD-01 明确「后台标签也自动保存」—— 切走就清定时器等于让后台标签
+      //      **永不落盘**，MD-01 落空（只剩快照，文件本身不更新）；
+      //   ③ P2 起写盘目标 = session.path、内容 = session.state，定时器持有的正是
+      //      那个会话，已不存在「拿激活标签内容写后台标签文件」的串写风险 ——
+      //      清定时器的旧理由随「写盘同源」一起消失。
+      // 定时器仍会在**关闭标签**（useTabLifecycle 第 ③ 步）与显式保存时清掉。
+      if (cur.dirty) await docState?.writeSnapshot?.(cur, true)
     }
     // 步骤 3 · 丢弃待渲染预览（旧文档的防抖预览会覆盖新标签的 markdown）
     cancelPendingPreview()
@@ -409,11 +423,6 @@ export function useEditorSession({
     mru.value = [target.id, ...mru.value.filter((id) => id !== target.id)]
     // 步骤 15 · 聚焦（切完标签应能直接打字）
     view.focus()
-    // dirty 交回：进入的会话自己记着脏不脏，状态栏据此显示（P2 改 per-session）
-    if (docState) {
-      docState.dirty.value = target.dirty
-      docState.saveState.value = target.dirty ? 'unsaved' : 'saved'
-    }
   }
 
   /**
@@ -475,7 +484,7 @@ export function useEditorSession({
     // 编辑器与派生状态
     editorEl, slashRef, markdown, filePath, folderPath, title, caret, wordCount, previewHtml, exportHtml,
     // 会话注册表
-    sessions, activeId, mru, activeSession, getActiveSession, findByPath,
+    sessions, activeId, mru, activeSession, getActiveSession, findByPath, anyDirty,
     createSession, activateSession, removeSession, setActivePath, bindDocState,
     // 预览 / 文档替换
     queuePreview, flushPreview, cancelPendingPreview, syncAfterDocReplace, renderMarkdown,

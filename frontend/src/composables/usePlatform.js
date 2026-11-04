@@ -16,7 +16,7 @@
 // 两者都不是 darwin 时行为一致）。
 
 import { ref, watch, computed } from 'vue'
-import { Environment } from '../../wailsjs/runtime/runtime'
+import { Environment } from '../../wailsjs/runtime/runtime.js'
 
 /** navigator 同步初判（不可用时回落 'unknown'，行为等同非 mac 布局） */
 function detectViaUA() {

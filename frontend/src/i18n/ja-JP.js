@@ -20,6 +20,12 @@ export default {
   'common.untitled': '無題',
   // ---- タブバー（複数ドキュメント）----
   'tabbar.label': '開いている文書',
+  'tabbar.close': 'タブを閉じる',
+  // ---- 未保存タブを閉じるときの三択確認 ----
+  'confirm.title': '未保存の変更',
+  'confirm.body': '「{title}」に未保存の変更があります。閉じる前に保存しますか？',
+  'confirm.save': '保存',
+  'confirm.discard': '保存しない',
 
   // ---- タイトルバー ----
   'doc.title': 'ドキュメント',
