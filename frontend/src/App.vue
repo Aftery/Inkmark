@@ -52,11 +52,11 @@ const session = useEditorSession({
   typewriterOn: workspace.typewriterOn, onEditorReady: () => prefs.syncZoomToEditor(),
   zoom, focusOn: workspace.focusOn, invalidateOutline: outlineSync.invalidateMeasure,
 })
-const { editorEl, slashRef, filePath, folderPath, title, caret, wordCount, previewHtml, exportHtml, sessions, activeId } = session
+const { editorEl, slashRef, filePath, folderPath, title, caret, wordCount, previewHtml, exportHtml, sessions, activeId, anyDirty } = session
 const { focusOn, focusToast, sidebarOpen, sidebarTab, showSidebarTab } = workspace
 const assets = useFileAssets({ getFilePath: () => filePath.value, notify: showToast })
 const docState = useDocumentState({
-  getEditor, getActiveSession: session.getActiveSession, anyDirty: session.anyDirty, setActivePath: session.setActivePath,
+  getEditor, getActiveSession: session.getActiveSession, getSessions: () => session.sessions.value, setActivePath: session.setActivePath,
   renderedHtml: exportHtml, theme: prefs.resolvedTheme, notify: showToast, onDocReplaced: session.syncAfterDocReplace,
 })
 session.bindDocState(docState)
@@ -95,7 +95,7 @@ function onDocChange() {
 
 <template>
   <div class="app" :class="{ focus: focusOn }">
-    <TitleBar v-show="!focusOn" :filename="title" :is-dirty="dirty"
+    <TitleBar v-show="!focusOn" :filename="title" :is-dirty="anyDirty"
       :groups="menuGroups" @command="emitCommand" />
     <TabBar v-show="!focusOn && sessions.length > 1" :sessions="sessions" :active-id="activeId" @select="session.activateSession" @close="tabs.closeTab" />
 

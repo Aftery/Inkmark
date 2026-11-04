@@ -60,8 +60,7 @@ function errText(err) {
  * @param {Object}   deps
  * @param {Function} deps.getEditor         () => EditorView|null（onMounted 后才有值）
  * @param {Function} deps.getActiveSession  () => DocSession|null
- * @param {import('vue').ComputedRef<boolean>} deps.anyDirty 全部标签里是否还有脏的
- *                    （Go 侧 SetDirty 的镜像源 —— 见下方 watch 的理由）
+ * @param {Function} deps.getSessions       () => DocSession[] 全部会话（逐文档镜像的遍历源）
  * @param {Function} deps.setActivePath     (path) => void 路径的**唯一写入入口**
  * @param {import('vue').Ref<string>} deps.renderedHtml 激活会话渲染好的 HTML（导出用）
  * @param {import('vue').Ref<string>} deps.theme     当前已解析主题（theme.js 真源）
@@ -70,7 +69,7 @@ function errText(err) {
  *                    （replaceDocument 走 setState，不触发 updateListener）
  */
 export function useDocumentState({
-  getEditor, getActiveSession, anyDirty, setActivePath, renderedHtml, theme, notify, onDocReplaced,
+  getEditor, getActiveSession, getSessions, setActivePath, renderedHtml, theme, notify, onDocReplaced,
 }) {
   // 状态机：unsaved（有改动未落盘）→ saving（写入中）→ saved；写入失败 → error。
   // 四态在状态栏用「图标形状 + 文案 + 颜色」三重表达（AC-20）。
@@ -81,15 +80,39 @@ export function useDocumentState({
   const snapshots = ref([])
   const historyLoading = ref(false)
 
-  // ---------- dirty → Go 镜像 ----------
-  // 【必须盯 anyDirty，不能盯 dirty】OnBeforeClose / CloseWindow 的关闭守卫读 Go 侧
-  // 这面镜子。P2 之后 `dirty` 只反映**激活标签**：后台标签变脏不触发它 → Go 以为
-  // 干净 → 关窗口不弹未保存确认 → 后台稿子静默丢失（最坏的一类缺陷：全程无报错）。
-  // 聚合口径与 P3 的 Go 侧 anyDirty() 一致；P3 只是把聚合搬到 Go 侧，前端这层不变。
-  // try/catch 是浏览器预览无绑定的正常降级，不掩盖代码错误。
-  watch(anyDirty, (d) => {
-    try { window.go?.main?.App?.SetDirty?.(d) } catch { /* 预览环境无绑定 */ }
-  })
+  // ---------- dirty → Go 逐文档镜像（ADR-005 §四 的 docKey→dirty 映射，P3）----------
+  //
+  // 【为什么必须逐文档、不能只推一个布尔值】Go 侧 OnBeforeClose 经 anyDirty() 判定，
+  // 但 map 的键是逐文档的。若前端只推聚合值，Go 就等于又退回一个布尔量，两份文档的
+  // 落盘状态挤进同一个字段 —— ADR-005 §四 明确禁止的那一类错误。
+  //
+  // 【身份口径（与 Go 的 dirtyKeyOf 对齐）】已落盘传绝对路径（Go 侧走 docKeyOf），
+  // 未落盘传 "u:"+<tabId>（独立命名空间，与 16 位 hex 不相交）。**前端不实现 sha1**
+  // —— snapshot.go:89 明文规定 docKeyOf 是唯一派生，派生留在 Go 侧一份。
+  //
+  // 【为什么全量重推而不是做 diff】这是「出错代价 = 静默丢稿」的地方，正确性优先于
+  // 少发几次 IPC。SetDirty / ForgetDoc 都是幂等的，多推无害；而 diff 逻辑漏掉一条
+  // 就是脏标记丢失。try/catch 是浏览器预览无绑定的正常降级，不掩盖代码错误。
+  const goApi = () => window.go?.main?.App
+  function docIdentity(s) {
+    return s.path || `u:${s.id}`
+  }
+  function pushDirty(s, d) {
+    try { goApi()?.SetDirty?.(docIdentity(s), Boolean(d)) } catch { /* 预览环境无绑定 */ }
+  }
+  /** 标签关闭后摘掉 Go 侧的映射条目（不摘会被「已不存在的文档」拦住关窗口）。 */
+  function forgetDoc(s) {
+    try { goApi()?.ForgetDoc?.(docIdentity(s)) } catch { /* 预览环境无绑定 */ }
+  }
+  // 只在 dirty 变化时触发（字符串签名只含身份与 dirty，不含内容/标题）。
+  // 【会话列表必须由装配层注入】本模块拿不到 sessions（它在 useEditorSession 里），
+  // 用 getSessions() 惰性取，避免把它变成对会话注册表的反向依赖。
+  watch(
+    () => getSessions().map((s) => `${docIdentity(s)}=${s.dirty ? 1 : 0}`).join('|'),
+    () => {
+      for (const s of getSessions()) pushDirty(s, s.dirty)
+    },
+  )
 
   // 自动保存延时 / 快照间隔改由用户偏好驱动（themes/prefs.js 唯一真源）。
   // 0 = 关闭对应自动行为（AC-10）；手动「立即快照」走 writeSnapshot(s, true) 绕过。
@@ -379,8 +402,8 @@ export function useDocumentState({
   return {
     // 状态（激活会话的派生值，名字与 P1 一致）
     saveState, dirty, showHistory, snapshots, historyLoading,
-    // 自动保存 / 快照 / 破坏性边界
-    markDirty, maybeSnapshot, beforeDiscard,
+    // 自动保存 / 快照 / 破坏性边界 / Go 侧逐文档映射清理
+    markDirty, maybeSnapshot, beforeDiscard, forgetDoc,
     // 保存 / 导出
     saveFile, saveFileAs, saveSession, exportHtml, exportPdf,
     // 历史面板

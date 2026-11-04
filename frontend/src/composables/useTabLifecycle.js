@@ -130,8 +130,12 @@ export function useTabLifecycle({ session, docState, getEditor }) {
       await session.activateSession(next || session.createSession({ path: '', content: '' }))
     }
 
-    // ⑤ 从注册表移除
+    // ⑤ 从注册表移除，并让 Go 侧摘掉该文档的 dirty 映射条目
+    //    （ADR-005 §四：不摘的话，用户关掉一个脏标签（已确认不保存）后，它的脏标记
+    //      还留在映射里，关窗口会被一个**已经不存在的文档**拦住 —— 既误拦，
+    //      又掩盖了真正还脏着的文档）
     session.removeSession(id)
+    docState.forgetDoc?.(target)
     return true
   }
 

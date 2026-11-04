@@ -17,6 +17,8 @@ export function DocAssetHandler():Promise<http.Handler>;
 
 export function ExportPDF(arg1:string,arg2:string):Promise<string>;
 
+export function ForgetDoc(arg1:string):Promise<void>;
+
 export function ListDir(arg1:string):Promise<Array<main.DirEntry>>;
 
 export function OpenDirectoryDialog(arg1:string):Promise<string>;
@@ -35,7 +37,7 @@ export function SaveImageFromClipboard(arg1:string):Promise<string>;
 
 export function SaveImageFromPath(arg1:string,arg2:string):Promise<string>;
 
-export function SetDirty(arg1:boolean):Promise<void>;
+export function SetDirty(arg1:string,arg2:boolean):Promise<void>;
 
 export function SetDocDir(arg1:string):Promise<void>;
 

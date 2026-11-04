@@ -82,9 +82,12 @@ Phase C 引入关闭拦截：前端持 `dirty`（`frontend/src/composables/useDo
 | 状态 | 内容 | 证据 |
 |---|---|---|
 | **已落地（P0 地基）** | 扩展清单（含 `history()` / `wysiwygField` / `tableRenderField`）从 `createEditor.js` 抽到 `editor/extensions.js`，由调用方构建**一次**并交给所有 `EditorState` 共用 —— 这是「N 份 state、撤销栈各自隔离」得以成立的前提 | `frontend/src/editor/extensions.js`；`createEditor.js` 有效行 257 → 47 |
-| **已定案、未落地（P1–P3）** | ① 前端 `dirty` 由全局单值改为 **per-session 字段**，`useDocumentState` 暴露的 `dirty` / `saveState` 变为「激活标签的」computed；② Go 侧 `App.dirty bool` → `App.dirtyByDoc map[string]bool`，键口径 = 已落盘 `docKeyOf(absPath)`（复用 `snapshot.go` 同一派生，**不新增第二份**）+ 未落盘 `"u:" + <tabId>`（独立命名空间，与 16 位 hex 不相交），新增 `SetDirty(docIdentity, d)` / `ForgetDoc` / `anyDirty()`，`OnBeforeClose` 读 `anyDirty()`；③ 两条关闭路径的判定本体 `confirmClose` **保持不变**，红绿灯路径读镜像汇总、自绘 × 路径读请求携带的**聚合值** | **当前代码仍是单值**：`app.go` 的 `dirty bool` / `SetDirty(d bool)`、`useDocumentState.js` 的单 `dirty` ref 均未改动。目标形态见 `docs/plan/multi-tab-architecture.md` §6 与 `docs/decisions/MD-2026-10-28-multi-tab.md` |
+| **已落地（P2 per-session）** | 前端 `dirty` 由全局单值改为 **per-session 字段**：`dirty` / `saveState` / `saveTimer` / `lastSnapshotAt` 都是会话字段，对外 `dirty` / `saveState` 变「激活会话」的 computed；`switchFile()` / `resetSession()` 退役，破坏性边界改用 `beforeDiscard(session)` 且**不做全局复位**。写盘目标与内容**同源**（都取自同一个 session） | `frontend/src/composables/useDocumentState.js`；`writeAndSettle(session, path)` 用 `docText(session)` + `session.path` |
+| **已落地（P3 Go 侧映射）** | `App.dirty bool` → `App.dirtyByDoc map[string]bool`；键口径 = 已落盘 `docKeyOf(absPath)`（复用 `snapshot.go` 同一派生，**不新增第二份**）+ 未落盘 `"u:"+<tabId>`（独立命名空间，与 16 位 hex 不相交）；新增 `SetDirty(docIdentity, d)` / `ForgetDoc` / `anyDirty()`；`OnBeforeClose` 读 `anyDirty()`。前端镜像改为**逐文档**推送，标签关闭时 `ForgetDoc` 摘条目 | `app.go` 的 `dirtyByDoc` / `dirtyKeyOf` / `SetDirty` / `ForgetDoc` / `anyDirty`；`app_dirty_test.go` 4 条 |
+| **已落地（关闭守卫的两条路径对齐）** | `confirmClose` 判定本体**一字未改**；红绿灯路径读 `anyDirty()`，自绘 × 路径读请求携带的**聚合值**（`TitleBar` 的 `:is-dirty` 已从「激活标签的 dirty」改为 `anyDirty` —— 改前后台标签脏、当前标签干净时点 × 会静默丢稿） | `app.go:92` `CloseWindow(dirty, locale)` 与 `:338` `OnBeforeClose`；`App.vue` 的 `:is-dirty="anyDirty"` |
+| **未落地（P4–P6）** | 标签的拖拽重排 / 右键菜单 / Tab Switcher / 5 条命令；标签状态持久化；`HANDOFF` §6 目视清单的标签页条目 | — |
 
-**同一路径不得开第二个标签**（决策真源中的架构约束）：否则两个标签共享 `docKey` → 映射退化 → 本 ADR 的单义不变量被破坏。打开已打开文件 = 切到已有标签。此条**随 P1 落地**，当前单文档形态下不适用。
+**同一路径不得开第二个标签**（决策真源中的架构约束）：否则两个标签共享 `docKey` → 映射退化 → 本 ADR 的单义不变量被破坏。打开已打开文件 = 切到已有标签。此条**已随 P2 落地**（`useFileOps.openPath` 先 `findByPath`）。
 
 **明确禁止（保留并强化）**：在这个布尔量上叠加第二种含义（如「或有未保存的窗口布局」）。新语义必须开新字段，不得复用 `dirty`——这是本 ADR 存在的首要目的。
 

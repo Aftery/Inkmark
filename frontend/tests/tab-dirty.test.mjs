@@ -51,6 +51,8 @@ afterEach(() => {
 
 function makeApp() {
   const setDirtyCalls = []
+  const goDirtyMap = new Map()
+  const forgetCalls = []
   globalThis.window = {
     runtime: {},
     go: {
@@ -59,7 +61,14 @@ function makeApp() {
           WriteFile: async () => {},
           SnapshotWrite: async () => {},
           SaveFileDialog: async () => '',
-          SetDirty: (d) => { setDirtyCalls.push(d) },
+          // 复刻 Go 侧 App.dirtyByDoc 的行为（app.go），而不是只记调用序列：
+          // 判据要打在「Go 侧映射里的状态」上，那才是关闭守卫真正读的东西。
+          SetDirty: (id, d) => {
+            setDirtyCalls.push([id, d])
+            if (d) goDirtyMap.set(id, true)
+            else goDirtyMap.delete(id)
+          },
+          ForgetDoc: (id) => { forgetCalls.push(id); goDirtyMap.delete(id) },
         },
       },
     },
@@ -80,7 +89,7 @@ function makeApp() {
   const docState = useDocumentState({
     getEditor: () => editorRef.value,
     getActiveSession: session.getActiveSession,
-    anyDirty: session.anyDirty,
+    getSessions: () => session.sessions.value,
     setActivePath: session.setActivePath,
     renderedHtml: { value: '' },
     theme: { value: 'light' },
@@ -108,7 +117,9 @@ function makeApp() {
   }
   // 环引用：让 view 参与 update 对象
   editorRef.value = view
-  const app = { session, docState, editorRef, view, setDirtyCalls }
+  const app = { session, docState, editorRef, view, setDirtyCalls, forgetCalls,
+    goDirty: (id) => goDirtyMap.has(id),
+    goAnyDirty: () => goDirtyMap.size > 0 }
   liveApps.push(app)
   return app
 }
@@ -180,8 +191,8 @@ describe('MD-03 · 未落盘【空】文档的 dirty 初值', () => {
   })
 })
 
-describe('Go 侧镜像必须盯聚合（anyDirty），不是激活标签的 dirty', () => {
-  test('切到干净的标签**不得**把 Go 的镜像翻成 false（后台还脏着）', async () => {
+describe('Go 侧镜像逐文档（ADR-005 §四 的 docKey→dirty 映射）', () => {
+  test('切到干净的标签**不得**抹掉后台标签在 Go 侧的脏标记', async () => {
     const ctx = makeApp()
     const a = ctx.session.createSession({ path: '/a.md', content: 'AAA' })
     const b = ctx.session.createSession({ path: '/b.md', content: 'BBB' })
@@ -190,28 +201,32 @@ describe('Go 侧镜像必须盯聚合（anyDirty），不是激活标签的 dirt
     type(ctx, 'x')
     ctx.docState.markDirty()
     await sleep(0)
-    assert.deepEqual(ctx.setDirtyCalls, [true], 'A 变脏 → Go 收到 true')
+    assert.equal(ctx.goDirty('/a.md'), true, 'A 变脏 → Go 侧 /a.md 条目为 true')
 
     await ctx.session.activateSession(b)
     await sleep(0)
-    assert.deepEqual(
-      ctx.setDirtyCalls, [true],
-      '切到干净的 B 时**不得**给 Go 发 false —— 后台的 A 还脏着。' +
-        '发了 false 就等于告诉关闭守卫「全都存好了」：用户关窗口不弹确认，A 的稿子静默丢失。' +
-        `实际序列：${JSON.stringify(ctx.setDirtyCalls)}`,
+    assert.equal(
+      ctx.goDirty('/a.md'), true,
+      '切到干净的 B 后，Go 侧 /a.md 的脏标记**必须仍在**。' +
+        '若被抹掉，关闭守卫就会读到「全都存好了」：用户关窗口不弹确认，A 的稿子静默丢失。' +
+        `实际调用序列：${JSON.stringify(ctx.setDirtyCalls)}`,
     )
+    assert.equal(ctx.goDirty('/b.md'), false, 'B 自己是干净的，不该有条目')
+    assert.equal(ctx.goAnyDirty(), true, '聚合判定（关闭守卫的唯一输入）仍是「有脏文档」')
   })
 
-  test('全部标签都存好之后，镜像才转 false', async () => {
+  test('全部标签都存好之后，Go 侧映射清空、聚合转 false', async () => {
     const ctx = makeApp()
     const a = ctx.session.createSession({ path: '/a.md', content: 'AAA' })
 
     await ctx.session.activateSession(a)
     ctx.docState.markDirty()
     await sleep(0)
+    assert.equal(ctx.goAnyDirty(), true, '存之前 Go 侧仍有脏文档')
     await ctx.docState.saveSession(a)
     await sleep(0)
-    assert.deepEqual(ctx.setDirtyCalls, [true, false], '存好之后才发 false')
+    assert.equal(ctx.goDirty('/a.md'), false, '存好后 /a.md 的条目应被删掉（不是留着 false 值）')
+    assert.equal(ctx.goAnyDirty(), false, '全部干净后聚合必须转 false')
     assert.equal(ctx.session.anyDirty.value, false)
   })
 })

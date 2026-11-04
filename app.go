@@ -33,12 +33,19 @@ import (
 // 调 Wails runtime；界面语言由前端 i18n 单点持有（不再需要两侧同步）。
 type App struct {
 	ctx context.Context
-	// dirty 是前端文档「是否落后于磁盘」状态的镜像：
-	// true ⟺ 编辑器内存内容 ≠ 磁盘内容（含从未落盘的新文档）。
-	// 真源在前端，此处只镜像、不读盘比对、不自行推断；由 SetDirty 写入、OnBeforeClose 读取。
-	// 语义定义、生命周期与扩展路径见 docs/architecture/ADR-005-dirty-semantics.md；
-	// 若扩展为多文档，本字段应升级为 docKey→dirty 映射，不得在此布尔量上叠加第二种含义。
-	dirty bool
+	// dirtyByDoc 是前端「文档是否落后于磁盘」的**逐文档**镜像，即 ADR-005 §四
+	// 预留的 docKey→dirty 映射（2026-11-04 落地）：
+	//   键 = 已落盘文档走 docKeyOf(absPath)；未落盘文档走 "u:"+<tabId>（独立命名空间，
+	//        与 16 位 hex 的 docKey 不相交）—— 见 dirtyKeyOf。
+	//   值 = 该文档的 dirty。
+	// 真源在前端，此处只镜像、不读盘比对、不自行推断；由 SetDirty / ForgetDoc 写入、
+	// OnBeforeClose 经 anyDirty() 读取。语义与生命周期见
+	// docs/architecture/ADR-005-dirty-semantics.md。
+	//
+	// 【为什么不复用旧的 dirty bool】单文档下「一个布尔量 = 当前文档」成立；多标签后
+	// 若仍是一个布尔量，两份文档的落盘状态就被挤进同一个字段 —— 与 ADR-005 §四
+	// 强化说明里「在 dirty 上叠加第二种含义」是同一类错误。故必须按文档分开。
+	dirtyByDoc map[string]bool
 	// closing 防止关闭流程中重复弹确认框（Linux Frameless + 自定义 CloseWindow 场景）。
 	closing bool
 	// docDir 是当前文档所在目录的镜像（真源在前端 filePath，由 SetDocDir 写入），
@@ -325,18 +332,63 @@ func (a *App) localeSnapshot() string {
 	return v
 }
 
-// SetDirty 由前端 watch(dirty) 调用，把「文档是否落后于磁盘」镜像到后端。
+// SetDirty 由前端 per-session dirty watcher 调用，把「该文档是否落后于磁盘」镜像到后端。
+// docIdentity 口径见 dirtyKeyOf：已落盘传绝对路径，未落盘传 "u:"+<tabId>。
 // 只接收、不推断：Go 侧不读盘比对内容；语义与生命周期以 ADR-005 为准。
 // 不加锁：读写都发生在 Wails 主事件循环序列内，最坏是一次多余的确认框，不影响数据安全。
-func (a *App) SetDirty(d bool) {
-	a.dirty = d
+func (a *App) SetDirty(docIdentity string, d bool) {
+	if a.dirtyByDoc == nil {
+		a.dirtyByDoc = map[string]bool{}
+	}
+	key := dirtyKeyOf(docIdentity)
+	if d {
+		a.dirtyByDoc[key] = true
+	} else {
+		// 清脏 = 删条目而不是写 false：留着 false 会让映射随「改一下存一下」
+		// 无限堆积，且 ForgetDoc 之后残留幽灵条目。
+		delete(a.dirtyByDoc, key)
+	}
+}
+
+// ForgetDoc 在标签关闭后摘掉该文档的映射条目。
+// 不摘的后果：用户关掉一个脏标签（已确认不保存）后它的脏标记还留在映射里，
+// 关窗口会被一个**已经不存在的文档**拦住 —— 既误拦，又掩盖了真正的脏文档。
+func (a *App) ForgetDoc(docIdentity string) {
+	delete(a.dirtyByDoc, dirtyKeyOf(docIdentity))
+}
+
+// anyDirty 是否有任何一个已知文档仍是脏的 —— 关闭守卫的唯一输入。
+// 单文档下这就是 a.dirty；多标签下必须遍历，否则漏掉后台标签 = 静默丢稿。
+func (a *App) anyDirty() bool {
+	for _, d := range a.dirtyByDoc {
+		if d {
+			return true
+		}
+	}
+	return false
+}
+
+// dirtyKeyOf 把前端传来的文档身份折成映射键。
+//
+// 【为什么未落盘要用 "u:"+<tabId> 独立命名空间】docKeyOf 是 sha1 前 16 位 hex
+// （snapshot.go:55），而未落盘文档没有路径可派生。若随便拿 tabId 当键，与 docKey
+// 的取值空间没有保证不相交 —— 一旦相撞，一个未落盘标签的脏标记会污染另一份
+// 已落盘文档。"u:" 前缀不是 hex，天然不会撞上 16 位 hex。
+//
+// 【为什么这里调 docKeyOf 而不是让前端传 docKey】docKeyOf 是 docKey 的**唯一派生**
+// （snapshot.go:89 注释明文禁止前端复刻 sha1）。前端只传身份，派生留在 Go 侧一份。
+func dirtyKeyOf(docIdentity string) string {
+	if len(docIdentity) > 2 && docIdentity[0] == 'u' && docIdentity[1] == ':' {
+		return docIdentity
+	}
+	return docKeyOf(docIdentity)
 }
 
 // OnBeforeClose 在窗口关闭前由 Wails 调用，返回 true 阻止关闭（Wails 约定）。
-// 读 SetDirty 镜像判定；自绘关闭按钮路径（CloseWindow）用请求携带的 dirty
-// 走同一份判定，见 confirmClose。
+// 读 SetDirty 镜像判定；自绘关闭按钮路径（CloseWindow）用请求携带的**聚合值**
+// （任一标签脏）走同一份判定，见 confirmClose。
 func (a *App) OnBeforeClose(ctx context.Context) bool {
-	return a.confirmClose(ctx, a.dirty, a.localeSnapshot())
+	return a.confirmClose(ctx, a.anyDirty(), a.localeSnapshot())
 }
 
 // confirmClose 是关闭守卫的判定本体，OnBeforeClose / CloseWindow 两条路径共用，

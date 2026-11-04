@@ -1969,7 +1969,7 @@ WebKit 的默认粘贴行为就是**把它当纯文本插入**（这就是「粘
 | **关闭窗口** | Wails v2.16 **没有 `WindowClose`**，只有强制退出的 `Quit`。自建 `App.CloseWindow()`（先问 `OnBeforeClose` 再 Quit）。故 ⌘Q 之类的「退出应用」快捷键**未设**——自绘菜单里也没有「退出」项（macOS 走红绿灯，Linux 走自绘 ×） |
 | ✅ **`treeSignal` 空转** | **已接线（2026-10-13，第九轮）**。原记录「Go 侧 `WatchDir` 未暴露」不成立——`watcher.go` 与 `app.go` 同包，方法早已暴露、绑定在册；真正缺的是**前端没订阅 `fs:changed`**。已补：`useFileOps.js` 的 `shouldReloadTree(payload, folderPath)` 纯函数守卫（严格相等才自增）+ `window.runtime?.EventsOn?.()` 订阅 + 14 条测试（含 7 条真实驱动）。`watcher.go` 另修去抖回调陈旧 payload 缺陷（代际校验）。**待 `wails dev` 真机确认三场景**：① 目录内新建/删除文件树即时刷新；② 切文件夹后旧目录迟到事件不触发；③ 空串停止后无事件推送。~~遗留 advisory：去抖边界双发、`w.Errors` 静默吞掉~~ **（2026-10-17 第十六轮：「去抖边界双发」经实测不成立、已撤销；`w.Errors` 已于 2026-10-15 记日志。去抖已改为串行状态机，语义由 `watcher_test.go` 5 条 Go 测试钉死）** |
 | **无拼写检查** | 刻意不做：CM 的 lint 对 CJK 基本无效，中文场景是伪需求 |
-| **零多标签页** | ADR-005 已预留 `dirty` 升级路径 |
+| **多标签页** | **已落地 P0–P3**（会话注册表 / per-session 持久化 / Go 侧 `dirtyByDoc` 映射）。**剩余 P4–P6**：拖拽重排、右键菜单、Tab Switcher、5 条命令、标签状态持久化、目视清单条目。决策见 `docs/decisions/MD-2026-10-28-multi-tab.md`，施工图见 `docs/plan/multi-tab-architecture.md` §11 |
 | **导出模板文案** | `export/exporters.js` 的 HTML 模板未国际化（Spec §1 明确留待后续） |
 
 ## 8. 已修记录与下一步候选（2026-10-11）

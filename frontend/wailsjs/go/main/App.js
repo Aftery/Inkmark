@@ -30,6 +30,10 @@ export function ExportPDF(arg1, arg2) {
   return window['go']['main']['App']['ExportPDF'](arg1, arg2);
 }
 
+export function ForgetDoc(arg1) {
+  return window['go']['main']['App']['ForgetDoc'](arg1);
+}
+
 export function ListDir(arg1) {
   return window['go']['main']['App']['ListDir'](arg1);
 }
@@ -66,8 +70,8 @@ export function SaveImageFromPath(arg1, arg2) {
   return window['go']['main']['App']['SaveImageFromPath'](arg1, arg2);
 }
 
-export function SetDirty(arg1) {
-  return window['go']['main']['App']['SetDirty'](arg1);
+export function SetDirty(arg1, arg2) {
+  return window['go']['main']['App']['SetDirty'](arg1, arg2);
 }
 
 export function SetDocDir(arg1) {

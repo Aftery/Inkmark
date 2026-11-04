@@ -118,7 +118,7 @@ function makeApp(goOpts) {
   const docState = useDocumentState({
     getEditor: () => editorRef.value,
     getActiveSession: session.getActiveSession,
-    anyDirty: session.anyDirty,
+    getSessions: () => session.sessions.value,
     setActivePath: session.setActivePath,
     renderedHtml: { value: '' },
     theme: { value: 'light' },
