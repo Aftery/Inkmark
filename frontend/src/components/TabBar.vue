@@ -1,9 +1,8 @@
 <script setup>
 /**
- * TabBar — 标签栏（渲染标签 + 脏点 + 点击激活 + 关闭）
+ * TabBar — 标签栏：渲染 / 脏点 / 激活 / 关闭 / 拖拽重排 / 右键菜单 / Tab Switcher
  * ----------------------------------------------------------------------------
- * 【P2 的范围】加了关闭按钮；仍不做「+」按钮、拖拽重排、右键菜单、Tab Switcher
- * （P4）。`v-show` 条件由 App.vue 控制（`!focusOn && sessions.length > 1`）——
+ * `v-show` 条件由 App.vue 控制（`!focusOn && sessions.length > 1`）——
  * 只开着一个文档时不出现整条 chrome。
  *
  * 【脏点为什么用 --meta（MD-04 裁决）】实测对比度（各自对 --surface）：
@@ -21,36 +20,127 @@
  * 【为什么标签不是一个 <button>】
  * 关闭按钮是第二个可点元素，而 HTML 不允许按钮嵌套按钮（嵌套后内层既拿不到
  * 焦点、点击语义也不确定）。故结构是：外层 div（承载 data-state / 脏点 /
- * 关闭按钮）+ 内层 `<button role="tab">`（承载激活与选中语义）+ 同级关闭按钮。
- * 这样「点标签切过去」与「点 × 关掉」是两个互不干扰的可聚焦目标。
+ * 关闭按钮 / 拖拽与右键）+ 内层 `<button role="tab">` + 同级关闭按钮。
  *
- * 【关闭按钮的 × 走 AppIcon 白名单】
- * `close` 是 SEMANTICS 里已登记的语义名（几何 `x`），故用 `<AppIcon name="close" />`
- * ——不新增图标、不改图标白名单（`scripts/verify/scripts-verify-icons.mjs` 的
- * 「24/24」不受影响），也没有用任何符号字形（P0 禁止 emoji 与字符图标）。
+ * 【P4：三个交互为什么都挂在标签栏这一层】
+ * App.vue 是 ≤150 行硬上限且余量已是 0（contracts.test.mjs 契约 5）。新增交互
+ * 只有两条路：下沉到 composable，或长在**已被装配的组件**内部。这三件都是
+ * 「标签栏的局部 UI」——菜单与浮层已各自拆成子组件（`TabContextMenu.vue` /
+ * `TabSwitcher.vue`，理由同为本文件撞 300 有效行门禁），本文件只保留**状态与分发**。
+ * **行为**（关闭 / 落点 / 已关闭栈 / 重排）一律走 emit，本组件不碰会话注册表：
+ * 它是纯展示层，没有一条业务规则落在 .vue 里。
  *
- * 【打印隐藏由 App.vue 的 @media print 负责】`.tab-bar` 是本组件的**根元素**，
- * 父组件的 scoped 规则能打到子组件的根（Vue 会给根元素同时挂父作用域 id），
- * 故这里不重复一份 —— 重复的规则会让人误以为「删一处没事」。
+ * 【本组件必须保持单根】父组件 App.vue 的 scoped 规则要靠「根元素带父作用域 id」
+ * 才能打到 `.tab-bar`（打印时隐藏它就是靠这一条）。多根会让它**静默失效**。
  */
+import { computed, reactive, ref } from 'vue'
 import { t } from '../i18n/index.js'
+import { tabSwitcher } from '../composables/useShortcuts.js'
 import AppIcon from './icons/AppIcon.vue'
+import TabContextMenu from './TabContextMenu.vue'
+import TabSwitcher from './TabSwitcher.vue'
 
-defineProps({
+const props = defineProps({
   /** DocSession[]（只读渲染；数组顺序 = 显示顺序） */
   sessions: { type: Array, required: true },
   activeId: { type: String, default: '' },
 })
-const emit = defineEmits(['select', 'close'])
+const emit = defineEmits(['select', 'close', 'move', 'close-others', 'close-right'])
 
 /**
- * 标签的语义状态。P2 仍是 clean / dirty 两态；
- * error（保存失败）与 unsaved（未落盘）按 MD-04 的优先级在后续阶段补，
+ * 标签的语义状态。P4 仍是 clean / dirty 两态；
+ * error（保存失败）与未落盘（unsaved）按 MD-04 的优先级在后续阶段补，
  * 取值口径已按 §4.9 的四个值定好（clean|dirty|unsaved|error）。
  */
 function stateOf(s) {
   return s.dirty ? 'dirty' : 'clean'
 }
+
+// ---------- 拖拽重排 ----------
+// 用原生 HTML5 拖拽：不引依赖（P4 边界），WKWebView 对 dragstart/drop 的支持
+// 是完整的（不能用的只有 iOS 触屏）。
+const dragId = ref('')
+const dropId = ref('')
+
+function onDragStart(s, e) {
+  dragId.value = s.id
+  // 必须 setData：部分 WebView 在没有负载数据时不会触发 drop
+  try {
+    e.dataTransfer.setData('text/plain', s.id)
+    e.dataTransfer.effectAllowed = 'move'
+  } catch { /* 旧 WebView 无 dataTransfer 时仍允许拖（只是不发数据） */ }
+}
+
+function onDragOver(s) {
+  if (dragId.value && s.id !== dragId.value) dropId.value = s.id
+}
+
+function onDragLeave(s) {
+  if (dropId.value === s.id) dropId.value = ''
+}
+
+/** 落点语义 = 「放到这一格的位置上」（由 useEditorSession.reorder 做 splice） */
+function onDrop(s) {
+  const from = dragId.value
+  resetDrag()
+  if (from && from !== s.id) emit('move', from, s.id)
+}
+
+function resetDrag() {
+  dragId.value = ''
+  dropId.value = ''
+}
+
+// ---------- 右键菜单（渲染与键盘在 TabContextMenu.vue，这里只管状态与分发）----------
+const menu = reactive({ show: false, x: 0, y: 0, tabId: '' })
+
+const MENU_ACTIONS = [
+  { action: 'close', labelKey: 'tabbar.menu.close' },
+  { action: 'others', labelKey: 'tabbar.menu.closeOthers' },
+  { action: 'right', labelKey: 'tabbar.menu.closeRight' },
+]
+
+/**
+ * 三项的禁用态（每次都按**当前活的** sessions 重算，不是打开菜单那一刻的快照）：
+ *   - 关闭其他：只剩一个标签时点了等于没反应 → 禁用
+ *   - 关闭右侧：点在最右那个上同理 → 禁用
+ */
+const menuModel = computed(() => {
+  const list = props.sessions
+  const i = list.findIndex((s) => s.id === menu.tabId)
+  return MENU_ACTIONS.map((m) => ({
+    ...m,
+    disabled: m.action === 'others'
+      ? list.length <= 1
+      : m.action === 'right' ? (i < 0 || i === list.length - 1) : false,
+  }))
+})
+
+function openMenu(s, e) {
+  menu.show = true
+  menu.tabId = s.id
+  menu.x = e.clientX
+  menu.y = e.clientY
+}
+
+function closeMenu() {
+  menu.show = false
+}
+
+function runMenu(action) {
+  const id = menu.tabId
+  closeMenu()
+  if (action === 'close') emit('close', id)
+  if (action === 'others') emit('close-others', id)
+  if (action === 'right') emit('close-right', id)
+}
+
+// ---------- Tab Switcher 浮层 ----------
+// 数据来自 useShortcuts 的 tabSwitcher：**按下瞬间的 MRU 快照**（MD-10）。
+// 组件只负责把 id 解析成会话对象，不参与取快照的时机（见 useCommands.cycleTab）。
+const switcherRows = computed(() => tabSwitcher.ids.value
+  .map((id) => props.sessions.find((s) => s.id === id))
+  .filter(Boolean))
 </script>
 
 <template>
@@ -62,6 +152,15 @@ function stateOf(s) {
       :class="{ 'is-active': s.id === activeId }"
       :data-tab-id="s.id"
       :data-state="stateOf(s)"
+      :data-dragging="dragId === s.id ? 'true' : 'false'"
+      :data-drop-target="dropId === s.id ? 'true' : 'false'"
+      draggable="true"
+      @dragstart="onDragStart(s, $event)"
+      @dragover.prevent="onDragOver(s)"
+      @dragleave="onDragLeave(s)"
+      @drop.prevent="onDrop(s)"
+      @dragend="resetDrag"
+      @contextmenu.prevent="openMenu(s, $event)"
     >
       <button
         class="tab-main"
@@ -85,16 +184,32 @@ function stateOf(s) {
         type="button"
         :aria-label="t('tabbar.close')"
         :title="t('tabbar.close')"
-        @click="emit('close', s)"
+        @click="emit('close', s.id)"
       >
         <AppIcon name="close" size="inline" />
       </button>
     </div>
+
+    <TabContextMenu
+      :open="menu.show"
+      :x="menu.x"
+      :y="menu.y"
+      :items="menuModel"
+      @run="runMenu"
+      @close="closeMenu"
+    />
+    <TabSwitcher
+      :open="tabSwitcher.open.value && switcherRows.length > 1"
+      :rows="switcherRows"
+      :active-id="activeId"
+    />
   </div>
 </template>
 
 <style scoped>
-/* 一行 chrome：与标题栏同宽、比它矮一档；内容横向可滚（标签多了不挤压） */
+/* 一行 chrome：与标题栏同宽、比它矮一档；内容横向可滚（标签多了不挤压）。
+   注意它同时是一个**裁剪容器**（overflow-x: auto）—— 菜单与浮层因此 teleport 到
+   body 并用 position: fixed，不放在本元素内部做绝对定位。 */
 .tab-bar {
   flex: none;
   display: flex;
@@ -119,7 +234,8 @@ function stateOf(s) {
   color: var(--fg-2);
   transition:
     background-color var(--motion-fast) var(--ease-standard),
-    color var(--motion-fast) var(--ease-standard);
+    color var(--motion-fast) var(--ease-standard),
+    opacity var(--motion-fast) var(--ease-standard);
 }
 
 .tab:hover { background: var(--surface-2); color: var(--fg); }
@@ -131,6 +247,11 @@ function stateOf(s) {
   color: var(--fg);
   font-weight: var(--weight-emphasize);
 }
+
+/* 拖拽反馈：被拖的那格变淡（数据仍在预览里），落点用一条 inset 竖线当插入位置。
+   两个信号都不靠颜色单独传达（透明度 / 位置），且都只用既有 token。 */
+.tab[data-dragging='true'] { opacity: 0.45; }
+.tab[data-drop-target='true'] { box-shadow: inset 2px 0 0 var(--accent); }
 
 .tab-main {
   display: flex;
@@ -192,4 +313,8 @@ function stateOf(s) {
 
 .tab-close:hover { background: var(--danger-soft); color: var(--danger); }
 .tab-close:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+
+@media (prefers-reduced-motion: reduce) {
+  .tab, .tab-close { transition: none; }
+}
 </style>

@@ -69,6 +69,9 @@
 | 操作 | 快捷键 |
 |---|---|
 | 新建 | ⌘N |
+| 新建标签页 | ⌘T |
+| 关闭标签页 | ⌘⌥W |
+| 恢复最近关闭的标签页 | ⌘⇧T |
 | 打开… | ⌘O |
 | 打开文件夹… | ⌘⇧O |
 | 保存 | ⌘S |
@@ -131,6 +134,8 @@
 | 操作 | 快捷键 |
 |---|---|
 | 命令面板（搜索并执行任意命令） | ⌘⇧A |
+| 上一个标签页 | ⌘⌥← |
+| 下一个标签页 | ⌘⌥→ |
 | 专注模式 | ⌘⇧F |
 | 显示/隐藏大纲 | ⌘B |
 | 放大 | ⌘= |
@@ -206,7 +211,7 @@ inkmark/
     │   └── themes/          # tokens/design-tokens.css（Token 唯一真源）+ index.css（唯一样式入口）
     │                        #   + app-shell.css / platform-darwin.css / editor-wysiwyg.css
     │                        #   + theme.js（主题解析）/ prefs.js（偏好唯一真源）
-    ├── tests/           # node:test 测试网（717 条测试 / 180 个 suite，零第三方依赖），需 Node ≥22
+    ├── tests/           # node:test 测试网（745 条测试 / 190 个 suite，零第三方依赖），需 Node ≥22
     └── wailsjs/         # Wails 自动生成的 IPC 绑定（勿手改）
 ```
 
@@ -240,7 +245,7 @@ npm install
 
 npm run dev      # 本地开发服务器
 npm run build    # 生产构建 → frontend/dist
-npm test         # 测试网（717 条测试，零第三方依赖），【需 Node ≥22】
+npm test         # 测试网（745 条测试，零第三方依赖），【需 Node ≥22】
 ```
 
 > - `npm test` 用的是 Node **内置** `node:test`（无第三方测试依赖），因此**必须 Node ≥22**；低版本会报 `node --test` 不可用。
@@ -251,7 +256,7 @@ npm test         # 测试网（717 条测试，零第三方依赖），【需 No
 ### 门禁脚本（与 CI 同口径）
 
 ```bash
-cd frontend && npm test                                    # 测试网，期望 717/717
+cd frontend && npm test                                    # 测试网，期望 745/745
 node scripts/verify/verify-readme-claims.mjs               # README 数字声明 ↔ 实测（自己会再跑一遍测试网；退出码 1=漂移 / 2=测量失效）
 node scripts/verify/verify-shortcuts.mjs                   # 快捷键三方对齐（README ↔ 速查表 ↔ COMMANDS）
 node scripts/verify/scan-i18n-residue.mjs                  # i18n 文案残留

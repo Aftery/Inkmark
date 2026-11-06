@@ -21,6 +21,17 @@ export default {
   // ---- タブバー（複数ドキュメント）----
   'tabbar.label': '開いている文書',
   'tabbar.close': 'タブを閉じる',
+  // P4：タブバーの操作（メニュー文言 + 右クリックメニュー + 切り替えオーバーレイ）
+  'tabbar.newTab': '新しいタブ',
+  'tabbar.closeTab': 'タブを閉じる',
+  'tabbar.reopenClosedTab': '閉じたタブを開き直す',
+  'tabbar.prevTab': '前のタブ',
+  'tabbar.nextTab': '次のタブ',
+  'tabbar.menu.label': 'タブの操作',
+  'tabbar.menu.close': '閉じる',
+  'tabbar.menu.closeOthers': '他のタブを閉じる',
+  'tabbar.menu.closeRight': '右側のタブを閉じる',
+  'tabbar.switcher': '最近使ったタブ',
   // ---- 未保存タブを閉じるときの三択確認 ----
   'confirm.title': '未保存の変更',
   'confirm.body': '「{title}」に未保存の変更があります。閉じる前に保存しますか？',
@@ -106,6 +117,11 @@ export default {
 
   // ---- ショートカット一覧（説明のみ。キー表記は翻訳しない）----
   'shortcuts.new': '新規ファイル',
+  'shortcuts.newTab': '新しいタブ',
+  'shortcuts.closeTab': '現在のタブを閉じる（⌘W はウィンドウを閉じる）',
+  'shortcuts.reopenClosedTab': '最後に閉じたタブを開き直す',
+  'shortcuts.prevTab': '前のタブ（タブバーの並び順）',
+  'shortcuts.nextTab': '次のタブ（タブバーの並び順）',
   'shortcuts.open': 'ファイルを開く / フォルダを開く',
   'shortcuts.save': '保存 / 名前を付けて保存',
   'shortcuts.print': '印刷（PDF を書き出し、PDF リーダーから印刷できます）',
@@ -215,6 +231,7 @@ export default {
   'toast.updateBadVersion': 'バージョン番号を比較できませんでした',
   'toast.syntaxLoaded': '記法のサンプルを読み込みました（⌘S で別保存）',
   'toast.newFile': '新しいファイルを作成しました（⌘S で保存）',
+  'toast.noClosedTab': '開き直せるタブがありません',
   'toast.saveBeforeRename': '名前を変更する前にドキュメントを保存してください（⌘S）',
   'toast.renameUnsupported': 'ここでは名前を変更できません',
   'toast.renamed': '名前を変更しました',

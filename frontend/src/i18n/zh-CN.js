@@ -36,6 +36,17 @@ export default {
   // ---- 标签栏（多标签页）----
   'tabbar.label': '打开的文档',
   'tabbar.close': '关闭标签页',
+  // P4：标签栏交互（命令菜单项文案 + 右键菜单 + 切换浮层）
+  'tabbar.newTab': '新建标签页',
+  'tabbar.closeTab': '关闭标签页',
+  'tabbar.reopenClosedTab': '重新打开关闭的标签页',
+  'tabbar.prevTab': '上一个标签页',
+  'tabbar.nextTab': '下一个标签页',
+  'tabbar.menu.label': '标签页操作',
+  'tabbar.menu.close': '关闭',
+  'tabbar.menu.closeOthers': '关闭其他',
+  'tabbar.menu.closeRight': '关闭右侧',
+  'tabbar.switcher': '最近使用的标签页',
   // ---- 关闭脏标签的三选一确认 ----
   'confirm.title': '未保存的更改',
   'confirm.body': '「{title}」有未保存的更改。关闭前要保存吗？',
@@ -121,6 +132,11 @@ export default {
 
   // ---- 快捷键速查（仅描述列；键位串不译，见 Spec §7 坑 4）----
   'shortcuts.new': '新建文件',
+  'shortcuts.newTab': '新建标签页',
+  'shortcuts.closeTab': '关闭当前标签页（⌘W 仍归「关闭窗口」）',
+  'shortcuts.reopenClosedTab': '恢复最近关闭的标签页',
+  'shortcuts.prevTab': '上一个标签页（按标签栏顺序）',
+  'shortcuts.nextTab': '下一个标签页（按标签栏顺序）',
   'shortcuts.open': '打开文件 / 打开文件夹',
   'shortcuts.save': '保存 / 另存为',
   'shortcuts.print': '打印（导出 PDF，可在系统阅读器里打印）',
@@ -230,6 +246,7 @@ export default {
   'toast.updateBadVersion': '无法检查更新：版本号格式无法比较',
   'toast.syntaxLoaded': '已载入语法示例（⌘S 可另存）',
   'toast.newFile': '已新建文件，⌘S 保存到磁盘',
+  'toast.noClosedTab': '没有可恢复的标签页',
   'toast.saveBeforeRename': '请先保存文档（⌘S）再重命名',
   'toast.renameUnsupported': '当前环境不支持重命名',
   'toast.renamed': '已重命名',

@@ -21,6 +21,17 @@ export default {
   // ---- Tab bar (multi-document) ----
   'tabbar.label': 'Open documents',
   'tabbar.close': 'Close tab',
+  // P4: tab bar interactions (menu labels + context menu + switcher overlay)
+  'tabbar.newTab': 'New tab',
+  'tabbar.closeTab': 'Close tab',
+  'tabbar.reopenClosedTab': 'Reopen closed tab',
+  'tabbar.prevTab': 'Previous tab',
+  'tabbar.nextTab': 'Next tab',
+  'tabbar.menu.label': 'Tab actions',
+  'tabbar.menu.close': 'Close',
+  'tabbar.menu.closeOthers': 'Close other tabs',
+  'tabbar.menu.closeRight': 'Close tabs to the right',
+  'tabbar.switcher': 'Recently used tabs',
   // ---- Confirm dialog for closing a dirty tab ----
   'confirm.title': 'Unsaved changes',
   'confirm.body': '"{title}" has unsaved changes. Save before closing?',
@@ -105,6 +116,11 @@ export default {
 
   // ---- Shortcut cheat sheet (descriptions only; key caps are not translated) ----
   'shortcuts.new': 'New file',
+  'shortcuts.newTab': 'New tab',
+  'shortcuts.closeTab': 'Close current tab (⌘W still closes the window)',
+  'shortcuts.reopenClosedTab': 'Reopen the most recently closed tab',
+  'shortcuts.prevTab': 'Previous tab (in tab bar order)',
+  'shortcuts.nextTab': 'Next tab (in tab bar order)',
   'shortcuts.open': 'Open file / Open folder',
   'shortcuts.save': 'Save / Save as',
   'shortcuts.print': 'Print (exports a PDF you can print from your PDF reader)',
@@ -214,6 +230,7 @@ export default {
   'toast.updateBadVersion': 'Version numbers are not comparable',
   'toast.syntaxLoaded': 'Syntax sample loaded (⌘S to save a copy)',
   'toast.newFile': 'New file created — ⌘S to save it to disk',
+  'toast.noClosedTab': 'No closed tab to reopen',
   'toast.saveBeforeRename': 'Save the document (⌘S) before renaming',
   'toast.renameUnsupported': 'Renaming is not supported here',
   'toast.renamed': 'Renamed',

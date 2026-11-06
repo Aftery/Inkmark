@@ -191,6 +191,36 @@ export function useEditorSession({
   }
 
   /**
+   * 调整标签的显示顺序（拖拽重排用）。
+   *
+   * 【只动 `sessions` 的顺序，绝不动 `activeId`】拖拽是「改变排列」，不是「改变
+   * 焦点」：把后台标签拖到最前面之后，用户仍在编辑原来那份文档。若这里顺手把
+   * activeId 指到被拖的那个，就变成「拖一下就跳文档」——与 MD-15 同源的反直觉
+   * 缺陷（功能生效了，用户感知为「点了别的东西」）。
+   * MRU 也不动：它是「最近访问顺序」，与排列无关（MD-09/10 都依赖它）。
+   *
+   * @returns {boolean} 顺序是否真的变了（false = 越界 / 原地 / 无变化）
+   */
+  function reorder(fromIndex, toIndex) {
+    const list = sessions.value
+    if (fromIndex === toIndex) return false
+    if (!Number.isInteger(fromIndex) || !Number.isInteger(toIndex)) return false
+    if (fromIndex < 0 || fromIndex >= list.length) return false
+    if (toIndex < 0 || toIndex >= list.length) return false
+    const next = list.slice()
+    const [moved] = next.splice(fromIndex, 1)
+    next.splice(toIndex, 0, moved)
+    sessions.value = next
+    return true
+  }
+
+  /** 按 id 重排（组件侧用 id 而不是下标：下标在并发增删下会指错对象） */
+  function moveSession(fromId, toId) {
+    const list = sessions.value
+    return reorder(list.findIndex((s) => s.id === fromId), list.findIndex((s) => s.id === toId))
+  }
+
+  /**
    * 改激活会话的路径（另存为 / 重命名 / 打开）。**filePath 的唯一写入入口**。
    * 标题同步在这里做：`title` 是 `session.title` 的派生值，路径变了标题必须跟着变。
    */
@@ -485,7 +515,7 @@ export function useEditorSession({
     editorEl, slashRef, markdown, filePath, folderPath, title, caret, wordCount, previewHtml, exportHtml,
     // 会话注册表
     sessions, activeId, mru, activeSession, getActiveSession, findByPath, anyDirty,
-    createSession, activateSession, removeSession, setActivePath, bindDocState,
+    createSession, activateSession, removeSession, setActivePath, bindDocState, reorder, moveSession,
     // 预览 / 文档替换
     queuePreview, flushPreview, cancelPendingPreview, syncAfterDocReplace, renderMarkdown,
   }

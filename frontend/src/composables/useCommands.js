@@ -29,6 +29,7 @@ import { promoteHeading, demoteHeading } from '../editor/headingLevel.js'
 import { SYNTAX_DOC } from '../editor/sampleDocs.js'
 import {
   commandsByGroup, fmtAccel, onCommand, installGlobalShortcuts, uiState,
+  openTabSwitcher, closeTabSwitcher, tabSwitcher,
 } from './useShortcuts.js'
 import { WindowMinimise, WindowToggleMaximise } from '../../wailsjs/runtime/runtime.js'
 import { ClipboardGet, ClipboardSet, Version } from '../../wailsjs/go/main/App.js'
@@ -218,10 +219,50 @@ export function useCommands(deps) {
 
   // ---------- 命令注册（菜单点击与快捷键共用这一张表）----------
 
+  // ---------- 标签切换 + Tab Switcher 浮层（P4）----------
+  /** 浮层停留时长：按一下就熄。取 200ms —— 与既有 MOTION 的「进入 UI」档同量级，
+   *  够用户看清列表、又不至于挡着下一次操作。 */
+  const SWITCHER_HIDE_MS = 200
+  let switcherTimer = null
+
+  /**
+   * 按**显示序**切到上 / 下一个标签，到头折返。
+   *
+   * 【浮层排序用「按下瞬间的 MRU 快照」（MD-10）】只在浮层从「关」变「开」的那
+   * 一次取快照，已在开着时**不重取** —— 重取会让连按两下时列表顺序变化（用户
+   * 看到列表在跳），且「下一个」的参照系自相矛盾。注意**切换本身按显示序**，
+   * 快照只用于浮层的排序：移动按位置、浮层按最近使用，两者分工固定。
+   *
+   * 【为什么用 200ms 定时器收起，而不是监听 ⌘ 的 keyup】这一行是取舍记录：
+   * keyup 在 WKWebView 上有两个坑 —— 切走窗口再回来时 keyup 会丢（浮层永久卡在
+   * 屏幕上，没有任何事件能把它收走）、且需要再装一个 window 监听去和
+   * `onEscKeydown` 抢同一条事件链。定时器是自愈的：每次按下重置，松手 200ms
+   * 后必然收起，不存在「卡住」态。
+   */
+  function cycleTab(delta) {
+    const list = session.sessions.value
+    if (list.length < 2) return
+    const i = list.findIndex((s) => s.id === session.activeId.value)
+    const target = list[(i + delta + list.length) % list.length]
+    if (!tabSwitcher.open.value) openTabSwitcher(session.mru.value)
+    void session.activateSession(target)
+    clearTimeout(switcherTimer)
+    switcherTimer = setTimeout(closeTabSwitcher, SWITCHER_HIDE_MS)
+  }
+
   function registerCommands() {
     const map = {
       // 文件
       'file.new': fileOps.newFile,
+      // ⌘T 与 ⌘N 同一个实现：多标签下「新建」必然产生一个新标签（见命令表注释）
+      'file.newTab': () => fileOps.newFile(),
+      // ⌘⌥W 关的是**当前**标签；关闭的生命周期（留底 / 确认 / 落点）全在 useTabLifecycle
+      'file.closeTab': () => tabs.closeTab(session.activeId.value),
+      // ⌘⇧T：栈空时给轻提示 —— 静默无反应是本仓明令禁止的形态（用户会以为按键坏了）
+      'file.reopenClosedTab': async () => {
+        const ok = await tabs.reopenClosedTab()
+        if (!ok) notify?.(t('toast.noClosedTab'))
+      },
       'file.open': fileOps.openFile,
       'file.openFolder': fileOps.openFolder,
       'file.save': () => docState.saveFile(),
@@ -282,6 +323,8 @@ export function useCommands(deps) {
       // （contracts.test.mjs）只扫 useCommands.js，且「命令有登记但无处理器」
       // 正是它要挡的静默失败：菜单里点了没反应、还不报错。
       'view.commandPalette': () => { uiState.paletteOpen.value = !uiState.paletteOpen.value },
+      'view.prevTab': () => cycleTab(-1),
+      'view.nextTab': () => cycleTab(1),
       'view.focus': workspace.toggleFocus,
       'view.outline': toggleOutline,
       'view.zoomIn': () => prefs.changeZoom(10),
@@ -340,6 +383,9 @@ export function useCommands(deps) {
   onBeforeUnmount(() => {
     removeShortcuts?.()
     window.removeEventListener('keydown', onEscKeydown)
+    // 浮层定时器必须随组件销毁清掉：不清会在「已卸载」之后继续跑，
+    // 把模块级 tabSwitcher 改成一次迟到状态（测试里表现为跨用例污染）
+    clearTimeout(switcherTimer)
   })
 
   return {

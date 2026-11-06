@@ -30,6 +30,18 @@ import { t } from '../i18n/index.js'
 /** 修饰键 → 展示符号（顺序即书写顺序，不可调换） */
 const MOD_ORDER = ['⌘', '⇧', '⌥', '⌃']
 
+/**
+ * 方向键的 KeyboardEvent.key → 命令表里的写法。
+ *
+ * 【为什么只补 ← →，不补 ↑ ↓】`view.prevTab` / `view.nextTab`（⌘⌥←/→）必须由
+ * **全局分发**命中，而 `e.key` 对方向键给的是 'ArrowLeft' 这类长名 —— 不翻译就
+ * 永远拼不出 '⌘⌥←'（快捷键按了没反应，且不报错）。
+ * 而 ↑ ↓ **刻意不补**：`⌥↑` / `⌥↓` / `⇧⌥↓` 由编辑器 keymap 承接（见
+ * verify-shortcuts.mjs 的 KEYMAP 豁免表），补进来会给同一条命令造出两条分发
+ * 路径（全局 + keymap），谁先命中取决于焦点位置 —— 那正是「行为不确定」。
+ */
+const ARROW_ALIAS = { ArrowLeft: '←', ArrowRight: '→' }
+
 /** 规范键位串 → 命令 id */
 const ACCEL_TO_ID = new Map()
 /** 命令 id → 命令定义 */
@@ -46,6 +58,16 @@ const ID_TO_COMMAND = new Map()
 export const COMMANDS = [
   // ---- 文件 ----
   { id: 'file.new', group: 'file', labelKey: 'titlebar.new', accel: '⌘N', descKey: 'shortcuts.new' },
+  // 多标签页（P4）：⌘N 与 ⌘T 在行为上**就是同一件事** —— 多标签下「新建」必然
+  // 产生一个新标签，不存在「在同一个标签里清空」的另一条路径。之所以仍分两条
+  // 命令，是因为读者的肌肉记忆分两套（⌘N = 新建文档、⌘T = 新标签页，浏览器 /
+  // 编辑器通用），而键位必须各自登记才进得了 README 与速查表。两者共用一个
+  // 处理器（fileOps.newFile），不复制实现。
+  { id: 'file.newTab', group: 'file', labelKey: 'tabbar.newTab', accel: '⌘T', descKey: 'shortcuts.newTab' },
+  // 关闭标签 **不得**用 ⌘W（MD-02：macOS 的 ⌘W 是「关窗口」，单窗口应用里绑它
+  // 等于把「关标签」与「关窗口」缝成一件事）。
+  { id: 'file.closeTab', group: 'file', labelKey: 'tabbar.closeTab', accel: '⌘⌥W', descKey: 'shortcuts.closeTab' },
+  { id: 'file.reopenClosedTab', group: 'file', labelKey: 'tabbar.reopenClosedTab', accel: '⌘⇧T', descKey: 'shortcuts.reopenClosedTab' },
   { id: 'file.open', group: 'file', labelKey: 'titlebar.open', accel: '⌘O', descKey: 'shortcuts.open' },
   { id: 'file.openFolder', group: 'file', labelKey: 'menu.openFolder', accel: '⌘⇧O', descKey: null },
   { id: 'file.save', group: 'file', labelKey: 'titlebar.save', accel: '⌘S', descKey: 'shortcuts.save' },
@@ -109,6 +131,15 @@ export const COMMANDS = [
   // 系统保留键（⌘⇧3/4/5 截图、⌘⇧Q 注销）冲突的组合。
   // 改键位只改这一行即可 —— CommandPalette.vue 从本表读取键位，不硬编码。
   { id: 'view.commandPalette', group: 'view', labelKey: 'menu.commandPalette', accel: '⌘⇧A', descKey: 'shortcuts.commandPalette' },
+  // 标签切换（P4）：**显示序**的上/下一个，到头折返。
+  // 【为何不走 MRU 序】command 的语义要可预期 —— 用户按 ⌘⌥→ 时期待的是「右边
+  // 那个」，不是「上次看过的那个」；MRU 序用在 **Tab Switcher 浮层**的排序上
+  // （MD-10 的快照），两者分工固定：**移动按位置，浮层按最近使用**。
+  // 【为何是 ⌘⌥←/→ 而不是 ⌘⌥↑/↓ 或 ⌃Tab】⌘⌥↑/⌘⌥↓ 已被标题升降占用（⌘⌥ 家族
+  // 内已被格式命令挤满）；⌃Tab 由 macOS 系统级 App 切换器占用，WKWebView 里
+  // 拿不到。⌘⌥←/→ 在命令表里此前完全空闲。
+  { id: 'view.prevTab', group: 'view', labelKey: 'tabbar.prevTab', accel: '⌘⌥←', descKey: 'shortcuts.prevTab' },
+  { id: 'view.nextTab', group: 'view', labelKey: 'tabbar.nextTab', accel: '⌘⌥→', descKey: 'shortcuts.nextTab' },
   { id: 'view.focus', group: 'view', labelKey: 'menu.focus', accel: '⌘⇧F', descKey: 'shortcuts.focus' },
   { id: 'view.outline', group: 'view', labelKey: 'menu.outline', accel: '⌘B', descKey: 'shortcuts.outline' },
   { id: 'view.zoomIn', group: 'view', labelKey: 'menu.zoomIn', accel: '⌘=', descKey: 'shortcuts.zoom' },
@@ -157,6 +188,7 @@ export function fmtAccel(accel) {
 /** 物理键 → 规范单键写法（字母统一大写，符号键原样） */
 function normKeyChar(k) {
   if (k === ' ') return 'Space'
+  if (ARROW_ALIAS[k]) return ARROW_ALIAS[k]
   if (k.length === 1 && /[a-z]/i.test(k)) return k.toUpperCase()
   return k
 }
@@ -281,6 +313,37 @@ export const uiState = {
   // 处理器，且处理器必须集中在 useCommands.js），CommandPalette.vue 监听它渲染。
   // 这样「菜单点 / 按 ⌘⇧A / 面板内执行」三条路径都收敛到同一个开关。
   paletteOpen: ref(false),
+}
+
+// ---------------------------------------------------------------------------
+// Tab Switcher 浮层（P4 · MD-10）
+// ---------------------------------------------------------------------------
+// 【为什么状态放在这里而不是 TabBar.vue】
+// 触发方是**命令**（⌘⌥←/→ 的处理器在 useCommands.js），渲染方是**组件**
+// （浮层挂在 TabBar.vue 内部，因为 App.vue 的 150 行余量是 0）。两者不在同一
+// 模块，唯一不制造第二份真源的做法就是模块级 ref —— 与 uiState 里那几个开关
+// 同构（CommandPalette 也是这条分工）。
+//
+// 【快照语义（MD-10）】`ids` 只在**浮层从关到开**的那一次取，整个循环期间不重算。
+// 若改成每次按都重算实时 MRU，循环过程中列表自身在变 —— 连按两下浮层顺序就会
+// 不一致（用户看到列表在跳），且「下一个」的语义自相矛盾。
+// 因此 `openTabSwitcher` **不是**幂等重置：调用方必须先判 `open`，开着时不得再取快照。
+export const tabSwitcher = {
+  open: ref(false),
+  /** @type {import('vue').Ref<string[]>} 标签 id 序列（按下瞬间的 MRU 序快照） */
+  ids: ref([]),
+}
+
+/** 取快照并显示浮层。**只在浮层关闭时调用**（见上方「快照语义」）。 */
+export function openTabSwitcher(ids) {
+  tabSwitcher.ids.value = [...ids]
+  tabSwitcher.open.value = true
+}
+
+/** 收起浮层。快照一并丢弃 —— 留着会让下一次误读到上一次的列表。 */
+export function closeTabSwitcher() {
+  tabSwitcher.open.value = false
+  tabSwitcher.ids.value = []
 }
 
 export const settingsOpen = computed(() => uiState.settingsOpen.value)

@@ -230,10 +230,17 @@ describe('标签栏 · 装配契约', () => {
     )
   })
 
-  test('TabBar 声明了 select / close 事件，脏点带非颜色信号（data-state + role=img + aria-label）', () => {
+  test('TabBar 声明了 select / close / move / close-others / close-right 事件，脏点带非颜色信号（data-state + role=img + aria-label）', () => {
     // P2 起标签栏多一个 close（关闭按钮是第二个可点元素 —— 故标签根是 div、
-    // 内层才是 button[role=tab]，HTML 不允许按钮嵌套按钮）
-    assert.match(TAB_BAR, /defineEmits\(\['select', 'close'\]\)/, 'TabBar 未声明 select / close 事件')
+    // 内层才是 button[role=tab]，HTML 不允许按钮嵌套按钮）；
+    // P4 再加三个：拖拽重排（move）、右键菜单的两条批量关闭。
+    // 五个事件必须**逐个**点明 —— 这里用精确列表而不是 includes('close')：
+    // 少一个事件就是「某个交互被删了但测试仍绿」。
+    assert.match(
+      TAB_BAR,
+      /defineEmits\(\['select', 'close', 'move', 'close-others', 'close-right'\]\)/,
+      'TabBar 的事件清单与装配契约不一致（P4 起必须五个）',
+    )
     assert.match(TAB_BAR, /data-state=/, '缺 data-state：状态只剩颜色一条信道（WCAG 1.4.1）')
     assert.match(TAB_BAR, /role="img"/, '脏点缺 role=img，aria-label 不会被读屏播报')
     assert.match(TAB_BAR, /:aria-label="t\('common\.unsaved'\)"/, '脏点的 aria-label 必须走 i18n')
