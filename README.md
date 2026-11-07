@@ -331,7 +331,7 @@ node scripts/probe/probe-r11-fixes.mjs             # 第十一轮修复：全角
 | 10 | **macOS 未签名分发** | Gatekeeper 会拦，需 Apple 开发者账号（$99/年）签名 + 公证。⚠️ `release.yml` 目前**没有** codesign / notarize 步骤，产物是未签名 zip —— 用户下载后需右键「打开」或 `xattr -d com.apple.quarantine` |
 | 11 | **无「退出应用」快捷键** | Wails v2.16 没有 `WindowClose`，⌘Q 未设；关闭走 macOS 红绿灯 / Linux 自绘 ×（`App.CloseWindow()`） |
 | 12 | **导出产物不跟随正文字体偏好（已裁决）** | 2026-10-13 裁决**不跟随**：导出物是分发格式，把作者本地偏好写死进 HTML/PDF 会让排版随机器漂移；保持主题级 `--font-body` 保证任何机器导出一致。用户偏好是本地阅读体验，不是文档内容。重开条件见 [`docs/decisions/OPEN-DECISIONS.md`](docs/decisions/OPEN-DECISIONS.md) |
-| 13 | **多标签页已落地（P1–P5），真机未验收** | 2026-11-04 落地：会话注册表 + 按标签换 `EditorState`（撤销栈各自隔离）+ per-session 持久化 + Go 侧 `dirtyByDoc` 逐文档映射 + 标签状态持久化（含未落盘草稿）。**剩余**：P4 交互的**真机目视**（右键菜单开合、Switcher 浮层对齐、拖拽手感）与 P6 目视清单条目。决策见 `docs/decisions/MD-2026-10-28-multi-tab.md` |
+| 13 | **多标签页已落地（P0–P6 代码），真机未验收** | 2026-11-04 落地：会话注册表 + 按标签换 `EditorState`（撤销栈各自隔离）+ per-session 持久化 + Go 侧 `dirtyByDoc` 逐文档映射 + 标签状态持久化（含未落盘草稿）+ 拖拽 / 右键菜单 / Tab Switcher / 5 条命令。**目视清单已补齐**：`docs/HANDOFF.md` §6 第 30~45 项（与 `docs/qa/visual-checklist.html` 严格同步，门禁守着）。**剩余只有真机目视**——16 条一条都没验过，第 30 项（IME 合成期切标签，MD-11 P0 级）风险最高。决策见 `docs/decisions/MD-2026-10-28-multi-tab.md` |
 | 14 | **无拼写检查（刻意不做）** | CodeMirror 的 lint 对 CJK 基本无效，中文写作场景是**伪需求**，故不引入。英文拼写需自行接第三方 lint 扩展 |
 | 15 | **导出模板文案未国际化** | `export/exporters.js` 的 HTML 模板未接 `t()`（Spec 明确留待后续） |
 | 16 | **`App.vue` 行数余量 0（已压线）** | 装配层硬上限 **总行数** 150 行、当前 150 行（契约 5 实测；2026-10-28 P0 腾 6 行、P1 标签栏 4 行、P2 确认弹层 2 行，**余量已用尽**）。任何新增装配行都必须先腾行（下沉到 composables/），门禁口径是**总行数**（含注释与空行，比有效行更严） |
