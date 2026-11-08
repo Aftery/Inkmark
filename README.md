@@ -263,6 +263,7 @@ node scripts/verify/scan-i18n-residue.mjs                  # i18n 文案残留
 ./scripts/p0-check-emoji.sh frontend/src main.go app.go    # P0 零 emoji
 /usr/local/opt/go/bin/go vet ./...                          # Go 静态检查（注意：go 不在 PATH）
 CGO_ENABLED=1 /usr/local/opt/go/bin/go test ./...           # Go 测试（含快照与剪贴板判据；e2e 剪贴板为空时 skip）
+CGO_ENABLED=1 /usr/local/opt/go/bin/go test -race -count=1 ./...  # 数据竞争门禁（2026-11-08 新增；普通 go test 抓不到 Wails 并发 IPC 下的 map 竞争）
 CGO_ENABLED=0 GOOS=linux   /usr/local/opt/go/bin/go build -o /dev/null .   # Linux 适配层不腐烂
 CGO_ENABLED=0 GOOS=windows /usr/local/opt/go/bin/go build -o /dev/null .   # Windows 适配层不腐烂
 node scripts/smoke/render-check.mjs                        # 真渲染冒烟（CI frontend job 第三步；需先 npm run build）

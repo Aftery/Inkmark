@@ -168,6 +168,7 @@ node scripts/verify/scripts-verify-icons.mjs        # 图标↔ phaseC 规格逐
 node scripts/verify/scripts-verify-theme.mjs        # theme.js 优先级自检，期望 8/8、退出码 0
 /usr/local/opt/go/bin/go vet ./...           # 注意：go 不在 PATH。⚠ 本机必绿（dist 有产物），别把它当「仓库编得出来」的证据
 CGO_ENABLED=1 /usr/local/opt/go/bin/go test ./...   # Go 测试（2026-10-15 起CI 才跑；e2e 用例剪贴板为空时 skip）
+CGO_ENABLED=1 /usr/local/opt/go/bin/go test -race -count=1 ./...   # 数据竞争门禁（2026-11-08 新增；见 §5 go ③½ 与 ci.yml 注释）
 CGO_ENABLED=0 GOOS=linux   /usr/local/opt/go/bin/go build -o /dev/null .   # 通道③ Linux 适配层不腐烂
 CGO_ENABLED=0 GOOS=windows /usr/local/opt/go/bin/go build -o /dev/null .   # 通道③ Windows 适配层不腐烂
 node scripts/smoke/render-check.mjs         # 真渲染冒烟（需先 npm run build），期望 PASS
@@ -1602,6 +1603,7 @@ WebKit 的默认粘贴行为就是**把它当纯文本插入**（这就是「粘
 | `go` ① | vet（printf 动词错 / 不可达代码 / 锁复制） | `go vet ./...` |
 | `go` ② | build（**vet 不做链接，cgo 导出代码要 build 才暴露**） | `go build -o /dev/null .` |
 | `go` ③ | **测试**（2026-10-15 新增。此前本仓零Go 测试，「什么字节才算图片」的判据完全裸奔） | `CGO_ENABLED=1 go test ./...` |
+| `go` ③½ | **数据竞争检测**（2026-11-08 新增。2026-11-08 真机 P0 崩溃 `fatal error: concurrent map writes`（app.go SetDirty）在 745/745 与普通 go test 全绿下漏到真机：Wails 对每条前端 IPC 各起一个 goroutine，并发写 map 只在调度撞上时炸，普通测试抽样不到。成本实测 2~6s。元测试：对「去锁」变异体跑该命令必 FAIL（4 处 race/fatal），修复版必 PASS） | `CGO_ENABLED=1 go test -race -count=1 ./...` |
 | `go` ④ | **Linux / Windows 交叉编译**（2026-10-15 新增。通道③ 的另两个平台适配层此前不在任何门禁里，改坏了没人知道） | `CGO_ENABLED=0 GOOS=linux go build` + `GOOS=windows` |
 | `p0-emoji` | 界面不得用 emoji 当图标（含注释） | `./scripts/p0-check-emoji.sh frontend/src main.go app.go` |
 | `docs-contract` ① | 键位在 README / 应用内速查表 / **`useShortcuts.js` 的 `COMMANDS`** 三处脱节 | `node scripts/verify/verify-shortcuts.mjs` |

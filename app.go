@@ -15,6 +15,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -33,21 +34,26 @@ import (
 // 调 Wails runtime；界面语言由前端 i18n 单点持有（不再需要两侧同步）。
 type App struct {
 	ctx context.Context
-	// dirtyByDoc 是前端「文档是否落后于磁盘」的**逐文档**镜像，即 ADR-005 §四
-	// 预留的 docKey→dirty 映射（2026-11-04 落地）：
-	//   键 = 已落盘文档走 docKeyOf(absPath)；未落盘文档走 "u:"+<tabId>（独立命名空间，
-	//        与 16 位 hex 的 docKey 不相交）—— 见 dirtyKeyOf。
-	//   值 = 该文档的 dirty。
-	// 真源在前端，此处只镜像、不读盘比对、不自行推断；由 SetDirty / ForgetDoc 写入、
-	// OnBeforeClose 经 anyDirty() 读取。语义与生命周期见
-	// docs/architecture/ADR-005-dirty-semantics.md。
+	// dirtyByDoc 是前端「文档是否落后于磁盘」的逐文档镜像（ADR-005 §四）：
+	// 键 = 已落盘走 docKeyOf(absPath)、未落盘走 "u:"+<tabId>（见 dirtyKeyOf）；
+	// 真源在前端，此处只镜像、不读盘比对；SetDirty / ForgetDoc 写、anyDirty 读。
+	// 不用单个 bool：多标签下两份文档的落盘状态会挤进同一字段（ADR-005 §四 禁止）。
 	//
-	// 【为什么不复用旧的 dirty bool】单文档下「一个布尔量 = 当前文档」成立；多标签后
-	// 若仍是一个布尔量，两份文档的落盘状态就被挤进同一个字段 —— 与 ADR-005 §四
-	// 强化说明里「在 dirty 上叠加第二种含义」是同一类错误。故必须按文档分开。
+	// 【必须加锁，且锁要盖住惰性初始化】Wails v2.16 对每条前端 IPC 各起一个
+	// goroutine（dev: devserver.go:196-207；生产 darwin: frontend.go:427），而前端
+	// watch 全量重推（useDocumentState.js），多标签下一次触发即 N 个 goroutine 并发
+	// 进 SetDirty ⇒ map 并发写 = fatal error（2026-11-08 真机崩于此，-race 4 处）。
+	// nil 判断也须在锁内：否则两个 goroutine 各 new 一张 map，后写者整张丢弃先写者
+	// 的条目 = 脏标记静默丢失（关窗口不拦 = 丢稿），比崩溃更隐蔽。选 RWMutex 而非
+	// atomic.Value：要保护的是 map 读改写整体，不是指针替换。
 	dirtyByDoc map[string]bool
-	// closing 防止关闭流程中重复弹确认框（Linux Frameless + 自定义 CloseWindow 场景）。
-	closing bool
+	// dirtyMu 保护 dirtyByDoc。叶子锁：临界区内不加别的锁、不做 IO、不弹对话框。
+	dirtyMu sync.RWMutex
+	// closing 防关闭流程重复弹确认框。同样跨 IPC goroutine 读改写（Linux 快速双击 ×
+	// 会两个 goroutine 同读 false、各弹一框），故与 dirty 同判据加锁；OnBeforeClose
+	// 的 Quit 路径不读写 closing，无第二条竞争。「读判定+置位」原子步见 tryBeginClose。
+	closingMu sync.Mutex
+	closing   bool
 	// docDir 是当前文档所在目录的镜像（真源在前端 filePath，由 SetDocDir 写入），
 	// /doc-assets/ 资源服务（docassets.go）据此把 URL 解析到磁盘文件。
 	// 与 dirty 同族：「前端真源 → Go 镜像」；空串（含从未同步）= 没有已落盘文档。
@@ -97,18 +103,39 @@ func (a *App) startup(ctx context.Context) {
 // 但 CloseWindow 只在前端自绘按钮场景下被调用（TitleBar.vue 用 isDarwin 隔离），
 // 所以两条路径互不重叠。
 func (a *App) CloseWindow(dirty bool, locale string) {
-	if a.ctx == nil || a.closing {
+	ctx := a.ctx
+	// 「读判定+置位」必须是一个原子步（先读再写两步会让并发 goroutine 都读到
+	// false、各弹一框），由 tryBeginClose 在锁内完成。
+	if ctx == nil || !a.tryBeginClose() {
 		return
 	}
-	a.closing = true
-	// 复用 OnBeforeClose 的判定逻辑（含 dirty 检查与确认框）
-	shouldBlock := a.confirmClose(a.ctx, dirty, locale)
+	// 判定与确认框在锁外：MessageDialog 阻塞等人工输入，不能关进临界区；
+	// closing 已置位，重复请求在 tryBeginClose 处即被挡住。
+	shouldBlock := a.confirmClose(ctx, dirty, locale)
 	if !shouldBlock {
-		runtime.Quit(a.ctx)
-	} else {
-		// 用户取消关闭，重置标志位允许下次尝试
-		a.closing = false
+		runtime.Quit(ctx)
+		return
 	}
+	// 用户取消关闭，重置标志位允许下次尝试
+	a.endClose()
+}
+
+// tryBeginClose 抢占关闭流程：抢到返回 true（并把 closing 置位），已有流程在跑返回 false。
+func (a *App) tryBeginClose() bool {
+	a.closingMu.Lock()
+	defer a.closingMu.Unlock()
+	if a.closing {
+		return false
+	}
+	a.closing = true
+	return true
+}
+
+// endClose 释放关闭流程（用户取消了关闭时调用）。
+func (a *App) endClose() {
+	a.closingMu.Lock()
+	a.closing = false
+	a.closingMu.Unlock()
 }
 
 // ---------- 系统剪贴板 ----------
@@ -332,34 +359,42 @@ func (a *App) localeSnapshot() string {
 	return v
 }
 
-// SetDirty 由前端 per-session dirty watcher 调用，把「该文档是否落后于磁盘」镜像到后端。
-// docIdentity 口径见 dirtyKeyOf：已落盘传绝对路径，未落盘传 "u:"+<tabId>。
-// 只接收、不推断：Go 侧不读盘比对内容；语义与生命周期以 ADR-005 为准。
-// 不加锁：读写都发生在 Wails 主事件循环序列内，最坏是一次多余的确认框，不影响数据安全。
+// SetDirty 由前端 per-session dirty watcher 调用，镜像「该文档是否落后于磁盘」。
+// docIdentity 口径见 dirtyKeyOf；只接收、不推断，语义以 ADR-005 为准。
+// 写锁必须盖住 nil 判断与赋值整体：Wails 每条 IPC 一个 goroutine（见 dirtyByDoc
+// 注释），nil 判断留在锁外 = 两个 goroutine 各 new 一张 map、后写者整张丢弃先写者
+// 的条目（脏标记静默丢失）。
 func (a *App) SetDirty(docIdentity string, d bool) {
+	key := dirtyKeyOf(docIdentity)
+	a.dirtyMu.Lock()
+	defer a.dirtyMu.Unlock()
 	if a.dirtyByDoc == nil {
 		a.dirtyByDoc = map[string]bool{}
 	}
-	key := dirtyKeyOf(docIdentity)
 	if d {
 		a.dirtyByDoc[key] = true
 	} else {
-		// 清脏 = 删条目而不是写 false：留着 false 会让映射随「改一下存一下」
-		// 无限堆积，且 ForgetDoc 之后残留幽灵条目。
+		// 清脏 = 删条目而不是写 false：留着 false 会让映射无限堆积、ForgetDoc 后残留幽灵条目。
 		delete(a.dirtyByDoc, key)
 	}
 }
 
-// ForgetDoc 在标签关闭后摘掉该文档的映射条目。
-// 不摘的后果：用户关掉一个脏标签（已确认不保存）后它的脏标记还留在映射里，
-// 关窗口会被一个**已经不存在的文档**拦住 —— 既误拦，又掩盖了真正的脏文档。
+// ForgetDoc 在标签关闭后摘掉该文档的映射条目。不摘则已不存在的文档仍会拦住关窗口。
+// 与 SetDirty 同一条 IPC 通道（关标签与 dirty 变化可同时发生），取写锁；
+// nil 映射上 delete 是合法空操作，故此处不做惰性初始化（少一处并发写点）。
 func (a *App) ForgetDoc(docIdentity string) {
-	delete(a.dirtyByDoc, dirtyKeyOf(docIdentity))
+	key := dirtyKeyOf(docIdentity)
+	a.dirtyMu.Lock()
+	defer a.dirtyMu.Unlock()
+	delete(a.dirtyByDoc, key)
 }
 
-// anyDirty 是否有任何一个已知文档仍是脏的 —— 关闭守卫的唯一输入。
-// 单文档下这就是 a.dirty；多标签下必须遍历，否则漏掉后台标签 = 静默丢稿。
+// anyDirty 是否有任何一个已知文档仍是脏的 —— 关闭守卫的唯一输入；多标签下必须
+// 遍历，否则漏掉后台标签 = 静默丢稿。读也须加读锁：map 遍历与任一写者并发即
+// fatal error（concurrent map iteration and map write），只锁写侧不够。
 func (a *App) anyDirty() bool {
+	a.dirtyMu.RLock()
+	defer a.dirtyMu.RUnlock()
 	for _, d := range a.dirtyByDoc {
 		if d {
 			return true

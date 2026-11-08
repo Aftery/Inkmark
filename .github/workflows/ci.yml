@@ -125,6 +125,16 @@ jobs:
       - name: 测试
         run: CGO_ENABLED=1 go test ./...
 
+      # 【2026-11-08 新增 -race】上面的普通 `go test` 抓不到数据竞争：2026-11-08
+      # 真机 P0 崩溃（fatal error: concurrent map writes，app.go SetDirty）在
+      # 745/745 全绿 + 普通 go test 全绿的情况下漏到真机 —— Wails 对每条前端 IPC
+      # 各起一个 goroutine，并发写 map 只在调度撞上时炸，普通测试抽样不到。
+      # 成本实测可忽略（本机全量 -race 约 2~6s；runner 有缓存更稳）。
+      # 判据：app_dirty_concurrency_test.go 的并发用例在 -race 下必报；
+      # 元测试（2026-11-08）：对「去掉锁」的变异体跑本步命令必 FAIL，修复版必 PASS。
+      - name: 数据竞争检测（-race）
+        run: CGO_ENABLED=1 go test -race -count=1 ./...
+
       # 通道③ 有三个平台适配层（clipboard_darwin/linux/windows.go）。
       # macOS runner 上只编得出 darwin 那一份 —— Linux / Windows 两份
       # **从不在任何门禁里被编译过**，改坏了也不会有人知道（本仓已栽过

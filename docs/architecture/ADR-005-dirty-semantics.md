@@ -2,7 +2,7 @@
 
 ## Status
 
-**Accepted (2026-10-02)** → **Accepted (Amended 2026-10-28)**。
+**Accepted (2026-10-02)** → **Accepted (Amended 2026-10-28)** → **Accepted (Amended 2026-11-08：Go 侧镜像加锁)**。
 
 约束来源：Phase C「未保存关闭拦截」（commit `feat(app): 未保存关闭拦截`）落地后，该状态横跨三处（前端 `dirty` → `SetDirty` IPC → Go `OnBeforeClose`），但原先只有一句「未保存更改标记」的注释，**只描述了数据流向、没有定义这个布尔量表示什么**。team-lead 指示将其语义固化，以防后续扩展（多窗口 / 后台常驻）时语义漂移。
 
@@ -18,6 +18,17 @@
 | **什么时候** | 2026-10-28，与多标签页实现**同批**修订（决策 MD-13：拖到收尾会让实现与已接受的 ADR 长期不一致 —— 这正是本 ADR 存在的目的所反对的） |
 
 **修订留痕纪律**：本 ADR 是 **Accepted** 的决策记录，修订**不得静默改字** —— 每一处改动都在上表登记「改了什么 / 为什么 / 谁拍板 / 什么时候」，并在正文对应位置标注修订标记。
+
+### 修订记录（2026-11-08）
+
+**触发原因**：真机 `wails dev` 的 P0 崩溃（`fatal error: concurrent map writes`，栈顶 `App.SetDirty`），`-race` 复现 4 处 DATA RACE。
+
+| 项 | 内容 |
+|---|---|
+| **改了什么** | 仅 §五 最后第二条：原文「读写不加锁：均发生在 Wails 主事件循环序列内」→ 改写为「必须加锁」并给出 Wails 侧证据与锁方案 |
+| **为什么** | 该判断**与 Wails 实现相反**：Wails v2.16 每条 IPC 一个 goroutine，故 `dirtyByDoc` 的并发写是必崩缺陷而非「最坏多弹一次确认框」。留着会再次误导后来者，属思想根因，必须一并改正 |
+| **谁拍板** | team-lead（缺陷已机械实证，非推测） |
+| **什么时候** | 2026-11-08，与锁修复**同批**（ADR-005 原有的「不静默改字」纪律） |
 
 
 ## Background
@@ -98,7 +109,7 @@ Phase C 引入关闭拦截：前端持 `dirty`（`frontend/src/composables/useDo
 - 前端 → Go：`SetDirty(bool)`，由前端 `watch(dirty)` 边沿触发（仅在**变化**时调用）。
 - 自绘关闭按钮路径（`CloseWindow(dirty)`，2026-10-15 起）：dirty 随关闭请求**同一条 IPC** 携带、不读镜像 —— `watch → SetDirty` 是异步镜像，快速输入后立即点 × 时可能滞后（此前靠「先 `await SetDirty` + 50ms sleep」补救，依赖的是无法证实的 IPC 时序假设）。守卫判定本体 `confirmClose`（`app.go`）两条路径共用：`OnBeforeClose`（红绿灯钩子）传镜像值，`CloseWindow` 传请求携带值；`SetDirty` 仍是镜像的唯一写者。
 - Go 侧不自行推断、**不读盘比对文件内容**，只镜像。
-- 读写不加锁：均发生在 Wails 主事件循环序列内，最坏是一次多余的确认框，不影响数据安全。
+- **（2026-11-08 修正）Go 侧映射必须加锁**：原文写「读写不加锁：均发生在 Wails 主事件循环序列内」，**该判断与 Wails 实际实现相反**。Wails v2.16 对**每一条**前端 IPC 消息各起一个 goroutine（dev：`internal/frontend/devserver/devserver.go:196-207`；生产 darwin：`internal/frontend/desktop/darwin/frontend.go:427`），而前端 `useDocumentState.js` 的 watch 是**全量重推**（`for (const s of getSessions()) pushDirty(s, s.dirty)`），多标签下一次 watch 即 N 条并发 `SetDirty`。后果不是「最坏多弹一次确认框」，而是 Go runtime 的 `fatal error: concurrent map writes`（不可 recover，进程必死）—— 2026-11-08 真机 `wails dev` 正是这样崩的。现 `dirtyByDoc` 由 `sync.RWMutex` 保护：`SetDirty` / `ForgetDoc` 取写锁（**惰性初始化的 `== nil` 判断也在锁内**），`anyDirty` 取读锁。回归判据见 `app_dirty_concurrency_test.go`。
 - 前端启动时 `dirty = false`，与 Go 零值一致，无需首次同步。
 
 ## Consequences
