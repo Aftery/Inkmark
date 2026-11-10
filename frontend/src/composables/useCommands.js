@@ -32,9 +32,9 @@ import {
   openTabSwitcher, closeTabSwitcher, tabSwitcher,
 } from './useShortcuts.js'
 import { WindowMinimise, WindowToggleMaximise } from '../../wailsjs/runtime/runtime.js'
-import { ClipboardGet, ClipboardSet, Version } from '../../wailsjs/go/main/App.js'
+import { ClipboardGet, ClipboardSet, CloseWindow, Version } from '../../wailsjs/go/main/App.js'
 import { useTabLifecycle } from './useTabLifecycle.js'
-import { t } from '../i18n/index.js'
+import { t, getLocale } from '../i18n/index.js'
 
 /**
  * @param {Object}   deps
@@ -336,6 +336,10 @@ export function useCommands(deps) {
       // 窗口
       'window.minimize': () => { try { WindowMinimise() } catch { /* 浏览器预览 */ } },
       'window.zoom': () => { try { WindowToggleMaximise() } catch { /* 浏览器预览 */ } },
+      // 走 CloseWindow 而不是 runtime.Quit：保留「未保存更改」确认框（ADR-005）
+      'window.quit': () => {
+        try { CloseWindow(docState.dirty.value, getLocale()) } catch { /* 浏览器预览 */ }
+      },
       // 帮助
       'help.shortcuts': () => { help.showShortcuts.value = true },
       'help.about': openAbout,

@@ -152,6 +152,7 @@ export const COMMANDS = [
   // ---- 窗口 ----
   { id: 'window.minimize', group: 'window', labelKey: 'menu.minimize', accel: '⌘M', descKey: null },
   { id: 'window.zoom', group: 'window', labelKey: 'menu.zoom', accel: null, descKey: null },
+  { id: 'window.quit', group: 'window', labelKey: 'menu.quit', accel: '⌘Q', descKey: null },
 
   // ---- 帮助 ----
   { id: 'help.shortcuts', group: 'help', labelKey: 'titlebar.shortcuts', accel: '⌘/', descKey: 'shortcuts.list' },

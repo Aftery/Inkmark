@@ -19,9 +19,10 @@ export const PDF_EXPORT_MEASURE = '467px'
 // 467pt ≈ 622px。用 467px 会让正文只占 350pt，左右各多出 ~58pt 空白。
 export const PDF_EXPORT_MEASURE_GTK = '622px'
 
-export function buildHtmlDocument(title, bodyHtml, theme, measure = HTML_EXPORT_MEASURE) {
+// lang 跟随界面语言：会影响导出产物的断行、字体回退与屏幕朗读口径。
+export function buildHtmlDocument(title, bodyHtml, theme, measure = HTML_EXPORT_MEASURE, lang = 'zh-CN') {
   return `<!DOCTYPE html>
-<html lang="zh-CN" data-theme="${theme}">
+<html lang="${escapeHtml(lang)}" data-theme="${theme}">
 <head>
 <meta charset="UTF-8" />
 <title>${escapeHtml(title)}</title>

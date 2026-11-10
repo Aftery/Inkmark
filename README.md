@@ -151,6 +151,7 @@
 |---|---|
 | 最小化 | ⌘M |
 | 缩放 | 无快捷键（仅菜单；Wails 无「适配内容尺寸」API，以最大化/还原近似） |
+| 退出应用 | ⌘Q |
 
 **帮助**
 
@@ -201,7 +202,7 @@ inkmark/
     │   │                    #   渲染器与编辑器装饰两侧同源消费，避免「同一文档两副面孔」
     │   ├── export/          # HTML / PDF 导出模板与 exporters
     │   ├── composables/     # useEditorSession（编辑器实例 + 派生状态）/ useDocumentState（dirty /
-    │   │                    #   自动保存 / 快照 / 导出 / 历史）/ useCommands（62 条命令处理器 + 菜单结构）
+    │   │                    #   自动保存 / 快照 / 导出 / 历史）/ useCommands（68 条命令处理器 + 菜单结构）
     │   │                    #   / useWorkspace / useFileAssets / usePrefs / useShortcuts（键位唯一真源）
     │   │                    #   / useShortcutsHelp / useOutline / usePlatform / useToast / useDialog /
     │   │                    #   useFileOps / useTableHint（表格提示，模块级单例）/ useChrome / commandFilter
@@ -298,7 +299,7 @@ node scripts/probe/probe-r11-fixes.mjs             # 第十一轮修复：全角
 3. **主题 = CSS 变量**：编辑器（CodeMirror theme）、预览排版、代码高亮 token 全部引用同一组变量，切换零成本；预览高亮没用 hljs 官方主题 CSS，而是把 token 色值做成变量（`--hl-keyword` 等），保证明暗一致。`data-theme` 始终存「已解析」的具体主题（不存 `system`），切换只改属性、不重建编辑器。
 4. **单栏居中流式**：双栏 / 分屏 / 滚动联动已随产品减法整体下线，正文限宽（`--single-measure: 46rem`）居中；阅读态已于 2026-10-14 移除，所见即所得渲染直接内嵌编辑器（表格真渲染见 `src/editor/tableRender.js`）；`useOutline` 只保留大纲高亮与跳转。
 5. **窗口拖拽用 `--wails-draggable`**：Wails 不读 `-webkit-app-region`（那是 Chromium 的，macOS WKWebView 不认）。标题栏根节点设 `--wails-draggable: drag`，交互子元素（菜单按钮 / 下拉项 / 窗口按钮）逐个设 `no-drag`——该自定义属性**会向下继承**，只能落在叶子可点元素上，落在布局容器上会把空白区也变成非拖动区。
-6. **原生菜单已下线，键位真源在前端**：原生菜单因「Role 不可本地化 / 非 darwin 不展开 / 无边框下无处安放」三条实测约束整体删除，键位收敛到 `useShortcuts.js` 的 `COMMANDS` 表（**62 条命令 / 50 项键位**），菜单结构、全局分发、速查表三方同源派生；门禁 `verify-shortcuts.mjs` 守着 README 与命令表不漂移。
+6. **原生菜单已下线，键位真源在前端**：原生菜单因「Role 不可本地化 / 非 darwin 不展开 / 无边框下无处安放」三条实测约束整体删除，键位收敛到 `useShortcuts.js` 的 `COMMANDS` 表（**68 条命令 / 56 项键位**），菜单结构、全局分发、速查表三方同源派生；门禁 `verify-shortcuts.mjs` 守着 README 与命令表不漂移。
 7. **渲染进程零 Node 能力**：前端只能通过生成的 `wailsjs` 绑定调 Go 方法，文件系统攻击面收在 `app.go`。
 8. **WYSIWYG 即时渲染的边界**：只产装饰、绝不 `dispatch` 文档变更（内容零篡改）；`view.composing` 为 true（中文输入中）时冻结重算，避免抖动；装饰只在 `visibleRanges` 内计算（大文档性能）；活跃行向上下各扩 1 行，避免方向键因标记符显隐突变而跳跃。
 9. **快照与自动保存解耦**：自动保存 800ms 防抖覆盖原文件；快照独立按「节流 / 显式保存 / 切换文件边界 / 手动」触发，避免每次按键都落快照、污染历史。
@@ -321,7 +322,7 @@ node scripts/probe/probe-r11-fixes.mjs             # 第十一轮修复：全角
 | # | 项 | 状态 / 说明 |
 |---|-----|------------|
 | 1 | **Windows / Linux 无边框形态未真机验证** | 窗口形态已按平台分流，但无边框拖拽、自绘窗口按钮、关闭守卫**从未在真实 Windows / Linux 上跑过**；导出 PDF 在 **Linux 已是一键直出**（GTK 打印到文件，2026-10-26 落地），仅 **Windows** 仍降级为系统打印 |
-| 2 | **真机目视清单未过** | 自动化只验到「根节点渲染 + 标题栏/编辑区已挂载 + 无异常」。标题栏拖拽、红绿灯留白、毛玻璃、斜杠面板、GFM 任务列表、代码块高亮、「插入目录」跳转等交互**全部需目视**，完整 **29 项**见 [`docs/HANDOFF.md`](docs/HANDOFF.md) §6。**现在有可执行副本了**：打开 [`docs/qa/visual-checklist.html`](docs/qa/visual-checklist.html)（单文件、双击即开、零依赖）逐项勾选并导出 Markdown，追加进 [`docs/qa/VERIFICATION-LOG.md`](docs/qa/VERIFICATION-LOG.md) 留痕——清单副本与 §6 真源的编号/标题由门禁 4 第二步机检守着 |
+| 2 | **真机目视清单未过** | 自动化只验到「根节点渲染 + 标题栏/编辑区已挂载 + 无异常」。标题栏拖拽、红绿灯留白、毛玻璃、斜杠面板、GFM 任务列表、代码块高亮、「插入目录」跳转等交互**全部需目视**，完整 **45 项**见 [`docs/HANDOFF.md`](docs/HANDOFF.md) §6。**现在有可执行副本了**：打开 [`docs/qa/visual-checklist.html`](docs/qa/visual-checklist.html)（单文件、双击即开、零依赖）逐项勾选并导出 Markdown，追加进 [`docs/qa/VERIFICATION-LOG.md`](docs/qa/VERIFICATION-LOG.md) 留痕——清单副本与 §6 真源的编号/标题由门禁 4 第二步机检守着 |
 | 3 | **macOS 透明窗口的代价** | `WebviewIsTransparent` + `WindowIsTranslucent` 在旧款 Intel Mac 上可能掉帧（透明窗口不能被合成器缓存）；本机是 macOS 12，只验到「能编译」，性能未实测 |
 | 4 | **Linux（CachyOS）真机** | 无边框 + 自绘标题栏的 Linux 表现从未在真机跑过；窗口按钮对接的 `WindowMinimise / WindowToggleMaximise / CloseWindow` 在 Linux 后端的行为需目视 |
 | 5 | **「最近打开」功能整体下线** | 它的唯一消费方是原生菜单的子菜单；自绘标题栏未做该入口。若要恢复需**重做**：前端加列表 + Go 侧重写持久化（原 `GetRecents` / `recents.json` 逻辑已随原生菜单整体删除，`app.go` 只剩历史注释提及） |
@@ -330,11 +331,11 @@ node scripts/probe/probe-r11-fixes.mjs             # 第十一轮修复：全角
 | 8 | ✅ **`release.yml` 已跑通（2026-10-21 / 2026-10-27 各一次）** | `v0.1.0` 与 `v0.2.0` 两个 tag 各触发一次三平台原生构建，五个 job 全 success，产物自动上传为 Release 附件。三平台构建的坑（Linux 的 `webkit2_41` tag、macOS ditto 打包、Windows exe）已被真 runner 验过。**剩余仅签名/公证**（见 #10） |
 | 9 | ✅ **检查更新已可用（2026-10-21 起）** | 已有 Release（当前 `v0.2.0`），`releases/latest` 返回 200，`CheckUpdate` 走真实 semver 比对路径，不再落到「暂无已发布的版本」 |
 | 10 | **macOS 未签名分发** | Gatekeeper 会拦，需 Apple 开发者账号（$99/年）签名 + 公证。⚠️ `release.yml` 目前**没有** codesign / notarize 步骤，产物是未签名 zip —— 用户下载后需右键「打开」或 `xattr -d com.apple.quarantine` |
-| 11 | **无「退出应用」快捷键** | Wails v2.16 没有 `WindowClose`，⌘Q 未设；关闭走 macOS 红绿灯 / Linux 自绘 ×（`App.CloseWindow()`） |
+| 11 | ✅ **退出快捷键已接入（待真机按键确认）** | 2026-11-10 命令表新增 `window.quit`（⌘Q），处理器走 `App.CloseWindow()` 同一套「未保存更改」确认流程，不直连 `runtime.Quit`。macOS 系统层是否会在 WebView 之前截获 ⌘Q 仍待真机确认；Linux/Windows 归一为 Ctrl+Q |
 | 12 | **导出产物不跟随正文字体偏好（已裁决）** | 2026-10-13 裁决**不跟随**：导出物是分发格式，把作者本地偏好写死进 HTML/PDF 会让排版随机器漂移；保持主题级 `--font-body` 保证任何机器导出一致。用户偏好是本地阅读体验，不是文档内容。重开条件见 [`docs/decisions/OPEN-DECISIONS.md`](docs/decisions/OPEN-DECISIONS.md) |
 | 13 | **多标签页已落地（P0–P6 代码），真机未验收** | 2026-11-04 落地：会话注册表 + 按标签换 `EditorState`（撤销栈各自隔离）+ per-session 持久化 + Go 侧 `dirtyByDoc` 逐文档映射 + 标签状态持久化（含未落盘草稿）+ 拖拽 / 右键菜单 / Tab Switcher / 5 条命令。**目视清单已补齐**：`docs/HANDOFF.md` §6 第 30~45 项（与 `docs/qa/visual-checklist.html` 严格同步，门禁守着）。**剩余只有真机目视**——16 条一条都没验过，第 30 项（IME 合成期切标签，MD-11 P0 级）风险最高。决策见 `docs/decisions/MD-2026-10-28-multi-tab.md` |
 | 14 | **无拼写检查（刻意不做）** | CodeMirror 的 lint 对 CJK 基本无效，中文写作场景是**伪需求**，故不引入。英文拼写需自行接第三方 lint 扩展 |
-| 15 | **导出模板文案未国际化** | `export/exporters.js` 的 HTML 模板未接 `t()`（Spec 明确留待后续） |
+| 15 | ✅ **导出模板已国际化** | 2026-11-10：`buildHtmlDocument()` 的 `<html lang>` 改为跟随界面语言（zh-CN / en-US / ja-JP），模板内已无其它用户可见文案；新增单测覆盖 |
 | 16 | **`App.vue` 行数余量 0（已压线）** | 装配层硬上限 **总行数** 150 行、当前 150 行（契约 5 实测；2026-10-28 P0 腾 6 行、P1 标签栏 4 行、P2 确认弹层 2 行，**余量已用尽**）。任何新增装配行都必须先腾行（下沉到 composables/），门禁口径是**总行数**（含注释与空行，比有效行更严） |
 | 17 | **Go 侧错误串仍是中文（已裁决的残余）** | 2026-10 复查：原生**对话框**文案已全部本地化（`dialogs.go`，按前端传入的 locale 取表；`OnBeforeClose` 读 `SetLocale` 镜像）。但各方法的**错误信息**（如「同名文件已存在: x」）仍是中文，经 IPC 回到前端后被嵌进本地化模板显示为「保存失败：<中文原因>」。裁决见 `dialogs.go` 文件头：模态对话框必须本地化，错误细节保留技术原文；彻底解决的正确方向是 Go 返回**错误码**由前端查表，属独立协议改造 |
 | 18 | **Windows 路径处理未真机验证** | 2026-10 复查修掉了三处只认 `/` 的路径切分（标题栏文件名、侧栏文件夹名、字数统计无关），改为同时认 `\`；逻辑已由 `frontend/src` 内的实现覆盖，但 Windows 真机路径仍未跑过（与 #1 同源） |

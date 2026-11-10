@@ -365,6 +365,7 @@ export default {
   'menu.alwaysOnTop': '窗口置顶',
   'menu.minimize': '最小化',
   'menu.zoom': '缩放',
+  'menu.quit': '退出应用',
   'menu.settings': '设置…',
   'help.syntax': 'Markdown 语法示例',
   'footnote.title': '脚注',
