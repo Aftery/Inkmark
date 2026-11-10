@@ -32,7 +32,9 @@
 
 import { ref, computed, watch, onBeforeUnmount } from 'vue'
 import { SaveFileDialog, WriteFile } from '../../wailsjs/go/main/App.js'
-import { buildHtmlDocument, PDF_EXPORT_MEASURE, PDF_EXPORT_MEASURE_GTK } from '../export/exporters.js'
+import {
+  buildHtmlDocument, HTML_EXPORT_MEASURE, PDF_EXPORT_MEASURE, PDF_EXPORT_MEASURE_GTK,
+} from '../export/exporters.js'
 import { platform } from './usePlatform.js'
 import { replaceDocument } from '../editor/createEditor.js'
 import { getPref, onPrefsChange } from '../themes/prefs.js'
@@ -285,7 +287,9 @@ export function useDocumentState({
   async function exportHtml() {
     const path = await SaveFileDialog(`${activeTitle().replace(/\.md$/, '')}.html`, getLocale())
     if (!path) return
-    const html = buildHtmlDocument(activeTitle(), renderedHtml.value, theme.value)
+    const html = buildHtmlDocument(
+      activeTitle(), renderedHtml.value, theme.value, HTML_EXPORT_MEASURE, getLocale(),
+    )
     await WriteFile(path.endsWith('.html') ? path : path + '.html', html)
   }
 
@@ -333,7 +337,7 @@ export function useDocumentState({
     // 版心宽：darwin 的离屏 WKWebView 满足 1 CSS px = 1 pt，用 467px 正好等于
     // 可打印宽；GTK 打印走 96dpi，同一物理宽度是 622px（见 exporters.js）。
     const measure = platform.value === 'linux' ? PDF_EXPORT_MEASURE_GTK : PDF_EXPORT_MEASURE
-    let html = buildHtmlDocument(activeTitle(), renderedHtml.value, pdfTheme, measure)
+    let html = buildHtmlDocument(activeTitle(), renderedHtml.value, pdfTheme, measure, getLocale())
     // 兜底：若未来模板回退为固定 46rem，这里保证 PDF 版心仍为 467px
     if (/max-width:\s*46rem/.test(html)) html = html.replace(/max-width:\s*46rem/g, 'max-width:467px')
     try {
