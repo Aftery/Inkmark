@@ -211,7 +211,6 @@ inkmark/
     │   └── themes/          # tokens/design-tokens.css（Token 唯一真源）+ index.css（唯一样式入口）
     │                        #   + app-shell.css / platform-darwin.css / editor-wysiwyg.css
     │                        #   + theme.js（主题解析）/ prefs.js（偏好唯一真源）
-    ├── tests/           # node:test 测试网（745 条测试 / 190 个 suite，零第三方依赖），需 Node ≥22
     └── wailsjs/         # Wails 自动生成的 IPC 绑定（勿手改）
 ```
 
@@ -245,10 +244,9 @@ npm install
 
 npm run dev      # 本地开发服务器
 npm run build    # 生产构建 → frontend/dist
-npm test         # 测试网（745 条测试，零第三方依赖），【需 Node ≥22】
 ```
 
-> - `npm test` 用的是 Node **内置** `node:test`（无第三方测试依赖），因此**必须 Node ≥22**；低版本会报 `node --test` 不可用。
+> - 测试用例只维护在 `dev` 分支（`npm test`，需 Node ≥22）；本分支不包含测试。
 > - `npm run build` 会**删掉被 git 跟踪的 `frontend/dist/.gitkeep`**（构建清空 `dist/` 的副作用）。
 >   该文件是 `main.go` 的 `//go:embed all:frontend/dist` 内嵌目标，**删掉会导致 Go 编译报 "no matching files found"**。
 >   本地每次 build 后请执行 `git checkout -- frontend/dist/.gitkeep` 还原。
@@ -256,14 +254,10 @@ npm test         # 测试网（745 条测试，零第三方依赖），【需 No
 ### 门禁脚本（与 CI 同口径）
 
 ```bash
-cd frontend && npm test                                    # 测试网，期望 745/745
-node scripts/verify/verify-readme-claims.mjs               # README 数字声明 ↔ 实测（自己会再跑一遍测试网；退出码 1=漂移 / 2=测量失效）
 node scripts/verify/verify-shortcuts.mjs                   # 快捷键三方对齐（README ↔ 速查表 ↔ COMMANDS）
 node scripts/verify/scan-i18n-residue.mjs                  # i18n 文案残留
 ./scripts/p0-check-emoji.sh frontend/src main.go app.go    # P0 零 emoji
 /usr/local/opt/go/bin/go vet ./...                          # Go 静态检查（注意：go 不在 PATH）
-CGO_ENABLED=1 /usr/local/opt/go/bin/go test ./...           # Go 测试（含快照与剪贴板判据；e2e 剪贴板为空时 skip）
-CGO_ENABLED=1 /usr/local/opt/go/bin/go test -race -count=1 ./...  # 数据竞争门禁（2026-11-08 新增；普通 go test 抓不到 Wails 并发 IPC 下的 map 竞争）
 CGO_ENABLED=0 GOOS=linux   /usr/local/opt/go/bin/go build -o /dev/null .   # Linux 适配层不腐烂
 CGO_ENABLED=0 GOOS=windows /usr/local/opt/go/bin/go build -o /dev/null .   # Windows 适配层不腐烂
 node scripts/smoke/render-check.mjs                        # 真渲染冒烟（CI frontend job 第三步；需先 npm run build）
@@ -284,9 +278,8 @@ node scripts/probe/probe-table-hint.mjs            # 缺分隔行时表格提示
 node scripts/probe/probe-r11-fixes.mjs             # 第十一轮修复：全角 ／ / Finder file URL 粘贴 / ⌘P（阅读态 5 项已随阅读态移除退役）
 ```
 
-> 改了 `prefs.js`、命令表或 `App.vue` 结构后，**先跑 `npm test` 再提交**——
-> 测试网里有静态契约检查（菜单事件双向闭合、⌘P 唯一性、打印样式存在性、行数门禁、装配顺序）
-> 会拦住静默失效。**改门禁本身必须做元测试**（造违规输入 → 确认报红 → 确认退出码非 0）。
+> 测试用例只维护在 `dev` 分支：改了 `prefs.js`、命令表或 `App.vue` 结构，
+> 请切到 `dev` 跑 `npm test`（内含静态契约检查）。本分支只保留功能代码与构建门禁。
 
 > 本机网络需镜像：Go 依赖走 `GOPROXY=https://goproxy.cn,direct`，npm 走 `--registry=https://registry.npmmirror.com`，且先 `unset` 环境里的代理变量。
 
@@ -325,8 +318,8 @@ node scripts/probe/probe-r11-fixes.mjs             # 第十一轮修复：全角
 | 3 | **macOS 透明窗口的代价** | `WebviewIsTransparent` + `WindowIsTranslucent` 在旧款 Intel Mac 上可能掉帧（透明窗口不能被合成器缓存）；本机是 macOS 12，只验到「能编译」，性能未实测 |
 | 4 | **Linux（CachyOS）真机** | 无边框 + 自绘标题栏的 Linux 表现从未在真机跑过；窗口按钮对接的 `WindowMinimise / WindowToggleMaximise / CloseWindow` 在 Linux 后端的行为需目视 |
 | 5 | **「最近打开」功能整体下线** | 它的唯一消费方是原生菜单的子菜单；自绘标题栏未做该入口。若要恢复需**重做**：前端加列表 + Go 侧重写持久化（原 `GetRecents` / `recents.json` 逻辑已随原生菜单整体删除，`app.go` 只剩历史注释提及） |
-| 6 | **文件树外部变更监听已接线，待真机确认** | 2026-10-13 落地：前端 `useFileOps` 订阅 `fs:changed`（payload 为根目录路径，仅当与当前 `folderPath` 严格相等才自增 `treeSignal`，`FileTree` 收信号后重拉目录）；Go 侧 `watcher.go` 另修一个真实缺陷——切换/停止文件夹时，旧监听残留的去抖定时器会把已失效目录的 `fs:changed` 推给前端（代际校验修复）。沙箱内无法验证真实 fsnotify 事件，需 `wails dev` 真机确认三场景：① 监听目录内新建/删除文件后树即时刷新；② 切到另一文件夹后旧目录的迟到事件不再触发；③ 关闭文件夹（空串）后无事件推送。另有两项已知未修：~~去抖边界双发（同 root 多刷一次，无正确性影响）~~ **（2026-10-17 撤销：实测不成立——该条目从未被真机验证过，同批连续到达的变更只推 1 次，跨窗口的两次独立变更推 2 次是正确行为）**；`w.Errors` 现已记日志（2026-10-15 落地，仍不打扰用户——fsnotify 内部错误时监听可能失效，日志是唯一排查线索）。**2026-10-17 另**：Go 侧去抖改为串行状态机（行为不再取决于调度顺序），语义由 `watcher_test.go` 的 5 条 Go 测试钉死 |
-| 7 | **表格真渲染待真机验收** | 2026-10-14 落地：编辑器内 StateField block 装饰渲染真表格（`src/editor/tableRender.js`），单元格可直接编辑并同步回 Markdown 源码；单元测试（`tests/table-render.test.mjs`）已过，光标进出切换渲染/源码、Tab 换格、IME 输入等真机路径仍需目视。原「阅读态跳转未目视」项随阅读态移除而消失 |
+| 6 | **文件树外部变更监听已接线，待真机确认** | 2026-10-13 落地：前端 `useFileOps` 订阅 `fs:changed`（payload 为根目录路径，仅当与当前 `folderPath` 严格相等才自增 `treeSignal`，`FileTree` 收信号后重拉目录）；Go 侧 `watcher.go` 另修一个真实缺陷——切换/停止文件夹时，旧监听残留的去抖定时器会把已失效目录的 `fs:changed` 推给前端（代际校验修复）。沙箱内无法验证真实 fsnotify 事件，需 `wails dev` 真机确认三场景：① 监听目录内新建/删除文件后树即时刷新；② 切到另一文件夹后旧目录的迟到事件不再触发；③ 关闭文件夹（空串）后无事件推送。另有两项已知未修：~~去抖边界双发（同 root 多刷一次，无正确性影响）~~ **（2026-10-17 撤销：实测不成立——该条目从未被真机验证过，同批连续到达的变更只推 1 次，跨窗口的两次独立变更推 2 次是正确行为）**；`w.Errors` 现已记日志（2026-10-15 落地，仍不打扰用户——fsnotify 内部错误时监听可能失效，日志是唯一排查线索）。**2026-10-17 另**：Go 侧去抖改为串行状态机（行为不再取决于调度顺序），语义由 Go 侧去抖单测钉死（测试在 `dev` 分支维护） |
+| 7 | **表格真渲染待真机验收** | 2026-10-14 落地：编辑器内 StateField block 装饰渲染真表格（`src/editor/tableRender.js`），单元格可直接编辑并同步回 Markdown 源码；单元测试（在 `dev` 分支维护）已过，光标进出切换渲染/源码、Tab 换格、IME 输入等真机路径仍需目视。原「阅读态跳转未目视」项随阅读态移除而消失 |
 | 8 | ✅ **`release.yml` 已跑通（2026-10-21 / 2026-10-27 各一次）** | `v0.1.0` 与 `v0.2.0` 两个 tag 各触发一次三平台原生构建，五个 job 全 success，产物自动上传为 Release 附件。三平台构建的坑（Linux 的 `webkit2_41` tag、macOS ditto 打包、Windows exe）已被真 runner 验过。**剩余仅签名/公证**（见 #10） |
 | 9 | ✅ **检查更新已可用（2026-10-21 起）** | 已有 Release（当前 `v0.2.0`），`releases/latest` 返回 200，`CheckUpdate` 走真实 semver 比对路径，不再落到「暂无已发布的版本」 |
 | 10 | **macOS 未签名分发** | Gatekeeper 会拦，需 Apple 开发者账号（$99/年）签名 + 公证。⚠️ `release.yml` 目前**没有** codesign / notarize 步骤，产物是未签名 zip —— 用户下载后需右键「打开」或 `xattr -d com.apple.quarantine` |
