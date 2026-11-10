@@ -38,6 +38,11 @@ import { markdown, markdownLanguage } from '@codemirror/lang-markdown'
 import { buildDecorations, wysiwygField } from '../src/editor/wysiwyg.js'
 import { createRenderer, render } from '../src/preview/markdown.js'
 import { initI18n } from '../src/i18n/index.js'
+import {
+  collectFootnoteDefs,
+  buildFootnoteFooter,
+  FootnoteFooterWidget,
+} from '../src/editor/footnoteFooter.js'
 
 /**
  * 哨兵尾巴：把光标停在这里，让被测内容所处行**不是活跃行**。
@@ -95,6 +100,26 @@ const footnotesOf = (items) => items.filter((i) => i.widget === 'FootnoteRefWidg
 /** 去掉行尾换行后的长度（用来圈定「widget 之后的正文」区间） */
 const DOC_LINE = (lineText) => lineText.replace(/\n$/, '').length
 const replacesIn = (items, from, to) => items.filter((i) => i.widget && i.from < to && i.to > from)
+/** 全文定义汇总（与 wysiwyg 隐藏口径同源）：内容正确性由这里断言 */
+const collectOf = (body) => collectFootnoteDefs(mkState(body + SENTINEL).doc)
+
+/** 文末汇总块：buildFootnoteFooter 只读 doc，可在 node 里直接打靶 */
+function footerOf(body) {
+  const doc = body + SENTINEL
+  const state = mkState(doc)
+  const deco = buildFootnoteFooter(state.doc)
+  const items = []
+  deco.between(0, doc.length, (from, to, val) => {
+    items.push({
+      from,
+      to,
+      widget: val.widget ? val.widget.constructor.name : null,
+      entries: val.widget?.entries,
+      block: val.spec?.block === true,
+    })
+  })
+  return items
+}
 
 // ===========================================================================
 // 0) 判据自检 —— 先证明「探测器」本身能分辨好坏，否则后面全是假绿
@@ -256,15 +281,17 @@ describe('缺陷 B · 多行脚注定义连缩进续行一起隐藏', () => {
     return items.some((i) => i.widget === null && i.from <= start && i.to >= end && i.to > i.from)
   }
 
-  test('首行换成内容 widget，续行整行隐藏', () => {
+  test('定义首行与续行都整行隐藏，内容改由文末汇总块承载', () => {
     const { items, doc } = decorationsOf(DOC)
-    const defs = items.filter((i) => i.widget === 'FootnoteDefWidget')
-    assert.equal(defs.length, 1, `应有 1 条定义内容 widget，实际 ${defs.length}`)
-    assert.equal(defs[0].label, 'note', 'widget 应带上定义的脚注标签')
-    assert.ok(defs[0].content.includes('命名脚注可以写多行'), 'widget 内容缺失')
+    assert.ok(lineHidden(items, doc, '[^note]: 命名脚注可以写多行，'), '定义首行没有隐藏')
     assert.ok(
       lineHidden(items, doc, '    续行需要缩进。'),
       '缩进续行没有被隐藏 —— 缺陷 B 复现：编辑器里续行留在正文（4 空格时还是代码块），而预览里是完整一条'
+    )
+    assert.equal(
+      items.filter((i) => i.widget === 'FootnoteDefWidget').length,
+      0,
+      '定义行不应再产出内容 widget（内容统一在文末列表，与 GitHub 预览一致）'
     )
   })
 
@@ -276,19 +303,21 @@ describe('缺陷 B · 多行脚注定义连缩进续行一起隐藏', () => {
         lineHidden(items, doc, `${indent}第二行`),
         `${indent.length} 空格缩进的续行没有被隐藏（与预览侧口径分叉）`
       )
+      assert.deepEqual(collectOf(body), [{ label: 'n', content: '第一行 第二行', pos: 0 }])
     }
   })
 
   test('两层缩进的续行也一起隐藏（续行可再嵌套）', () => {
     const { items, doc } = decorationsOf('[^n]: 第一\n    第二\n      第三\n')
     assert.ok(lineHidden(items, doc, '      第三'), '更深缩进的续行漏出来了')
+    assert.ok(lineHidden(items, doc, '[^n]: 第一'), '定义首行没有隐藏')
+    assert.equal(collectOf('[^n]: 第一\n    第二\n      第三\n')[0].content, '第一 第二 第三')
   })
 
   test('空行终止续行区：空行后的独立段落必须**不**被隐藏', () => {
     const { items, doc } = decorationsOf('[^a]: 内容\n\n独立段落\n')
-    const defs = items.filter((i) => i.widget === 'FootnoteDefWidget')
-    assert.equal(defs.length, 1, '定义行应由一条内容 widget 承载（不再整行隐藏）')
-    assert.equal(defs[0].content, '内容', 'widget 内容不对')
+    assert.ok(lineHidden(items, doc, '[^a]: 内容'), '定义行没有隐藏')
+    assert.equal(collectOf('[^a]: 内容\n\n独立段落\n')[0].content, '内容')
     assert.ok(
       !lineHidden(items, doc, '独立段落'),
       '空行之后的独立段落被连带隐藏了 —— 续行区必须遇到空行就终止'
@@ -305,12 +334,15 @@ describe('缺陷 B · 多行脚注定义连缩进续行一起隐藏', () => {
 
   test('两条相邻定义 → 各换各的内容 widget，不粘连', () => {
     const { items, doc } = decorationsOf('[^a]: 第一条\n[^b]: 第二条\n')
-    const defs = items.filter((i) => i.widget === 'FootnoteDefWidget')
-    assert.equal(defs.length, 2, `两条定义应各有 1 条内容 widget，实际 ${defs.length}`)
-    assert.deepEqual(defs.map((d) => d.content), ['第一条', '第二条'])
-    // 不粘连：任何一条 widget 区间都不许跨过行边界（跨行 replace 会被 CM 抛错）
-    for (const d of defs) {
-      assert.ok(!d.text.includes('\n'), `widget 区间跨行了：${JSON.stringify(d.text)}`)
+    assert.ok(lineHidden(items, doc, '[^a]: 第一条'), '第 1 条定义未隐藏')
+    assert.ok(lineHidden(items, doc, '[^b]: 第二条'), '第 2 条定义未隐藏')
+    assert.deepEqual(collectOf('[^a]: 第一条\n[^b]: 第二条\n'), [
+      { label: 'a', content: '第一条', pos: 0 },
+      { label: 'b', content: '第二条', pos: 10 },
+    ])
+    // 不粘连：隐藏区间不许跨行（插件跨行 replace 会被 CM 抛错）
+    for (const h of items.filter((i) => i.widget === null && i.to > i.from)) {
+      assert.ok(!h.text.includes('\n'), `隐藏区间跨行了：${JSON.stringify(h.text)}`)
     }
   })
 
@@ -330,11 +362,13 @@ describe('缺陷 B · 多行脚注定义连缩进续行一起隐藏', () => {
     //   ③ `: 第二条` 不许以任何形式裸露在正文里。
     const body = '[^a]: 第一条\n  续行\n[^b]: 第二条\n'
     const { items, doc } = decorationsOf(body)
-    // 首行是内容 widget，续行隐藏
-    const defs = items.filter((i) => i.widget === 'FootnoteDefWidget')
-    assert.equal(defs.length, 2, `应有 2 条内容 widget（两条定义），实际 ${defs.length}`)
-    assert.deepEqual(defs.map((d) => d.content), ['第一条 续行', '第二条'], 'widget 内容不对')
+    assert.ok(lineHidden(items, doc, '[^a]: 第一条'), '第 1 条定义首行未隐藏')
     assert.ok(lineHidden(items, doc, '  续行'), '第 1 条定义的缩进续行未隐藏')
+    assert.ok(lineHidden(items, doc, '[^b]: 第二条'), '第 2 条定义未隐藏')
+    assert.deepEqual(collectOf(body), [
+      { label: 'a', content: '第一条 续行', pos: 0 },
+      { label: 'b', content: '第二条', pos: 15 },
+    ])
     const fn = footnotesOf(items)
     assert.deepEqual(
       fn.map((f) => f.text),
@@ -407,13 +441,14 @@ describe('编辑器 ↔ 渲染器对照 · 多行定义两侧一致', () => {
     assert.equal(items.length, 1, `应恰好 1 条脚注，实际 ${items.length}`)
   })
 
-  test('编辑器侧：定义整条以内容 widget 呈现、续行隐藏（与渲染器的「完整一条」对齐）', () => {
-    const { items, doc } = decorationsOf(DOC)
-    const defs = items.filter((i) => i.widget === 'FootnoteDefWidget')
-    assert.equal(defs.length, 1, `应有 1 条内容 widget，实际 ${defs.length}`)
-    // 首行和续行都应该出现在 widget 内容里
-    assert.ok(defs[0].content.includes('命名脚注可以写多行'), 'widget 缺首行内容')
-    assert.ok(defs[0].content.includes('续行需要缩进'), 'widget 缺续行内容 —— 与渲染器分叉')
+  test('编辑器侧：定义行与续行整块隐藏，内容在文末汇总里完整一条（与渲染器对齐）', () => {
+    const { items } = decorationsOf(DOC)
+    const body = '[^note]: 命名脚注可以写多行，\n    续行需要缩进。\n'
+    const defs = collectOf(body)
+    assert.equal(defs.length, 1, `汇总应恰好 1 条脚注，实际 ${defs.length}`)
+    assert.equal(defs[0].label, 'note', '汇总条目应带上脚注标签')
+    assert.ok(defs[0].content.includes('命名脚注可以写多行'), '汇总缺首行内容')
+    assert.ok(defs[0].content.includes('续行需要缩进'), '汇总缺续行内容 —— 与渲染器分叉')
     assert.ok(
       items.some((i) => i.widget === null && i.to > i.from && i.text.includes('续行需要缩进')),
       '续行源码仍要整行隐藏（渲染器侧它已并入同一条脚注）'
@@ -429,5 +464,55 @@ describe('编辑器 ↔ 渲染器对照 · 多行定义两侧一致', () => {
     assert.equal(refs.length, 2, `渲染器应产出 2 个脚注引用，实际 ${refs.length}`)
     // 中间正文不许被吞（缺陷 A 在渲染器侧的对照判据）
     assert.match(html, /正文[\s\S]*?与/, '渲染器把两个脚注之间的正文吞掉了')
+  })
+})
+
+// ===========================================================================
+// 7) 文末汇总块：定义不再打断正文，汇总排在文末（对齐 GitHub 预览）
+// ===========================================================================
+describe('文末脚注汇总 · 位置与内容都对齐 GitHub 预览', () => {
+  test('汇总块挂在文档末尾，且是块级 widget（不会挤在正文行里）', () => {
+    const footer = footerOf('正文[^a]\n\n[^a]: 说明\n')
+    assert.equal(footer.length, 1, `文末应有 1 个汇总块，实际 ${footer.length}`)
+    assert.equal(footer[0].widget, 'FootnoteFooterWidget')
+    assert.ok(footer[0].block, '汇总块必须是 block widget，否则会嵌进最后一行')
+    assert.equal(
+      footerOf('正文[^a]\n\n[^a]: 说明\n')[0].from,
+      mkState('正文[^a]\n\n[^a]: 说明\n' + SENTINEL).doc.length,
+      '汇总块应挂在文档最末（doc.length）'
+    )
+  })
+
+  test('没有脚注定义时不发汇总块', () => {
+    assert.deepEqual(footerOf('只有正文\n'), [])
+  })
+
+  test('多条定义按出现顺序汇总，续行并入同一条', () => {
+    const entries = footerOf('[^b]: 第二条\n    续\n[^a]: 第一条\n')[0].entries
+    assert.deepEqual(
+      entries.map((e) => [e.label, e.content]),
+      [['b', '第二条 续'], ['a', '第一条']]
+    )
+  })
+
+  test('围栏代码块里的 `[^x]:` 不采集（它是代码，不是定义）', () => {
+    const body = '```\n[^no]: 这是代码\n    [^no2]: 也是代码\n```\n\n[^yes]: 真定义\n'
+    assert.deepEqual(
+      collectOf(body).map((d) => d.label),
+      ['yes'],
+      '把代码块里的定义形状当成了脚注定义 —— 汇总里会凭空多出条目'
+    )
+  })
+
+  test('波浪线围栏（~~~）同样跳过', () => {
+    assert.deepEqual(collectOf('~~~md\n[^no]: 代码\n~~~\n').map((d) => d.label), [])
+  })
+
+  test('条目位置随正文编辑平移时，widget 必须重建（否则点击跳到旧位置）', () => {
+    const a = new FootnoteFooterWidget([{ label: 'a', content: '说明', pos: 10 }])
+    const b = new FootnoteFooterWidget([{ label: 'a', content: '说明', pos: 10 }])
+    const moved = new FootnoteFooterWidget([{ label: 'a', content: '说明', pos: 20 }])
+    assert.ok(a.eq(b), '内容与位置都相同时应复用 DOM')
+    assert.ok(!a.eq(moved), '位置变了却判定相等 —— 点击会跳到过期位置')
   })
 })

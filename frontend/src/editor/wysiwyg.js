@@ -22,7 +22,7 @@ import {
   activeLineSet, noteQuoteDepth, pushLineClass, flushQuoteLines, pushMark,
   findChild, linkTextRange, footnoteLabel, parseHtmlTag, tagClass, htmlColor,
   htmlImgSrc, matchCloseTag, scanInlineMath, scanFootnoteRefs,
-  isFootnoteDefStart, footnoteDefLines, footnoteDefDecorations,
+  isFootnoteDefStart, footnoteDefLines,
   MathWidget, EmojiWidget, FootnoteRefWidget,
 } from './inlineExtras.js'
 
@@ -133,6 +133,8 @@ export function buildDecorations(state, visibleRanges) {
     if (!canHide(from) || from >= to) return
     replaces.push({ from, to: lineSafeTo(from, to), value: hideDeco })
   }
+  // 多行节点（引用式链接定义 / HTML 注释）逐行隐藏：插件 replace 跨行会被 CM 抛错
+  const hideMultiline = (from, to) => { for (let pos = from; pos < to;) { const l = doc.lineAt(pos); hide(pos, Math.min(to, l.to)); pos = l.to + 1 } }
   // widget 替换不能裁剪（半截替换会产出「半个图片/半个公式」），跨行时整套跳过
   const singleLine = (from, to) => !doc.sliceString(from, to).includes('\n')
   const markFor = (from, to, cls, color) => pushMark(decoRanges, from, to, cls, color)
@@ -208,11 +210,7 @@ export function buildDecorations(state, visibleRanges) {
           // 这里只处理普通引用式链接定义 `[ref]: url`。
           // 普通定义也可能跨行（实测 `[ref]: url⏎  "标题"` 是一个节点），故按行切开。
           if (!isFootnoteDefStart(doc.lineAt(node.from).text)) {
-            for (let pos = node.from; pos < node.to;) {
-              const line = doc.lineAt(pos)
-              hide(pos, Math.min(node.to, line.to))
-              pos = line.to + 1
-            }
+            hideMultiline(node.from, node.to)
           }
           return false
         }
@@ -246,6 +244,10 @@ export function buildDecorations(state, visibleRanges) {
           if (url) markFor(url.from, url.to, 'cm-md-link')
           return
         }
+
+        // HTML 注释：渲染时不可见（与 GitHub 预览一致）。代码块里不会产生
+        // Comment / CommentBlock 节点，故无需额外排除。
+        if (name === 'Comment' || name === 'CommentBlock') { hideMultiline(node.from, node.to); return false }
 
         // HTML 内联标签：隐藏标签本体、给两者之间的内容上语义类。
         // 清单只认 html.js 的 EDITOR_TAG_CLASS；不在清单里的一律保持源码可见
@@ -369,7 +371,7 @@ export function buildDecorations(state, visibleRanges) {
         ? footnoteDefLines(doc, n, doc.lineAt(visTo).number, (l) => inBlock(l.from, l.to)
             || codeRanges.some(([a, b]) => l.from >= a && l.to <= b))
         : null
-      if (defLines) { for (const r of footnoteDefDecorations(doc, defLines, n, canHide, singleLine)) replaces.push(r); continue }
+      if (defLines) { for (const ln of defLines) { const l = doc.line(ln); hide(l.from, l.to) } continue }
       for (const m of scanInlineMath(line.text, line.from)) {
         if (inCode(m.from, m.to)) continue
         replaces.push({ from: m.from, to: m.to, value: Decoration.replace({ widget: new MathWidget(m.tex) }) })

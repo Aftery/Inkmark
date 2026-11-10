@@ -485,14 +485,25 @@
   vertical-align: super;
 }
 
-/* 脚注定义首行：编号 + 内容小字 */
-.cm-md-footnote-def {
-  display: inline-block;
+/* 文末脚注汇总：定义行在原文处隐藏，这里统一列出（对齐 GitHub / 预览） */
+.cm-md-footnote-footer {
+  margin: 1.5em 0 .5em;
+  padding-top: .75em;
+  border-top: 1px solid var(--border);
   color: var(--meta);
   font-size: 0.92em;
 }
-.cm-md-footnote-def .cm-md-footnote-def-content {
-  margin-left: 4px;
+.cm-md-footnote-footer ol {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.cm-md-footnote-footer li {
+  margin: .2em 0;
+  cursor: pointer;
+}
+.cm-md-footnote-footer li:hover {
+  color: var(--fg);
 }
 
 /* HTML 对齐块：点击进入源码编辑 */

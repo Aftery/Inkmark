@@ -25,6 +25,7 @@ import { markdown, markdownLanguage } from '@codemirror/lang-markdown'
 import { tags as t } from '@lezer/highlight'
 import codeLanguages from './markdownHighlight.js'
 import { wysiwygField, wysiwygPlugin, wysiwygAtomicRanges } from './wysiwyg.js'
+import { footnoteFooterField } from './footnoteFooter.js'
 import { taskToggleHandlers } from './taskToggle.js'
 import { codeLinePlugin, codeCopyPlugin } from './codeBlock.js'
 
@@ -368,6 +369,8 @@ export function buildExtensions({
     wysiwygField,
     wysiwygPlugin,
     wysiwygAtomicRanges,
+    // 文末脚注汇总（定义行由 wysiwygPlugin 隐藏，本字段在文末渲染列表）
+    footnoteFooterField,
     // 表格真渲染（StateField block 装饰 + 可编辑单元格，见 tableRender.js 头注）。
     // tableSelectionGuard：拦「flush 把单元格 DOM 选区搬进主选区」的事务
     //（表格退化成竖线 + 失焦的第二道闸，根因链见 tableRender.js 的守卫头注）。
