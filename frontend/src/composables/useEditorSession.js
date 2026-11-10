@@ -37,7 +37,7 @@
 //   - onClipboardImage 是通道③：WKWebView 不暴露剪贴板图片，只能问系统剪贴板
 //     （见 imageDrop.js）。
 
-import { ref, computed, watch, nextTick, onMounted, onBeforeUnmount } from 'vue'
+import { ref, computed, watch, nextTick, onMounted, onBeforeUnmount, markRaw } from 'vue'
 import { createEditor, centerCursor, setEditorZoom } from '../editor/createEditor.js'
 import { buildExtensions, createEditorState, setFocusMode } from '../editor/extensions.js'
 import { createRenderer, render } from '../preview/markdown.js'
@@ -111,7 +111,7 @@ export function useEditorSession({
     onClipboardImage,
     onDocChange: (doc) => {
       const s = getActiveSession()
-      if (s) s.state = editorRef.value?.state ?? s.state
+      if (s) s.state = rawState(editorRef.value?.state ?? s.state)
       queuePreview(doc)
       onDocChange?.()
     },
@@ -125,6 +125,18 @@ export function useEditorSession({
   const activeId = ref('')
   /** @type {import('vue').Ref<Array<string>>} MRU：最近访问的 id 在最前 */
   const mru = ref([])
+  /**
+   * EditorState 必须始终保持裸对象。
+   *
+   * 【为什么】`sessions` 是 `ref([])`，Vue 会深层代理其中的对象；`state` 一旦被
+   * 代理，CodeMirror 的 `viewPlugin` facet 里取到的就是代理过的 spec，而其内部
+   * 插件查找用对象身份（`===`）比对 —— 比对失败会让 ViewPlugin「存在但取不到」，
+   * 表现为**切一次标签后 WYSIWYG 等插件装饰永久不再应用**（StateField 装饰仍在，
+   * 所以表格看起来正常，只有即时渲染静默失效）。
+   * markRaw 让 state 穿过 reactive 容器时仍按原对象返回；EditorView 同理
+   * （见 onMounted 的 editorRef 赋值）。
+   */
+  const rawState = (state) => markRaw(state)
   // 单调递增、**不复用**："t1" / "t2" …（复用 id 会让已关标签的旧引用复活）
   let idSeq = 0
   const nextSessionId = () => `t${++idSeq}`
@@ -158,7 +170,7 @@ export function useEditorSession({
       id: nextSessionId(),
       path,
       title: path ? baseName(path) : t('common.untitled'),
-      state: createEditorState({ doc: content, extensions }),
+      state: rawState(createEditorState({ doc: content, extensions })),
       scrollTop: 0,
       markdown: content,
       dirty: false,
@@ -329,7 +341,7 @@ export function useEditorSession({
     // 注册表若留着旧引用，切回标签时 setState(旧 state) 会让用户看到**旧内容**
     // （静默回退）。selectionSet 不触发 onDocChange，故必须在这里回写。
     const cur = getActiveSession()
-    if (cur) cur.state = u.state
+    if (cur) cur.state = rawState(u.state)
 
     const pos = u.state.selection.main.head
     const line = u.state.doc.lineAt(pos)
@@ -367,7 +379,7 @@ export function useEditorSession({
     const s = getActiveSession()
     if (s) {
       s.markdown = content
-      if (editorRef.value) s.state = editorRef.value.state
+      if (editorRef.value) s.state = rawState(editorRef.value.state)
     }
     caret.value = { line: 1, col: 1 }
     // 整份替换不触发 updateListener（见上），故手工重算表格提示，
@@ -404,7 +416,7 @@ export function useEditorSession({
     // 步骤 2 · 捕获当前标签：state / 滚动位置，脏则留底快照
     const cur = getActiveSession()
     if (cur) {
-      cur.state = view.state
+      cur.state = rawState(view.state)
       cur.scrollTop = view.scrollDOM.scrollTop
       // dirty / saveState 自 P2 起是**会话自己的字段**（§4.4），不再从全局捕获、
       // 也不再「交回」—— 切换只是换 state，不需要搬运脏标记。
@@ -433,7 +445,7 @@ export function useEditorSession({
     setEditorZoom(view, (zoom?.value ?? 100) / 100)
     view.dispatch({ effects: setFocusMode.of(Boolean(focusOn?.value)) })
     // 步骤 8 · 回写 state（步骤 7 的 dispatch 产生了新 state）
-    target.state = view.state
+    target.state = rawState(view.state)
     // 步骤 9 · 恢复滚动：setState 重建 docView 后几何要下一帧才准
     requestAnimationFrame(() => {
       view.scrollDOM.scrollTop = target.scrollTop
@@ -481,10 +493,12 @@ export function useEditorSession({
       // 共享的那一份扩展清单（见上方 extensions 的构建点）
       extensions,
     })
-    editorRef.value = view
+    // EditorView 也必须是裸对象：它持有 state / plugins，被代理后连内部方法里的
+    // `this.state` 读取都会拿到代理对象（见上方 rawState 的根因说明）。
+    editorRef.value = markRaw(view)
     // 注册表与视图必须是**同一个 state 对象**（EditorState 不可变，两份就等于
     // 两份撤销栈）。createEditor 内部另建了一份 state，故这里对齐一次。
-    initialSession.state = view.state
+    initialSession.state = rawState(view.state)
     // 应用级拖拽兜底：文件落在编辑器外时不让 webview 导航到 file://（见 imageDrop.js）
     removeDropGuard = installFileDropGuard(() => editorRef.value, onImageFile)
     onOutlineRefresh?.()
