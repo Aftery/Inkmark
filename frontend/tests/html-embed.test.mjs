@@ -1,19 +1,4 @@
-/**
- * html-embed.test.mjs — 内嵌 HTML（对齐块 / `<img>`）在编辑器侧的渲染契约
- * ---------------------------------------------------------------------------
- * 真机反馈：「内嵌 HTML 不支持，内容参考那个示例」——`<div align="center">` 整块
- * 以源码躺在编辑器里，`<img src=…>` 也只是一行尖括号。预览/导出侧本来就走
- * markdown/html.js 的白名单正常渲染，故这是**编辑器单边的两副面孔**。
- *
- * 这里钉住三件事：
- *   1) blockRanges 只登记「开闭标签各自独占一行」的 div/p 块，围栏代码里的同名
- *      标签不得被吞（吞了就是「代码块里的示例凭空少一段」）；
- *   2) parseHtmlAlignBlock 的配对 / align 白名单，防止任意值变成 CSS 注入；
- *   3) 正文过 sanitizeHtml（预览侧同一口径），`<script>` / 事件属性不得复活。
- *
- * 与 footnote-inline.test.mjs 同款：走真实 EditorState + 语法树，不用源码正则
- * 假装验证（区间偏一行不会报错，只会静默少渲染一段）。
- */
+// 编辑器内嵌 HTML 的渲染测试：对齐块区间、解析白名单、净化、点击进源码。
 import { describe, test } from 'node:test'
 import assert from 'node:assert/strict'
 import { EditorState } from '@codemirror/state'
@@ -25,7 +10,7 @@ import { parseHtmlAlignBlock, wysiwygBlocksField } from '../src/editor/wysiwygBl
 import { htmlImgSrc } from '../src/editor/inlineExtras.js'
 import { buildDecorations, wysiwygField } from '../src/editor/wysiwyg.js'
 
-/** 小文档的语法树在 create 时已完整；selection 放尾部避免块被显形源码 */
+// 选区放尾部，避免块被当成活跃行显示源码
 function mkState(doc) {
   return EditorState.create({
     doc,
@@ -45,7 +30,7 @@ describe('blockRanges · 对齐块区间', () => {
   test('div/p 独占一行的开闭标签配对成整块', () => {
     const doc = '<div align="center">\n  <p>居中</p>\n</div>\n\n正文\n'
     const [r] = htmlRanges(doc)
-    assert.ok(r, '未登记 html 区间（编辑器会继续显示源码）')
+    assert.ok(r, '未登记 html 区间')
     assert.equal(doc.slice(r.from, r.to), '<div align="center">\n  <p>居中</p>\n</div>')
   })
 
@@ -83,7 +68,7 @@ describe('parseHtmlAlignBlock · 解析与对齐白名单', () => {
 
   test('align 只认四个关键字，任意值不得流进 style', () => {
     const block = parseHtmlAlignBlock('<div align="center; background:url(x)">\n内容\n</div>')
-    assert.equal(block.align, '', '非法 align 被当成样式值 = CSS 注入通道')
+    assert.equal(block.align, '', '非法 align 被带进了 style')
   })
 
   test('闭标签不同名 / 尾巴带正文时拒绝解析', () => {
@@ -92,7 +77,7 @@ describe('parseHtmlAlignBlock · 解析与对齐白名单', () => {
   })
 })
 
-/** 只实现 widget.toDOM / 点击接线用到的几项 */
+// 仅实现 widget 用到的方法
 class El {
   constructor(tag) {
     this.tagName = String(tag).toUpperCase()
@@ -122,7 +107,7 @@ function widgetOf(doc, kind = 'html') {
   return found
 }
 
-/** 用桩 view 驱动 toDOM，并按 type 触发 widget 上注册的编辑事件 */
+// 用桩 view 驱动 toDOM，并触发 widget 上注册的编辑事件
 function clickWidget(widget, doc, { type = 'mousedown', from = 0 } = {}) {
   let anchor = null
   let focused = false
@@ -161,7 +146,7 @@ describe('HtmlAlignWidget · 正文净化', () => {
       '',
     ].join('\n')
     const w = widgetOf(doc)
-    assert.ok(w, '没造出 html widget（判据失效）')
+    assert.ok(w, '未生成 html widget')
 
     const prev = globalThis.document
     globalThis.document = { createElement: (tag) => new El(tag) }
@@ -172,7 +157,7 @@ describe('HtmlAlignWidget · 正文净化', () => {
       assert.equal(el.style.textAlign, 'center')
       assert.match(el.innerHTML, /保留/)
       assert.doesNotMatch(el.innerHTML, /<script|onclick|javascript:/i,
-        '正文没过 sanitizeHtml —— 预览不执行的，编辑器也不能执行')
+        '正文没有经过 sanitizeHtml')
     } finally {
       globalThis.document = prev
     }
@@ -183,19 +168,19 @@ describe('渲染块 · 点击进入源码编辑', () => {
   test('HTML 对齐块：单击把选区放进正文首行（widget 随 selectionInside 退回源码）', () => {
     const doc = '<div align="center">\n  <p>保留</p>\n</div>\n\n哨兵\n'
     const w = widgetOf(doc, 'html')
-    assert.ok(w, '没造出 html widget（判据失效）')
+    assert.ok(w, '未生成 html widget')
     const r = clickWidget(w, doc)
     assert.ok(r.anchor > 0 && r.anchor < doc.indexOf('</div>'), `选区没落进块内：${r.anchor}`)
     assert.ok(doc.slice(r.anchor, doc.indexOf('</div>')).includes('<p>保留</p>'), '选区没落在正文首行')
-    assert.equal(r.prevented, true, '必须 preventDefault，否则 CM 的默认点击会再抢一次选区')
-    assert.equal(r.stopped, true, '必须 stopPropagation，避免事件冒到 CM 的 contentDOM')
-    assert.equal(r.focused, true, '派发选区后必须把焦点交还编辑器，否则用户无法继续打字')
+    assert.equal(r.prevented, true, '应调用 preventDefault')
+    assert.equal(r.stopped, true, '应调用 stopPropagation')
+    assert.equal(r.focused, true, '派发选区后应重新聚焦编辑器')
   })
 
   test('公式块：单击把选区放进 `$$` 之间的源码首行', () => {
     const doc = '$$\na^2+b^2=c^2\n$$\n\n哨兵\n'
     const w = widgetOf(doc, 'math')
-    assert.ok(w, '没造出 math widget（判据失效）')
+    assert.ok(w, '未生成 math widget')
     const r = clickWidget(w, doc)
     assert.equal(doc.slice(r.anchor).split('\n')[0], 'a^2+b^2=c^2', '光标没落到公式源码行')
     assert.equal(r.focused, true)
@@ -204,10 +189,10 @@ describe('渲染块 · 点击进入源码编辑', () => {
   test('折叠块：单击保留原生展开/收起，双击才进源码编辑', () => {
     const doc = '<details>\n<summary>标题</summary>\n正文\n</details>\n\n哨兵\n'
     const w = widgetOf(doc, 'details')
-    assert.ok(w, '没造出 details widget（判据失效）')
+    assert.ok(w, '未生成 details widget')
     const r = clickWidget(w, doc, { type: 'dblclick' })
     assert.equal(doc.slice(r.anchor).split('\n')[0], '<summary>标题</summary>', '双击没落到折叠块源码')
-    assert.equal(r.el.listeners.mousedown, undefined, '单击必须留给原生 <summary>，不能被编辑态抢走')
+    assert.equal(r.el.listeners.mousedown, undefined, '单击应留给原生 <summary>')
   })
 })
 
@@ -218,12 +203,12 @@ describe('htmlImgSrc · `<img …>` 属性取值', () => {
     assert.deepEqual(htmlImgSrc(' src=c.png'), { src: 'c.png', alt: '' })
   })
 
-  test('没有 src 的 img 返回 null（保持源码，不造空图）', () => {
+  test('没有 src 时返回 null', () => {
     assert.equal(htmlImgSrc(' alt="只有说明"'), null)
     assert.equal(htmlImgSrc(''), null)
   })
 
-  test('width / height 进入图片 widget（示例里「可控制大小」不能只在预览生效）', () => {
+  test('width / height 进入图片 widget', () => {
     const doc = '<img src="data:image/svg+xml;base64,AA==" width="200" height="150" alt="logo" />\n\n哨兵\n'
     const state = EditorState.create({
       doc,

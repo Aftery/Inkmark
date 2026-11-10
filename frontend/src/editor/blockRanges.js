@@ -1,28 +1,8 @@
-// editor/blockRanges.js — 「整块渲染」区域的唯一登记处（块级 widget 与行内装饰的分界）
-// ----------------------------------------------------------------------------
-// 【为什么需要这个模块】编辑器的即时渲染分成两套机制，能力边界完全不同：
+// editor/blockRanges.js — 记录必须由块级 widget 独占的区间。
 //
-//   1) 行内装饰（wysiwyg.js 的 ViewPlugin）—— 只能整体替换**同一行内**的区间；
-//      跨行替换会被 @codemirror/view 直接拒绝（dist/index.js:2772 抛 RangeError）。
-//   2) 块级 widget（StateField 提供的 block 装饰）—— 能跨行整体替换，但只能由
-//      StateField 提供，且**与行内装饰落在同一片文本上时会互相踩**。
-//
-// 折叠块 `<details>…</details>` 与多行公式 `$$ … $$` 都属于第 2 类。于是必然会
-// 出现「两套机制抢同一片文本」的问题：行内装饰若照常处理 `</details>` 里的
-// `<b>`、或者把 `$$` 当普通文本，会和块 widget 的替换区间重叠 —— CM 侧的表现
-// 是构建装饰集时抛错（"Cannot destructure property 'tile'" 一族），或者视觉上
-// 出现半截渲染。
-//
-// 因此把「哪些区间由块级机制独占」做成一个**先于两边存在的契约**：
-//   - 本文件负责**扫描**这些区间（纯函数 scanBlockRanges + 一个 StateField）
-//   - 块级 widget 侧读它来决定在哪造 widget（tableRender.js 之外的另一个提供者）
-//   - 行内装饰侧读 `isBlockCovered()` 来决定**跳过**这些节点
-//
-// 【为什么扫描要自己按行做，而不是只看语法树节点】
-// `<details>` 在 lezer 眼里是**两段互不相连的 HTMLBlock**（开标签一段、闭标签
-// 一段），中间夹着普通 Paragraph —— 没有一个节点覆盖整块，只能从开标签行扫到
-// 闭标签行。多行 `$$` 更没有节点（lezer 不认 TeX）。故这里按行扫描 + 语法树
-// 排除（围栏代码块 / 行内代码里的这些符号是**文本**，不能当块标记）。
+// 行内装饰不能跨行替换，而 <details>、$$…$$、整块 <div>/<p> 在语法树里都没有
+// 覆盖整块的节点，只能按行扫描。块级 widget 与行内装饰若落在同一段文本上，
+// CodeMirror 会抛 tile 相关错误，因此两边都以这里的区间为准。
 
 import { syntaxTree } from '@codemirror/language'
 import { StateField } from '@codemirror/state'
@@ -31,24 +11,11 @@ import { StateField } from '@codemirror/state'
 const DETAILS_OPEN = /^\s{0,3}<details\b/i
 const DETAILS_CLOSE = /<\/details\s*>/i
 
-/**
- * 对齐块：`<div align="center">` / `<p align="right">` 这类**整行**开标签、配对
- * 闭标签独占一行的块。真机反馈「内嵌 HTML 里 div/p 不渲染」—— 预览侧这些标签
- * 走 html.js 白名单照常渲染，编辑器侧由行内 HTMLTag 兜底只能隐掉配对的行内
- * 标签，整块 div 保持源码。修法与 details 同路：由块级 widget 整块渲染。
- *
- * 【为什么只认「独占一行的开标签」】行内写法 `<p align="center">x</p>` 交给
- * 行内 HTMLTag 隐藏即可，混进来会和行内装饰抢同一片文本（module 头注的
- * 「两套机制抢」正是这里在新 kind 上复刻的坑）。闭标签必须独占一行同理：
- * `</div>` 尾巴上带正文时按「未配对」处理，保持源码可见。
- */
+// 独占一行的 <div>/<p> 开标签。行内写法（<p>x</p>）交给行内 HTMLTag，
+// 避免两套装饰覆盖同一段文本。
 const ALIGN_OPEN = /^\s{0,3}<(div|p)((?:\s[^<>]*?)?)(\/?)>$/i
 
-/**
- * 取一条文字（trim 后）里开标签的标签名；不是独占一行的 div/p 开标签返回 null。
- * 刻意**独立成函数**而不是直接一条正则糊在扫描循环里：闭标签配对、代码块排除、
- * 「开标签必须独占一行」三件事在 update() 的窄循环里互相缠着，站到外面才讲得清。
- */
+// 返回独占一行的 div/p 标签名；行内或自闭合标签返回 null。
 function alignOpenName(text) {
   const m = ALIGN_OPEN.exec(text.trim())
   if (!m || m[3] === '/') return null // 自闭合不是块开标签
@@ -56,15 +23,11 @@ function alignOpenName(text) {
 }
 
 /**
- * 扫描「必须由块级 widget 独占」的区间。
- *
- * 纯函数（入参是 doc + 语法树），便于直接对真实 EditorState 打靶 —— 块级渲染的
- * 缺陷全是静默的：区间偏一行，界面上只是「折叠块少了一段」或者「公式多出一行
- * 空行」，不抛错、不报红。
+ * 扫描块级区间，按 from 升序返回，互不重叠。
  *
  * @param {import('@codemirror/state').Text} doc
  * @param {import('@lezer/common').Tree} tree
- * @returns {{from:number,to:number,kind:'details'|'math'}[]} 按 from 升序、互不重叠
+ * @returns {{from:number,to:number,kind:'details'|'math'|'html'}[]}
  */
 export function scanBlockRanges(doc, tree) {
   const codeRanges = []
@@ -103,7 +66,7 @@ export function scanBlockRanges(doc, tree) {
         i = j + 1
         continue
       }
-      // 没配对上（用户正写到一半）：不登记 —— 保持源码可见，不吞掉后半篇文档
+      // 未闭合：保持源码可见，不吞后半篇
       i++
       continue
     }
@@ -126,7 +89,7 @@ export function scanBlockRanges(doc, tree) {
       i++
       continue
     }
-    // 对齐块（div/p 独占一行的开标签）：找配对的同名闭标签行，允许嵌套
+    // 对齐块：按同名标签配对，允许嵌套
     const openName = !inCode(line.from) && alignOpenName(line.text)
     if (openName) {
       const closeRe = new RegExp('^\\s*</\\s*' + openName + '\\s*>$', 'i')
@@ -140,8 +103,7 @@ export function scanBlockRanges(doc, tree) {
         if (closeRe.test(l.text)) { depth--; if (depth <= 0) break }
       }
       if (depth <= 0) {
-        // 闭标签行必须独占一行（closeRe 只认这个形态）；尾巴上带正文时按
-        // 「未配对」处理 —— 源码保持可见，不吞后半篇
+        // 闭标签必须独占一行；否则按未配对处理，保留源码
         out.push({ from: line.from, to: doc.line(j).to, kind: 'html' })
         i = j + 1
         continue

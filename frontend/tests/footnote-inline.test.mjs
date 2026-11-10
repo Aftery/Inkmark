@@ -256,10 +256,7 @@ describe('缺陷 B · 多行脚注定义连缩进续行一起隐藏', () => {
     return items.some((i) => i.widget === null && i.from <= start && i.to >= end && i.to > i.from)
   }
 
-  test('**决定性判据**：首行换成内容 widget（编号+内容可见），续行整行隐藏', () => {
-    // 【2026-10-26 口径更新】定义首行不再隐藏 —— 此前正文在编辑器里一处都看不到，
-    // 真机反馈「脚注最下面没有内容」。现改为 FootnoteDefWidget（上标编号 + 内容
-    // 小字），续行（隐藏口径来自缺陷 B 的修复）仍整行隐藏。
+  test('首行换成内容 widget，续行整行隐藏', () => {
     const { items, doc } = decorationsOf(DOC)
     const defs = items.filter((i) => i.widget === 'FootnoteDefWidget')
     assert.equal(defs.length, 1, `应有 1 条定义内容 widget，实际 ${defs.length}`)
@@ -333,7 +330,7 @@ describe('缺陷 B · 多行脚注定义连缩进续行一起隐藏', () => {
     //   ③ `: 第二条` 不许以任何形式裸露在正文里。
     const body = '[^a]: 第一条\n  续行\n[^b]: 第二条\n'
     const { items, doc } = decorationsOf(body)
-    // 口径更新（2026-10-26）：定义首行 = 内容 widget；续行 = 隐藏
+    // 首行是内容 widget，续行隐藏
     const defs = items.filter((i) => i.widget === 'FootnoteDefWidget')
     assert.equal(defs.length, 2, `应有 2 条内容 widget（两条定义），实际 ${defs.length}`)
     assert.deepEqual(defs.map((d) => d.content), ['第一条 续行', '第二条'], 'widget 内容不对')
@@ -414,8 +411,7 @@ describe('编辑器 ↔ 渲染器对照 · 多行定义两侧一致', () => {
     const { items, doc } = decorationsOf(DOC)
     const defs = items.filter((i) => i.widget === 'FootnoteDefWidget')
     assert.equal(defs.length, 1, `应有 1 条内容 widget，实际 ${defs.length}`)
-    // 首行与续行的文字都必须出现在 widget 内容里 —— 这就是「完整一条」在
-    // 编辑器侧的对等判据（编辑器不再要求源码以隐藏形态呈现整条）
+    // 首行和续行都应该出现在 widget 内容里
     assert.ok(defs[0].content.includes('命名脚注可以写多行'), 'widget 缺首行内容')
     assert.ok(defs[0].content.includes('续行需要缩进'), 'widget 缺续行内容 —— 与渲染器分叉')
     assert.ok(

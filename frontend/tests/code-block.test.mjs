@@ -183,12 +183,12 @@ describe('语言映射 · 编辑器侧高亮', () => {
     assert.equal(codeLanguages('no-such-language'), null)
   })
 
-  test('c / cpp / go / sql 共四个家族在编辑器侧也已支持（真机反馈补齐）', () => {
+  test('c / cpp / go / sql 家族已支持', () => {
     for (const lang of ['c', 'cpp', 'c++', 'go', 'golang', 'sql', 'mysql', 'postgresql', 'sqlite']) {
       assert.ok(codeLanguages(lang), `编辑器侧应支持 ${lang}`)
     }
-    // rust 没有官方 CodeMirror 语言包，仍只在预览区高亮 —— 边界别漂移
-    assert.equal(codeLanguages('rust'), null, 'rust 无官方语言包，只在预览区由 highlight.js 覆盖')
+    // rust 没有官方语言包，只在预览区高亮
+    assert.equal(codeLanguages('rust'), null, 'rust 只在预览区由 highlight.js 覆盖')
   })
 })
 

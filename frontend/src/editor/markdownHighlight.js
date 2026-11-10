@@ -1,14 +1,8 @@
-// 让 CodeMirror 的 markdown 代码围栏识别常见语言。
-// 注意：codeLanguages 回调必须返回 Language 本身（LanguageSupport.language），
-// 不能返回 LanguageSupport——lang-markdown 的 getCodeParser 取的是 found.parser，
-// LanguageSupport 没有 .parser 属性，返回它会静默退化为纯文本（无高亮无颜色）。
-//
-// 【能力边界，写给后来者】编辑器侧覆盖**已安装的 CodeMirror 语言包**：js/ts
-// 家族、java、html/xml 家族、css 家族、json 家族、python、c/cpp 家族、go、sql
-// 家族。rust / bash / yaml 等没有对应语言包的语言只在**预览区**由 highlight.js
-// 高亮，编辑器内保持纯文本底色 —— 仍遵循「不引第三方（非 CodeMirror 官方）
-// 语言包、不写手搓 parser」的边界。要新增语言时优先在 @codemirror/lang-*
-// 官方包里找，找到才加一行 import + 一行登记；返回任何 Lie 都只会退化成纯文本。
+// 编辑器侧代码围栏的语言映射。
+// 必须返回 Language（LanguageSupport.language）；返回 LanguageSupport 会让
+// lang-markdown 静默退化成纯文本。
+// 只使用已安装的 @codemirror/lang-*；rust/bash/yaml 等没有官方包，预览区由
+// highlight.js 高亮，编辑器内保持纯文本。
 import { javascript } from '@codemirror/lang-javascript'
 import { java } from '@codemirror/lang-java'
 import { html } from '@codemirror/lang-html'

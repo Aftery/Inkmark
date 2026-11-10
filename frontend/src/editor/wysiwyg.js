@@ -1,24 +1,9 @@
-// WYSIWYG 即时模式装饰器（D-2 默认编辑形态）
-// ----------------------------------------------------------------------------
-// 架构依据：docs/spec/phaseC-architecture.md §3（逐条照做）。
+// WYSIWYG 即时模式装饰器。
 //
-// 核心约束（@codemirror/view@6.43.13 实测，勿凭文档记忆改写）：
-// 1) 插件提供的装饰「不得 block、不得跨行替换」（dist/index.js:2772-2776 会抛
-//    RangeError）。本文件只用行内 Decoration.replace / Decoration.mark / 行内
-//    widget / Decoration.line，绝无 block 装饰。
-// 2) 装饰只在 visibleRanges 内计算（禁止全文档扫描，AC-05 大文档性能）。
-// 3) IME 保护：view.composing 为 true 时冻结重算（AC-04 中文输入硬需求）。
-// 4) atomicRanges 必需：光标必须跳过隐藏区，否则方向键「按了不动」。
-// 5) 内容零篡改（AC-03）：本模块只产装饰，永不 dispatch 文档变更。
-//
-// 显形判定（§3.2）：「活跃」= 与任一 selection range 相交的行。活跃行的所有
-// 隐藏型替换一律跳过（显形 = 保持源码原样）；行级样式类（引用底色等）照常应用。
-//
-// 【本文件只管「在哪儿用」】HTML 内联标签的解析/配对、行内公式的边界扫描、
-// emoji 与脚注的 widget 都在 editor/inlineExtras.js；图片整块在
-// editor/imageWidget.js（两者都是为了让本文件守住建制 5 的 300 有效行红线）。
-//
-// 样式：.cm-md-* 全部定义在 themes/editor-wysiwyg.css（该文件是唯一定义处）。
+// 只用行内装饰：block 和跨行替换会被 @codemirror/view 拒绝。
+// 装饰只算 visibleRanges，IME 合成期间冻结重算。
+// 活跃行显示源码；atomicRanges 让光标跳过隐藏的标记。
+// 解析和 widget 在 inlineExtras.js、imageWidget.js，这里只决定在哪用。
 
 import { ViewPlugin, Decoration, WidgetType, EditorView } from '@codemirror/view'
 import { StateField, StateEffect } from '@codemirror/state'
@@ -271,9 +256,7 @@ export function buildDecorations(state, visibleRanges) {
           // 跨行标签（属性换行）实测存在；隐藏半截会留下 `style="…">` 这种残渣，
           // 比整段源码更难读 —— 一律保持源码可见
           if (!tag || !singleLine(node.from, node.to)) return
-          // <img …/>：整体换成与 `![]()` 同款的图片预览 widget（口径同
-          // inlineExtras.htmlImgSrc）。img 在预览侧白名单里，编辑器留裸标签
-          // 正是「内嵌 HTML 的图片不显示」的真机反馈，两副面孔必须修齐。
+          // <img> 换成与 ![]() 相同的图片 widget
           const img = tag.name === 'img' && !tag.closing && canHide(node.from) ? htmlImgSrc(tag.attrs) : null
           if (img) { replaces.push({ from: node.from, to: node.to, value: Decoration.replace({ widget: new ImageWidget(img.src, img.alt, tag.attrs) }) }); return }
           const cls = tagClass(tag.name)

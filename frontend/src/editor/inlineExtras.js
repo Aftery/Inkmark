@@ -1,32 +1,13 @@
-// editor/inlineExtras.js — 行内渲染件：HTML 标签 / 行内公式 / emoji / 脚注
-// ----------------------------------------------------------------------------
-// 【为什么单独成文件】wysiwyg.js 已顶到契约 5 的 300 有效代码行红线。这四类
-// 渲染件的共同点是：它们都**不是 Markdown 语义**，而是「Markdown 之上的补充
-// 语法」—— lezer 要么只给出一个裸节点（HTMLTag / Emoji），要么根本不给节点
-// （TeX 公式）。判定与 DOM 组装都在本文件，wysiwyg.js 只负责「在哪儿用」。
+// editor/inlineExtras.js — 行内渲染件：HTML 标签、行内公式、emoji、脚注。
 //
-// 【三条硬口径，改这个文件前先看】
-// 1) 标签清单只从 markdown/html.js 的 EDITOR_TAG_CLASS 取 —— 那是唯一真源。
-//    另抄一份的后果是「编辑器认某个标签、预览/导出不认」，同一份文档两副面孔。
-// 2) 公式必须经 markdown/math.js 的 renderMath（唯一口径，KaTeX 选项只在那里）。
-//    本文件不 import katex：一旦两处各写一份选项，`trust`/`maxExpand` 这类
-//    安全参数迟早分叉，且**都不抛异常**，只有肉眼看得出。
-// 3) 所有 widget 的 eq() 必须把「构造期算出来的全部字段」纳入比较。本仓
-//    2026-10-23 的图片定格缺陷就是 eq 漏字段：CM 判「没变」⇒ 复用旧 DOM ⇒
-//    错误状态永久定格，而且全程不报错。
+// 标签清单以 markdown/html.js 的 EDITOR_TAG_CLASS 为准，公式统一走 renderMath。
+// widget 的 eq() 要比较构造期的全部字段，否则 CodeMirror 会复用旧 DOM。
 
 import { Decoration, WidgetType } from '@codemirror/view'
 import { EDITOR_BLOCK_TAGS, EDITOR_TAG_CLASS } from '../markdown/html.js'
 import { renderMath } from '../markdown/math.js'
 
-/**
- * 在**直接**子节点里找第一个指定名字的节点。
- * 不递归：lezer 的嵌套语义靠父节点判定（URL 只可能是 Link/Image/Autolink 的
- * 直接子节点），递归会拿到更深层的同名节点、把判定口径搞糊。
- *
- * 【坑，勿改】SyntaxNode 上**没有** .state / .doc（只有 from/to/name/node 等）。
- * 取文本必须用调用方传进来的 doc —— 曾写成 node.state.doc 直接把插件打崩。
- */
+// 只查直接子节点，不递归。SyntaxNode 没有 state/doc，文本要用传入的 doc。
 export function findChild(node, name) {
   const n = node.node
   if (!n) return null
@@ -40,13 +21,8 @@ export function findChild(node, name) {
 // 活跃行集合与引用块嵌套深度
 // ---------------------------------------------------------------------------
 
-/**
- * 与任一选区相交的行号集合，上下各扩 1 行。
- *
- * 【为什么要扩 1 行（真机反馈）】只含选区行时，光标移到相邻行的瞬间，该行的
- * 标记从「隐藏 + 原子」突变为可见，atomicRanges 动态变化导致方向键跳跃感明显。
- * 扩展后相邻行标记已处于可见态（非原子），跨行移动平滑。
- */
+// 与选区相交的行，上下各扩 1 行，避免光标跨行时装饰频繁切换。
+
 export function activeLineSet(doc, selection) {
   const active = new Set()
   for (const r of selection.ranges) {
@@ -120,16 +96,9 @@ export function linkTextRange(node) {
   return { from: marks[0].to, to: marks[1].from }
 }
 
-/**
- * 脚注引用 `[^1]` 的编号；不是脚注返回 null。
- *
- * 【lezer 把脚注引用解析成普通 Link —— 必须按 `^` 前缀区分】它没有 URL、
- * 也没有 LinkLabel，只有两个 LinkMark 夹着文本 `^1`。若不加这个判据，
- * 脚注会被当成普通链接处理：`^1` 变成链接文字（上不了上标），而普通引用式
- * 链接 `[文字][ref]` 又有 LinkLabel，两者靠「有无 URL/LinkLabel」也能分，
- * 但那太脆（lezer 版本变化时分不出来）。`^` 前缀是 Markdown 规范里脚注的
- * 定义性特征，最稳。
- */
+// 脚注引用 [^1] 的编号；不是脚注返回 null。
+// lezer 把脚注引用解析成普通 Link，靠 ^ 前缀和「无 URL/LinkLabel」区分。
+
 export function footnoteLabel(node, doc) {
   const n = node.node
   if (!n) return null
@@ -145,38 +114,15 @@ export function footnoteLabel(node, doc) {
   return isFootnoteLabel(inner) ? inner.slice(1) : null
 }
 
-/**
- * Link 的内部文本是不是**单个**脚注标签（`^1` / `^note`）。
- *
- * 【两条判据缺一不可 —— 2026-10-25 真机截图暴露的缺陷】
- * ① 以 `^` 开头（脚注的定义性特征，见 footnoteLabel 头注）；
- * ② **不含 `[` / `]`**。
- * 为什么 ② 是必须的：lezer 会**把同一行的多个脚注引用合并成一个 Link**。
- * 实测 `文字[^1]，还可以有命名脚注[^note]。` 产出的 Link 是
- *   Link(10..30) 内部文本 = `^1]，还可以有命名脚注[^note`
- * 若只看 ①，这个 20 字符的整段会被当成一个脚注 widget 换掉 —— 界面表现为
- * 「第二个脚注连同中间的正文一起消失，只剩一个上标 1」，而**不报任何错**。
- * 故含括号一律判「不是单个脚注」，由行级扫描（scanFootnoteRefs）逐个处理。
- */
+// 判断 Link 文本是不是单个脚注标签。必须排除含 [] 的文本：
+// lezer 会把同一行的多个脚注合并成一个 Link，只看 ^ 会连中间正文一起吞掉。
 export function isFootnoteLabel(inner) {
   return typeof inner === 'string' && inner.startsWith('^') && inner.length > 1
     && !/[\[\]]/.test(inner.slice(1))
 }
 
-/**
- * 扫描一行里的脚注引用，返回 `[{from, to, label}]`（绝对偏移）。
- *
- * 【为什么脚注不能只靠语法树】如 isFootnoteLabel 头注所述：同一行多个脚注会被
- * lezer 合并成一个 Link 节点，按节点处理必然要么吞掉中间正文、要么漏掉后续脚注。
- * 脚注引用本身是**词法层面**很规整的 `[^label]`，按行扫文本反而更准 —— 与行内
- * 公式（scanInlineMath）同一取舍，两处都只处理「非活跃行」。
- *
- * 边界：
- *  - 标签里不许出现空白或括号（`[^a b]` 不是标准脚注写法，保持源码）；
- *  - 前面紧邻 `!`（`![^x]`）不算：那是图片的 alt，交给图片 widget；
- *  - 定义行 `[^1]: 内容` 也会命中 —— 无害，整行的隐藏装饰区间更长，去重时
- *    会盖掉它（见 wysiwyg.js 的 replaces 去重）。
- */
+// 扫描一行里的脚注引用。语法树会把多个引用合并，按文本扫更可靠。
+// 跳过 ![^x]（图片 alt）和定义行（由整行装饰覆盖）。
 export function scanFootnoteRefs(text, offset = 0) {
   const out = []
   const re = /\[\^([^\[\]\s]+)\]/g
@@ -197,43 +143,15 @@ export function isFootnoteDefStart(text) {
   return /^\s{0,3}\[\^[^\]\s]+\]:/.test(text)
 }
 
-/**
- * 拆一条脚注定义首行 → { label, rest }；不是定义行返回 null。
- *
- * 【为什么要有它】2026-10-26 真机反馈「脚注在编辑器里整段消失」：定义行此前被
- * 整行隐藏、正文 nowhere 可读 —— 预览/导出侧内容渲染成 `<section class="footnotes">`，
- * 编辑器侧却一个字都看不到。修法是首行不再隐藏，而是换成下方的 FootnoteDefWidget
- * （编号上标 + 内容小字）；本函数就是 widget 渲染时唯一的取材口，与
- * isFootnoteDefStart 逐一同步（前缀口径一字不差）。
- */
+// `[^label]: 内容` → { label, rest }；不是脚注定义返回 null。
+// 前缀口径与 isFootnoteDefStart 保持一致。
 export function parseFootnoteDefText(text) {
   const m = /^\s{0,3}\[\^([^\]\s]+)\]:\s*(.*)$/.exec(text)
   return m ? { label: m[1], rest: m[2] } : null
 }
 
 /**
- * 脚注定义 `[^label]: 内容` 的**全部行**区间（含缩进续行）。
- *
- * 【为什么必须自己扫，而不用 LinkReference 节点】lezer 只把**首行**算进
- * LinkReference，续行会被当成普通段落甚至 CodeBlock：
- *   `[^note]: 命名脚注可以写多行，`
- *   `    续行需要缩进。`          ← 实测是 CodeBlock（缩进 4 空格即代码块）
- * 于是编辑器里只隐藏了首行、续行原样留在正文中 —— 用户看到「一条脚注内容
- * 一半消失了、另一半变成代码块」，而预览/导出里它是完整的一条脚注
- * （markdown-it-footnote 认缩进续行）。这类「同一份文档两副面孔」是本轮
- * 反复在修的主线，故定义行也改成按行扫。
- *
- * 【续行判定与预览侧对齐】markdown-it-footnote 把「紧跟定义行、且缩进 ≥1 个
- * 空格」的后续行都算进脚注（实测 2 空格与 4 空格都认，空行终止）。这里用
- * 同一口径：从定义行往下，遇到空行 / 非缩进行 / 另一条定义行就停。
- *
- * 【只在整行独占定义时登记】行首允许 0~3 空格（CommonMark 的缩进上限），
- * 且 `[^label]:` 之后必须没有别的正文 —— 否则 `说明[^1]: x` 这种行内写法
- * 会被误当成定义行整行隐藏。
- *
- * @param {import('@codemirror/state').Text} doc
- * @param {number} lineNumber 起始行号（1-based）
- * @returns {{from:number,to:number}|null} 定义块的行首到最后一行的行尾
+ * 脚注定义块的行范围：定义行加后续缩进续行，遇到空行、非缩进行或下一条定义停止。
  */
 export function footnoteDefRange(doc, lineNumber) {
   const line = doc.line(lineNumber)
@@ -250,29 +168,8 @@ export function footnoteDefRange(doc, lineNumber) {
 }
 
 /**
- * 收集 [fromLine, toLine] 范围内的**脚注定义块**覆盖到的行号（含缩进续行）。
- *
- * 【为什么按行扫，而不是跟着 lezer 的 LinkReference 节点走 —— 2026-10-26 缺陷 D】
- * 缺陷现场（QA 实测 + Lead 复现）：
- *     [^a]: 第一条
- *       续行
- *     [^b]: 第二条
- * 第三行紧跟在续行之后时，lezer **不产 LinkReference**，而是把它并进上一段的
- * Paragraph（实测 Paragraph(12..24) 里只有 Link(15..19)）。按节点处理的后果是：
- * 前两条被隐藏、`[^b]` 被行级扫描换成上标 widget、而 `: 第二条` 半截源码裸露在
- * 正文里 —— 同一份文档在预览/导出里是完整的两条脚注（实测 2 个 <li>），编辑器
- * 里却是「一个上标 + 半行源码」，属于本仓最忌讳的一类静默分叉。
- *
- * 故定义块与行内公式、脚注引用一样，统一走**行级口径**（三者都是「词法规整、
- * 语法树不可靠」的语法）。加上空行后另起一段的缩进内容（markdown-it-footnote
- * 支持脚注多段落）也覆盖不到 —— 这是刻意的取舍：宁可少隐藏一段，也不吞掉
- * 用户正文；多段落场景下首段与缩进续行仍会正常隐藏。
- *
- * @param {import('@codemirror/state').Text} doc
- * @param {number} fromLine 起始行号（1-based，含）
- * @param {number} toLine 结束行号（1-based，含）
- * @param {(line: object) => boolean} [isExcluded] 该行是否落在代码块 / 块级 widget 区间
- * @returns {Set<number>} 需要隐藏的行号
+ * 收集范围内所有脚注定义块的行号。
+ * 按行扫描而不是跟 LinkReference：lezer 只把首行算进节点，续行会漏掉。
  */
 export function footnoteDefLines(doc, fromLine, toLine, isExcluded) {
   const out = new Set()
@@ -344,14 +241,8 @@ export function htmlColor(attrs) {
   return null
 }
 
-/**
- * 从属性串里取**单个**属性值（img 的 src / alt 用）；取不到返回 null。
- *
- * 【为什么不复用 markdown/html.js 的 parseAttrs】那是给「白名单重建」用的
- * （逐属性遇非引号值吃到空白为止），它把 `<` `>` 也当属性名边界之外合法字符，
- * 而这里喂进来的 attrs 来自 parseHtmlTag（标签体已被剥离，不含尖括号）。
- * 正则一条解决，与 htmlColor 同批函数，不需要拖入两份解析器。
- */
+// 读取属性串里的单个属性值，支持双引号、单引号和无引号写法。
+// attrs 来自 parseHtmlTag，已去掉标签尖括号。
 export function attrValue(attrs, name) {
   const re = new RegExp(
     '(?:^|\\s)' + name + '\\s*=\\s*(?:"([^"]*)"|\'([^\']*)\'|([^\\s>"\']+))', 'i'
@@ -361,14 +252,8 @@ export function attrValue(attrs, name) {
   return m[1] ?? m[2] ?? m[3] ?? null
 }
 
-/**
- * 从 HTMLTag 标签体里取出 img 的 src / alt；不是可显示的 img（无 src）返回 null。
- *
- * 【为什么给 img 开小灶】img 在预览侧白名单里（INLINE_ALLOWED），`<img …/>` 独立
- * 一行时预览渲染出真图片；编辑器侧此前把它当普通 HTMLTag 留源码 —— 真机反馈
- * 「内嵌 HTML 的图片不显示」。widget 与 markdown `![]()` 共用 cm-md-img，尺寸
- * 由 ImageWidget 从 attrs 还原（width/height 只认纯数字，见 imageWidget.sizeOf）。
- */
+// `<img src alt>` → { src, alt }；没有 src 时返回 null，保留源码。
+// 尺寸由 ImageWidget 从 attrs 读取，见 imageWidget.sizeOf。
 export function htmlImgSrc(attrs) {
   const src = attrValue(attrs, 'src')
   return src ? { src, alt: attrValue(attrs, 'alt') ?? '' } : null
@@ -557,13 +442,8 @@ export class FootnoteRefWidget extends WidgetType {
   ignoreEvent() { return false }
 }
 
-/**
- * 脚注**内容** widget：定义行 `[^1]: 这是脚注内容。` 整行换成
- * 「上标编号 + 内容小字」。此前定义行整块隐藏（与预览侧 `<section
- * class="footnotes">` FileInfo 两副面孔），真机反馈是「脚注在正文里找不到内容」
- * —— 静默消失正是本仓最忌讳的形态。内容用 textContent 装载：它来自文档本身，
- * 不是 HTML，不能当 innerHTML 塞进去（`<b>` 这样的字面量会被激活成元素）。
- */
+// 脚注定义首行：显示为「上标编号 + 内容」，续行仍由 footnoteDefDecorations 隐藏。
+// 内容来自文档，必须用 textContent，避免把 <b> 之类的字面量当成 HTML。
 export class FootnoteDefWidget extends WidgetType {
   constructor(label, content) {
     super()
@@ -581,29 +461,15 @@ export class FootnoteDefWidget extends WidgetType {
     w.lastChild.textContent = this.content
     return w
   }
-  // 内容取自文档，无交互；与 MathWidget 同理由：点击要落光标
+  // 点击要让光标落到边上
   ignoreEvent() { return false }
 }
 
 /**
- * 脚注定义块的装饰清单：**首行**换成 FootnoteDefWidget（内容可见），续行保持
- * 隐藏（hideDeco 空替换，与 wysiwyg.js 的 hideDeco 同一字面）。
- *
- * 【为什么在 inlineExtras 而不在 wysiwyg.js】wysiwyg.js 的有效行数已顶到门禁
- * 红线，这里每多一行都挤掉别的职责。widget 与解析函数同住一个文件，也就天然
- * 满足「清单与解析同源」。
- *
- * @param {import('@codemirror/state').Text} doc
- * @param {Set<number>} defLines footnoteDefLines 的产物（行号集合，含首行）
- * @param {number} firstLineNo 定义首行行号（1-based）
- * @param {(from:number)=>boolean} canHide 活跃行不隐藏（显形源码，与全文件同一口径）
- * @param {(from:number,to:number)=>boolean} singleLine 跨行拦截（同 wysiwyg.js）
- * @returns {{from:number,to:number,value:object}[]} 可直接并入 replaces 的区间
+ * 生成脚注定义块的装饰：首行换成 FootnoteDefWidget，缩进续行隐藏。
+ * defLines 含下一条定义的首行，所以遇到下一个定义就结束本块。
  */
 export function footnoteDefDecorations(doc, defLines, firstLineNo, canHide, singleLine) {
-  // defLines 可能含**下一条定义的首行**（footnoteDefLines 收的是范围内所有定义
-  // 块的行号，不是单块）——本块在「下一个定义首行」处终止，其余块由 wysiwyg 的
-  // 逐行扫描在其各自的首行上自处理（隐藏是幂等的，widget 同样会再产一次）。
   const sorted = [...defLines].sort((a, b) => a - b)
   const blockLines = []
   for (const ln of sorted.slice(sorted.indexOf(firstLineNo) + 1)) {
@@ -626,5 +492,5 @@ export function footnoteDefDecorations(doc, defLines, firstLineNo, canHide, sing
   return out
 }
 
-/** 续行隐藏装饰。与 wysiwyg.js 的 hideDeco 有同一字面（空替换） */
+// 续行隐藏（空替换）
 const hideLineDeco = Decoration.replace({})
