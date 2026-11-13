@@ -2004,11 +2004,11 @@ WebKit 的默认粘贴行为就是**把它当纯文本插入**（这就是「粘
 | ✅ **检查更新** | **已闭环（2026-10-21 起可用）**：v0.1.0 发布后 `releases/latest` 返回 200 + `tag_name`，`CheckUpdate` 走的是真实比对路径（`app.go:624`），不再落到「暂无已发布的版本」。⚠️ **本条曾长期登记为「仓库无任何 Release」** —— 那是**过期登记**（发布早于登记更新），2026-10-27 核实线上后改写。**教训**：§7 属「如实登记」表，但**登记本身也会过期**；凡涉及线上状态的条目（Release / runner / CI），声称前应先查一次真实 API，别照抄文档。 |
 | **macOS 未签名分发** | Gatekeeper 会拦，需 Apple 开发者账号（$99/年）签名+公证。**注意 `release.yml` 目前无 codesign / notarize 步骤**（grep 无命中），macOS 产物是未签名 zip —— 分发即用户手动右键打开。 |
 | **「窗口 → 缩放」** | Wails 无「适配内容尺寸」API，用最大化近似（沿用既有裁决） |
-| **关闭窗口** | Wails v2.16 **没有 `WindowClose`**，只有强制退出的 `Quit`。自建 `App.CloseWindow()`（先问 `OnBeforeClose` 再 Quit）。故 ⌘Q 之类的「退出应用」快捷键**未设**——自绘菜单里也没有「退出」项（macOS 走红绿灯，Linux 走自绘 ×） |
+| **关闭窗口** | Wails v2.16 **没有 `WindowClose`**，只有强制退出的 `Quit`。自建 `App.CloseWindow()`（先问 `OnBeforeClose` 再 Quit）。~~故 ⌘Q 之类的「退出应用」快捷键**未设**~~ **（2026-11-10 撤销此句：`window.quit`（⌘Q）已接入命令表，处理器走 `App.CloseWindow()` 同一套「未保存更改」确认流程，不直连 `runtime.Quit`；见 README 已知问题 #11，代码见 `useShortcuts.js:155` / `useCommands.js:340`）**。macOS 系统层是否会在 WebView 之前截获 ⌘Q 仍待真机确认；Linux/Windows 归一为 Ctrl+Q。自绘菜单里仍无「退出」项（macOS 走红绿灯，Linux 走自绘 ×） |
 | ✅ **`treeSignal` 空转** | **已接线（2026-10-13，第九轮）**。原记录「Go 侧 `WatchDir` 未暴露」不成立——`watcher.go` 与 `app.go` 同包，方法早已暴露、绑定在册；真正缺的是**前端没订阅 `fs:changed`**。已补：`useFileOps.js` 的 `shouldReloadTree(payload, folderPath)` 纯函数守卫（严格相等才自增）+ `window.runtime?.EventsOn?.()` 订阅 + 14 条测试（含 7 条真实驱动）。`watcher.go` 另修去抖回调陈旧 payload 缺陷（代际校验）。**待 `wails dev` 真机确认三场景**：① 目录内新建/删除文件树即时刷新；② 切文件夹后旧目录迟到事件不触发；③ 空串停止后无事件推送。~~遗留 advisory：去抖边界双发、`w.Errors` 静默吞掉~~ **（2026-10-17 第十六轮：「去抖边界双发」经实测不成立、已撤销；`w.Errors` 已于 2026-10-15 记日志。去抖已改为串行状态机，语义由 `watcher_test.go` 5 条 Go 测试钉死）** |
 | **无拼写检查** | 刻意不做：CM 的 lint 对 CJK 基本无效，中文场景是伪需求 |
 | **多标签页** | **代码层面 P0–P6 全部落地**：会话注册表 / per-session 持久化 / Go 侧 `dirtyByDoc` 映射 / 标签状态持久化（含未落盘草稿）/ 拖拽重排、右键菜单、Tab Switcher、5 条命令 / 目视清单增量（§6 第 30~45 项，已与 `docs/qa/visual-checklist.html` 同步）。**剩余只有真机目视**：§6 第 30~45 项一条都没验过，其中第 30 项（IME 合成期切标签，MD-11 P0 级）风险最高。决策见 `docs/decisions/MD-2026-10-28-multi-tab.md`，施工图见 `docs/plan/multi-tab-architecture.md` §11 |
-| **导出模板文案** | `export/exporters.js` 的 HTML 模板未国际化（Spec §1 明确留待后续） |
+| ✅ **导出模板文案** | **已完成（2026-11-10）**：`export/exporters.js` 的 `buildHtmlDocument()` 把 `<html lang>` 改为跟随界面语言（zh-CN / en-US / ja-JP），模板内已无其它用户可见文案；新增单测覆盖。原登记「未国际化（Spec §1 留待后续）」已过期，见 README 已知问题 #15 |
 
 ## 8. 已修记录与下一步候选（2026-10-11）
 
