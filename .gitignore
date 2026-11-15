@@ -37,6 +37,11 @@ Thumbs.db
 *.log
 *.tmp
 
+# 真机验证 / 白屏复现实验的临时产物（探针、监控日志、GPU 自检、对照文档）
+# 注：其中 .realtest/backup/ 与 hello.md.orig 是**用户真实数据备份**，
+# 仅本地留存、不入库；入库的结论在 docs/review/ 与 docs/qa/。
+.realtest/
+
 # Wails 生成的依赖变更缓存（用于判断是否要重跑 npm install）
 frontend/package.json.md5
 
