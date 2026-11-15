@@ -587,3 +587,306 @@ $ grep -n "title" frontend/src/composables/useEditorSession.js
 **当前可信结论**：九次崩溃栈相同、确定是 WebKit 内部断言；
 纯净构建 + 手动操作可复现；纯 WebKit 300 秒不崩；
 **具体触发条件仍未定位**。
+
+---
+
+## 12. 2026-11-15：证伪「写 title 触发」假设 + §10.5 对照补完
+
+### 12.1 决定性源码证据：Wails Linux 根本没有 title 通知链
+
+§10.3 把「高频写 `document.title` → `WebKitWebView::notify::title` → GTK 窗口标题
+→ AT-SPI 跨进程事件」列为最可疑触发条件。**这条链在 Wails v2.16.0 的 Linux 前端里
+根本不存在**，源码可证：
+
+```
+$ D=.gopath/pkg/mod/github.com/wailsapp/wails/v2@v2.16.0/internal/frontend/desktop/linux
+$ grep -rn 'notify::title\|webkit_web_view_get_title\|title-changed\|NotifyTitle' $D/*.go $D/*.c $D/*.h
+（无命中）
+```
+
+- 窗口标题只在初始化时设一次：`window.go:133` `result.SetTitle(appoptions.Title)`（= `Inkmark`）。
+- 之后只有 Go 侧显式调用 `WindowSetTitle` 才会改：`frontend.go:333-334`
+  → `window.go:355-356` → `window.c:228 gtk_window_set_title(...)`。
+- **没有任何地方把 WebKit 页面的 `notify::title` 信号接到窗口标题上。**
+
+而 §10.6 已核实应用从不掉 `WindowSetTitle`。所以页面里写 `document.title`
+**完全不会影响 GTK 窗口标题**，更不会触发所谓「跨进程标题通知链」。
+
+**实测佐证**：注入 `setInterval(()=>document.title='T'+n, 250)` 后，AT-SPI 读到的
+frame 标题始终是 `'Inkmark'`，从未变成 `T<n>` —— 与源码结论一致。
+
+→ **§10.3 / §10.5 的「写 title 触发」假设被证伪。** 早前 IDLE 版（只写 title）崩溃
+不能用标题通知链解释；该崩溃另有原因（见 §12.3 的可复现性疑问）。
+
+### 12.2 §10.5 对照实验补完（真实桌面，Wayland + 硬件渲染，AT-SPI 开 + monitor）
+
+环境核对：`/proc/<pid>/environ` 与 11/14 崩溃轮的 `gpu-before.log` 完全一致
+（`XDG_SESSION_TYPE=wayland`、`WAYLAND_DISPLAY=wayland-1`、Mesa Intel Iris Pro P5200、
+direct rendering Yes、无 `WEBKIT_DISABLE_DMABUF_RENDERER`/`COMPOSITING` 缓解项、
+`NO_AT_BRIDGE` 未设）。即**与既往崩溃轮同一环境**。
+
+| 注入变体 | AT-SPI | 时长 | 结果 |
+|---|---|---|---|
+| 空转 `setInterval`（不碰 DOM） | off / on | 各 300s | **不崩** |
+| 只滚动（±120px/300ms，不改 title） | off / on | 各 300s | **不崩** |
+| 只写 title（250ms，不滚动） | on + monitor | 300s | **不崩** |
+
+注入确实执行（只滚动变体下 monitor 读到 `text_len` 282↔770 跳变、视口进入表格区），
+排除「内联脚本被 CSP 拦截」的可能。
+
+### 12.3 与 §11.1 的矛盾（必须如实记录）
+
+§11.1 曾记「任何注入的 `setInterval` 都在 85–115s 压崩」（含空转 90s、只滚动 85s）。
+**本轮在相同环境、相同注入下，空转 / 只滚动 / 只写 title 各 300s 全部不崩。**
+
+两者直接冲突。可能解释（均未证实，不下结论）：
+1. §11.1 那几轮受残留旧实例污染（§11.4 教训 2 已自承此风险），coredump 计数被旧进程干扰；
+2. 崩溃是概率性的，需要特定时间对齐，300s 未必每轮都命中；
+3. 真正的触发因素不在「定时器本身」，而在 §11.1 各变体共有的某个未被隔离的变量。
+
+**处理原则**：在矛盾澄清前，§11.1「任何 setInterval 都崩」降级为**不可靠复现**，
+不再作为推理依据。目前唯一站得住的真实复现仍是 **§11.2 第 9 次：纯净二进制 +
+人工「滚动几次 → 点击文字/空白 → 卡住 → 白屏」**（3 标签共存）。
+
+### 12.4 把第 9 次的人工配方程序化（scroll + click）—— 首次程序化复现成功
+
+本轮自动注入此前都**只滚动/只写 title，缺少「点击」**这一第 9 次崩溃的关键动作。
+改注入为「来回滚动（±120px/250ms）+ 每 6 步在编辑区可见处 dispatch 一次
+mousedown/mouseup/click」（只改选区、不改正文，用户数据安全），保留真实应用的 3 标签，
+AT-SPI 开 + monitor。
+
+**结果：+38s 崩溃**（第 10 次，PID 78730，10:42:24 SIGABRT，21.3M core）。
+
+| 注入变体 | AT-SPI | 结果 |
+|---|---|---|
+| 只滚动 / 只写 title / 空转 | on | 300s **不崩** |
+| **滚动 + 点击** | **on** | **38s 崩** |
+
+**栈逐帧比对（`coredumpctl info 78730`，无需解 core）**：
+
+```
+#3 +0x1432c4a  #4 +0x1432c39  #5 +0x442a2f2  #6 +0x485bcf9
+#7 +0x4daa20d  #8 +0x4db01cc  #9 +0x1cf3937
+#10/#11 libjavascriptcoregtk  #12 WTF::RunLoop::run  #13 WebProcessMain
+```
+
+与前九次**逐帧相同**（#6 取 `f9` 变体）→ 同一个 WebKit 断言。
+
+**结论（本轮最重要）**：触发条件需要**滚动 + 点击（选区/焦点变化）的组合**，
+单独滚动或单独定时器都不崩。这与第 9 次人工配方「滚动几次 → 点击文字/空白 → 卡住 → 白屏」
+完全吻合，且**首次用程序化注入稳定复现了真实缺陷**（不再是 §11.1 那种不可靠的定时器伪复现）。
+
+> 方法改进：`coredumpctl info <pid>` 直接给出各线程栈偏移，无需 `coredumpctl dump`
+> 解出 ~6GB core 再 gdb。本轮据此省掉一次大文件解压（磁盘仅剩 15G）。
+
+### 12.5 继续二分：AT-SPI 是必要条件（已证）
+
+| 注入 | AT-SPI | 时长 | 结果 |
+|---|---|---|---|
+| scroll + click | **on** | 38s | **崩** |
+| scroll + click | **off**（`NO_AT_BRIDGE=1`/`GTK_A11Y=none`） | 180s | **不崩** |
+
+→ **无障碍（AT-SPI）是崩溃的必要条件**。关掉无障碍桥后，同样的 scroll+click 180s 稳定。
+这把根因方向从「渲染/滚动」收窄到 **WebKit 无障碍树**：点击使某个节点获得焦点/选区，
+滚动触发该节点重建，无障碍树在跨进程同步时命中断言。
+
+**机制假设（待验）**：表格单元是 `contenteditable`（`tableFocus.js` 用 Selection/Range
+落光标）。点击表格单元 → 焦点进入该 cell；滚动 → CM 6.43 Tile 渲染器销毁/重建 TableWidget
+→ 被聚焦的 cell 成为悬挂节点 → WebKit 无障碍断言 abort。这能同时解释：
+- 只滚动不崩（无被聚焦的 cell 可悬挂）；
+- 只写 title / 空转不崩（无焦点变化）；
+- 关 AT-SPI 不崩（无障碍树不参与）；
+- 第 9 次人工「滚动 → 点击 → 卡住 → 白屏」。
+
+**正在跑的二分**：scroll + click，但运行时把所有 `td/th.contentEditable` 置 `false`
+（注入 `killCE()`，每 tick 刷新以覆盖 Tile 重建出的新 cell）。若崩止 → 表格 contenteditable
+焦点是触发点；若仍崩 → 不止表格，普通文本焦点 + 滚动亦可触发。
+
+### 12.6 表格 contenteditable 不是触发点（killCE 仍崩）
+
+| 注入 | AT-SPI | 结果 |
+|---|---|---|
+| scroll + click + `killCE()`（td/th 全置 contentEditable=false） | on + monitor | **+26s 崩**（第 11 次，PID 80320，栈逐帧相同） |
+
+→ **禁用表格单元 contenteditable 不能止崩**。触发点不是表格 cell 专有的，
+普通文本（`cm-content` 本身是 contenteditable）获得焦点/选区 + 滚动 + AT-SPI 即可触发。
+机制假设收窄为：**contenteditable 焦点/选区 + 滚动视口重建 + 无障碍树同步** 的通用交互，
+CodeMirror 只是恰好提供了这个环境。
+
+### 12.7 再隔离：无障碍「桥开启」vs「有客户端主动读树」
+
+§12.5 的 OFF 对照同时改了两个变量：① 关无障碍桥（`NO_AT_BRIDGE=1`）② 没有 AT-SPI 客户端。
+而所有崩溃轮都带 `monitor.py` 每 0.4s 主动读树。需分离：
+
+- **桥开 + 无客户端**（`atspi_run.sh on`，不起 monitor）：scroll+click 120s。
+  - 若崩 → 桥开启即足够（WebKit 自身无障碍代码路径被激活）。
+  - 若不崩 → **必须有客户端主动读树**才崩（真实桌面若有屏幕阅读器/无障碍服务才会触发；
+    我的 monitor 本身成了触发条件之一，需在结论里如实标注）。
+
+**结果：桥开 + 无客户端 → 120s 不崩。** 而桥开 + monitor 客户端 → 26–38s 崩。
+
+→ **必须有 AT-SPI 客户端主动读树**才崩。`monitor.py` 每 0.4s 读树不是被动观察，
+而是**激活了 WebKit 的无障碍实现**，使其在 contenteditable 焦点/选区 + 滚动重建时命中断言。
+
+### 12.8 当前必要条件全集（本轮实验锁定）
+
+崩溃 = 以下四者**同时**满足：
+1. 无障碍桥开启（`NO_AT_BRIDGE` 未设）；
+2. **有 AT-SPI 客户端主动读树**（monitor / 屏幕阅读器 / 桌面无障碍服务）；
+3. 编辑区获得**焦点/选区变化**（点击）；
+4. **滚动**触发视口/DOM 重建。
+
+缺任一即不崩（已分别证伪：关桥 180s 不崩 / 无客户端 120s 不崩 / 只滚动 300s 不崩 /
+只写 title 300s 不崩 / 空转 300s 不崩）。表格 contenteditable 非必需（killCE 仍崩）。
+
+**性质判定**：这是 **WebKitGTK 2.54.2 无障碍实现的内部断言缺陷**，由「AT 客户端读树 +
+contenteditable 焦点 + 滚动重建」三者交互触发；CodeMirror 只是提供了 contenteditable +
+视口重建的环境。**§12.12 已用纯 contenteditable 对照证实：崩溃是 CM 特有**（普通 CE 不销毁聚焦节点，不崩）。
+
+### 12.9 必须如实澄清的两个问题（已查清）
+
+**问题 1：历史人工崩溃是否也带 AT-SPI 客户端？→ 是。**
+- HANDOFF §1.2 明确「真机验收（AT-SPI 驱动，非截图）」：历次人工崩溃都是在 AT-SPI 探针
+  （rd.py / monitor.py / watch_real.py）运行期间观测的，第 3/4 次记录里的「崩溃前最后正常快照」
+  即来自 monitor。**当时 monitor 作为 AT 客户端在读树**。
+- 用户桌面常态核查：`kaccess`（KDE 无障碍守护，PID 1177）常驻并挂在 a11y 总线上，
+  **但无 Orca、无屏幕阅读器启用**（`kaccessrc` 仅 `[ScreenReader] SystemdManaged=true`，
+  `kdeglobals` 无 AccessibilityEnabled）。
+- 关键对照：**kaccess 常驻的情况下，桥开 + 无 monitor 客户端，scroll+click 120s 不崩**。
+  → kaccess 这类「键盘无障碍」守护**不主动读应用树**，不足以触发；必须是 monitor / Orca
+  这类**主动查询无障碍树**的客户端。
+
+**问题 2：真实暴露面与缓解方向。**
+- **普通用户（无屏幕阅读器/无 AT 客户端）日常使用大概率不崩**——九次历史崩溃均发生在
+  AT-SPI 驱动验收期间。这把缺陷从「所有用户必崩的 P0 数据丢失」**重新定性**为
+  「**屏幕阅读器/无障碍客户端用户**在滚动+点击时触发的 WebKit 无障碍断言缺陷」。
+  （仍需 300s 无客户端长跑最终确认，见 §12.10。）
+- **缓解悖论**：关无障碍桥（`NO_AT_BRIDGE=1`）虽能止崩，但会**剥夺屏幕阅读器用户的可达性**——
+  恰好是受影响人群。故「关桥」不是好修复。真正方向：上游 WebKit 修复 / 升级，
+  或应用侧减少「焦点+滚动」引起的无障碍树抖动。是否降级 WebKit 需用户同意（系统包变更）。
+
+### 12.10 无客户端长跑确认（已完成）
+
+桥开 + 无 monitor（kaccess 常驻）+ 纯 scroll+click（已去掉 killCE），**300s 不崩**（cores 稳定 11）。
+
+→ 坐实定性：**普通使用（无主动 AT 客户端）不触发；崩溃需要主动读树的 AT-SPI 客户端。**
+
+### 12.11 本轮结论（2026-11-15，首次定位触发条件）
+
+**触发条件（必要且 jointly 充分，已逐项对照）**：
+| 条件 | 证伪对照 |
+|---|---|
+| 无障碍桥开启 | 关桥 180s 不崩 |
+| 主动 AT-SPI 客户端读树 | 无客户端 120s + 300s 不崩（kaccess 常驻亦不触发） |
+| 点击 → 焦点/选区变化 | 只滚动 300s 不崩 |
+| 滚动 → 视口/DOM 重建 | （只点击未单测，机制上需重建悬挂焦点节点） |
+
+非必需：表格 contenteditable（killCE 仍崩 +26s）；写 document.title（Wails Linux 无 title 通知链，§12.1）。
+
+**缺陷性质**：WebKitGTK 2.54.2 无障碍实现的内部 `RELEASE_ASSERT`（栈 #3–#9 十一次逐帧相同），
+由「AT 客户端读树 + contenteditable 焦点 + 滚动重建」交互触发。CodeMirror 的 `cm-content`
+本身即 contenteditable，提供了焦点+视口重建环境。**§12.12 纯 contenteditable 对照（无 CM）90s 不崩
+→ 证实崩溃是 CM 特有**：CM Tile 渲染器滚动时销毁聚焦节点，普通 contenteditable 不会。
+
+**真实影响重定性**：九次历史崩溃均在 AT-SPI 驱动验收期间（monitor 读树）；用户桌面无屏幕阅读器。
+→ **屏幕阅读器/无障碍客户端用户**在滚动+点击时受影响；普通用户日常大概率不崩。
+不再表述为「所有用户必崩的 P0 数据丢失」。WAL 数据丢失风险（§6）仍独立存在，但仅在进程被强杀时。
+
+**修复方向（需用户定夺）**：
+1. 上游 WebKit 修复 / 版本升级（治本，但需确认哪个版本修了该断言）。
+2. 降级 WebKit 到无此断言的版本（系统包变更，**需用户同意**）。
+3. 应用侧减少「焦点+滚动」无障碍树抖动（治标，难度高，属 WebKit 内部）。
+4. ❌ 关无障碍桥：虽止崩但剥夺屏幕阅读器用户可达性，**不推荐**（恰伤害受影响人群）。
+
+**方法教训（追加 §11.4）**：观察工具（AT-SPI monitor）本身可以是触发条件的一部分。
+「观测者效应」在无障碍缺陷里是实质性的：读树激活了 WebKit 的无障碍代码路径。
+设计实验时必须把「是否有 AT 客户端」作为显式变量隔离，否则会把工具引入的崩溃误读为应用日常缺陷。
+
+### 12.12 纯 contenteditable 对照（无 CM）→ 崩溃是 CodeMirror 特有
+
+为验「是否 WebKit 通用缺陷」，搭独立 harness（`.realtest/plain_ce.py` + `plain_ce_client.py`）：
+一个普通 `contenteditable` div（400 段，**无任何 CodeMirror**）+ 程序化 scroll+click +
+**主动读树的 AT-SPI 客户端**。客户端日志确证在读编辑区：`roles=[…,'entry','scroll pane',…]`，
+`entry`（contenteditable 暴露为可编辑文本）每 0.4s 被读，30s 内 reads=73。
+
+| 场景 | 条件 | 结果 |
+|---|---|---|
+| 纯 contenteditable（无 CM） | 桥开 + AT 客户端读 entry + scroll+click | **90s 不崩**（干净连续跑，无 suspend 干扰）|
+| 真实 CM 应用 | 同上 | **26–38s 崩** |
+
+→ **崩溃是 CodeMirror 特有，不是 WebKit 通用 contenteditable 缺陷。**
+（修正 §12.8/§12.11 的「推测非 CM 独有」——已被本对照证伪。）
+
+**机制收敛**：普通 contenteditable div 滚动时**DOM 节点常驻**（被聚焦节点不会被销毁）；
+而 CM 6.43 的 **Tile 渲染器在滚动时销毁/重建视口外 DOM**。当用户点击使某节点获得焦点，
+紧接着滚动把该节点销毁，AT 客户端正在读树 → WebKit 无障碍树持有**悬挂的聚焦节点** → 断言 abort。
+这解释了全部对照：只滚动不崩（无聚焦节点可悬挂）、纯 CE 不崩（不销毁节点）、关 AT 不崩（不读树）。
+
+**修复方向更新（应用侧变得可行）**：根因在 **CM×WebKit 无障碍交互**，而非纯 WebKit 通用缺陷。
+候选应用侧缓解（需进一步验证，本轮未改代码）：
+1. 滚动时避免销毁**当前聚焦**的 widget/节点（CM 装饰层对聚焦节点做保留/pin）。
+2. 表格 cell 失焦前先退出编辑态再允许 Tile 回收（减少悬挂聚焦节点）。
+3. 降低视口重建频率 / 增大 CM `viewportMargin`，减少聚焦节点被销毁的概率。
+这些属"减少焦点+滚动引起的无障碍树抖动"，比"升级 WebKit"更可控。是否实施由用户定夺。
+
+### 12.13 应用侧缓解验证（2026-11-15）：v1 失败 / v2 止崩
+
+**v1（失败）**：仅补丁 CM 的 `rm$1(dom)`（`frontend/node_modules/@codemirror/view/dist/index.js:1875`），
+在 `window.__inkmarkScrolling` 标志窗口内、移除前 blur 被移除子树内的 activeElement + 清选区。
+结果：**+68s 仍崩**（cores 7→8）。已还原补丁。
+失败原因推断：① `rm$1` 非唯一移除路径（另有 `WidgetTile.destroy`→`widget.destroy`、
+`t.dom.remove()`、基类 `Tile.destroy`）；② 滚动标志 200ms 窗口可能错过 CM 异步（rAF/measure）重建。
+
+**v2（止崩，已验证）**：不改 node_modules，改在 `frontend/dist/index.html` 注入全局拦截：
+覆盖 `Node.prototype.removeChild` 与 `Element.prototype.remove`，**任何** DOM 移除前，
+若被移除子树包含 activeElement / 选区 anchor 则先 `blur()` / `removeAllRanges()`。
+**不加滚动标志**（排除 v1 时序问题）。刺激与 v1 完全相同（scroll ±120px/250ms + 每 6 步点击编辑区）。
+
+| 跑次 | 时长 | AT 客户端 | 结果 |
+|---|---|---|---|
+| v2 第一次 | 120s | monitor 主动读树（130+ 次，healthy） | **不崩**（cores 稳定 8）|
+| v2 确认 | 180s | monitor 主动读树（226 次，healthy） | **不崩**（cores 稳定 8）|
+
+对照：同刺激 v1 +68s 崩、历史 26–38s 崩。v2 连续 300s（120+180）不崩 → **缓解有效**。
+`hello.md` MD5 `e267b51f…` 全程未变（刺激只改选区/滚动，不改正文）；无残留进程。
+
+**机制坐实**：v1（只拦 `rm$1`、只清聚焦节点）失败而 v2（拦所有移除路径、移除前释放焦点/选区）成功
+→ 崩溃确由「被销毁节点仍持有焦点/选区 → WebKit 无障碍树悬挂引用」引起；
+在物理移除前释放焦点/选区即可消除悬挂引用，止崩。这与 §12.12 的机制收敛一致。
+
+**重要 caveat（未验证项，不得 overstate）**：
+1. **打字回归未验**：v2 是「always-on 全局拦截」，每次 removeChild/remove 都检查并可能 blur。
+   正常打字时 CM 是否销毁聚焦节点、是否会误 blur 导致输入中断 —— **未测**。
+   不测的原因：打字刺激会改 `hello.md` 正文（MD5 须保持）或无名标签草稿（localstorage 受保护），
+   违反数据保护纪律。生产落地前**必须**补打字回归（含 IME 合成期）。
+2. v2 是 **PoC（注入验证）**，非生产代码：全局原型覆盖偏重，生产宜收窄到「scroll 驱动的移除」
+   并复验止崩（注意 v1 的 scroll 标志方案失败，收窄后须重新验证，不能假定仍止崩）。
+3. 仅验「scroll+click」刺激；其它焦点+重建路径（结构编辑、切标签）未覆盖。
+
+**生产修复建议（报告态，由用户定夺/自行落地）**：
+方向＝在 DOM 移除前释放被移除子树内的焦点/选区。已验证的 PoC 代码（注入态，全局 always-on）：
+
+```js
+// 缓解 PoC（已验止崩 300s；打字回归未验，非生产代码）
+;(function () {
+  function release(node) {
+    try {
+      var ae = document.activeElement
+      if (ae && ae !== document.body && (node === ae || (node.contains && node.contains(ae)))) ae.blur()
+      var sel = window.getSelection()
+      if (sel && sel.rangeCount && sel.anchorNode &&
+          (node === sel.anchorNode || (node.contains && node.contains(sel.anchorNode)))) sel.removeAllRanges()
+    } catch (e) {}
+  }
+  var origRemoveChild = Node.prototype.removeChild
+  Node.prototype.removeChild = function (child) { release(child); return origRemoveChild.call(this, child) }
+  var origRemove = Element.prototype.remove
+  Element.prototype.remove = function () { release(this); return origRemove.call(this) }
+})()
+```
+
+生产落地建议：抽成独立模块（如 `frontend/src/editor/axDomGuard.js`），在 `frontend/src/main.js`
+mount 之前安装一次；优先收窄到「scroll 驱动的移除」（可借 `createEditor.js:96` 的 scroll 监听设标志），
+以降低打字回归风险 —— 但**收窄版须重新跑「止崩 + 打字回归」双验证**（v1 标志方案已失败一次）。
+验证方法：`bash .realtest/atspi_on_monitor.sh 180`（桥开 + monitor 读树 + scroll+click），cores 不增即止崩。
+治本仍属上游 WebKit（§12.11）；本缓解治标，是否实施由用户定夺。
