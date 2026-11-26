@@ -39,17 +39,17 @@
 | **设置面板** | `⌘,` 打开（`src/components/SettingsPanel.vue`）：外观 6 项（主题 / 正文字体 / 字号 / 行距 / 行宽 / 语言）+ 编辑器 4 项（自动保存间隔 / 快照间隔 / 智能符号 / 智能标点），全部**实时生效**（改完立刻落 CSS 变量，无需重启）、**刷新保持**（`localStorage` 持久化），另有「恢复默认」（二次确认，防误触） |
 | **三语国际化** | `src/i18n/`：简体中文 / English / 日本語 三档字典 + `t()`；标题栏菜单、设置面板、弹层、提示全量覆盖，语言偏好实时切换 |
 | **排版偏好** | 正文字体（系统 / 衬线 / 等宽）、字号（12–20px 六档，编辑区与预览区**成对同步**）、行距（紧凑 / 标准 / 宽松）、行宽（窄 / 标准 / 宽）——真源 `src/themes/prefs.js`，偏好走**文档作用域**变量 `--font-body-user`，不污染标题栏 / 侧栏等界面外壳 |
-| **打印** | `⌘P`：Wails 的 WKWebView **没有实现 `window.print()`**（调用即静默空操作，这正是「⌘P 没反应」的根因），故桌面端把「打印」实现为**生成 PDF**（`exportPdf`，保存对话框 + 路径提示），随后可在系统 PDF 阅读器里打印；非 darwin 桌面 / 浏览器预览下自动回退到 `window.print()`。`@media print` 已隐藏标题栏 / 侧栏 / 状态栏 / 各类遮罩，只输出正文 |
+| **打印** | `⌘P`：Wails 的 WKWebView **没有实现 `window.print()`**（调用即静默空操作，这正是「⌘P 没反应」的根因），故桌面端把「打印」实现为**生成 PDF**（`exportPdf`，保存对话框 + 路径提示），随后可在系统 PDF 阅读器里打印；**仅 Windows 与浏览器预览**自动回退到 `window.print()`（macOS、Linux 已有一键直出，失败如实报错、不再弹打印对话框）。`@media print` 已隐藏标题栏 / 侧栏 / 状态栏 / 各类遮罩，只输出正文 |
 | **预览渲染器（导出共用）** | markdown-it 渲染器（`src/preview/markdown.js`）只服务导出 HTML/PDF 与「复制为 HTML」；阅读态已于 2026-10-14 整体移除（渲染收敛进编辑器） |
 | **查找 / 替换** | `⌘F` 查找、`⌘⌥F` 查找并替换（CodeMirror `searchKeymap` + 面板） |
 | **跳转到行** | `⌘L` 打开输入框跳转到指定行号 |
 | **行操作** | `⌥↑` / `⌥↓` 移动当前行，`⇧⌥↓` 向下复制当前行，`⌘⇧K` 删除当前行（VS Code 惯例） |
-| **视图缩放** | `⌘=` 放大 / `⌘-` 缩小 / `⌘0` 重置，80%~150% 六档；状态栏可点击循环。与基础字号**正交叠加**（`--zoom-scale` 独立变量） |
+| **视图缩放** | `⌘=` 放大 / `⌘-` 缩小 / `⌘0` 重置，80%~150% **八档**（80…150 步长 10，到端点夹住、不循环）；状态栏可点击逐档放大。与基础字号**正交叠加**（`--zoom-scale` 独立变量） |
 | **工作区开关** | 打字机模式 / 窗口置顶两个勾选项，状态前端 `localStorage` 持久化（`useWorkspace`） |
 | **重命名 / 插入目录 / 清除格式** | 重命名走应用内输入对话框（WKWebView 无 `window.prompt`）；「格式 ▸ 插入 ▸ 目录」按标题层级生成 TOC（`editor/commands.js` 的 `insertToc`） |
 | 快捷键速查 | `⌘/` 打开应用内弹层；非 macOS 自动把 `⌘/⌥/⇧` 显示为 `Ctrl+/Alt+/Shift+` |
 | 快捷键 | 文件 / 编辑 / 格式 / 视图 / 窗口 / 帮助六类，唯一真源是 `useShortcuts.js` 的 `COMMANDS` 表，见下方「快捷键」 |
-| 文本导出 | HTML：内联样式模板（46rem 行宽）；PDF：**macOS 与 Linux 均为一键直出**（macOS 走 WebKit/PDFKit、Linux 走 GTK 打印到文件，dark→light 主题映射，467px 版心），Windows 与浏览器预览走系统打印（`src/export/` + `export_pdf_{darwin,linux,other}.go`） |
+| 文本导出 | HTML：内联样式模板（46rem 行宽）；PDF：**macOS 与 Linux 均为一键直出**（macOS 走离屏 WKWebView、Linux 走 GTK 打印到文件，dark→light 主题映射；版心 macOS 467px、Linux 按 96dpi 为 622px），Windows 与浏览器预览走系统打印（`src/export/` + `export_pdf_{darwin,linux,other}.go`） |
 | 本地文件管理 | 打开文件 / 打开文件夹，递归懒加载文件树（`app.go` + `src/components/FileTree.vue`） |
 
 ## 快捷键
@@ -321,19 +321,19 @@ node scripts/probe/probe-r11-fixes.mjs             # 第十一轮修复：全角
 
 | # | 项 | 状态 / 说明 |
 |---|-----|------------|
-| 1 | **Windows / Linux 无边框形态未真机验证** | 窗口形态已按平台分流，但无边框拖拽、自绘窗口按钮、关闭守卫**从未在真实 Windows / Linux 上跑过**；导出 PDF 在 **Linux 已是一键直出**（GTK 打印到文件，2026-10-26 落地），仅 **Windows** 仍降级为系统打印 |
-| 2 | **真机目视清单未过** | 自动化只验到「根节点渲染 + 标题栏/编辑区已挂载 + 无异常」。标题栏拖拽、红绿灯留白、毛玻璃、斜杠面板、GFM 任务列表、代码块高亮、「插入目录」跳转等交互**全部需目视**，完整 **45 项**见 [`docs/HANDOFF.md`](docs/HANDOFF.md) §6。**现在有可执行副本了**：打开 [`docs/qa/visual-checklist.html`](docs/qa/visual-checklist.html)（单文件、双击即开、零依赖）逐项勾选并导出 Markdown，追加进 [`docs/qa/VERIFICATION-LOG.md`](docs/qa/VERIFICATION-LOG.md) 留痕——清单副本与 §6 真源的编号/标题由门禁 4 第二步机检守着 |
+| 1 | **Windows 无边框形态未真机验证（Linux 已跑通）** | 窗口形态已按平台分流；**Linux 已于 2026-11-13 在 CachyOS 真机跑通**（关闭守卫 / 脏状态圆点 / 缩放 / 多标签主线 6 项通过，见 [`docs/qa/VERIFICATION-LOG.md`](docs/qa/VERIFICATION-LOG.md)），但**无边框拖拽、自绘窗口按钮、关闭守卫从未在真实 Windows 上跑过**；导出 PDF 在 **Linux 已是一键直出**（GTK 打印到文件，2026-10-26 落地），仅 **Windows** 仍降级为系统打印 |
+| 2 | **真机目视清单未过（已部分通过）** | 自动化只验到「根节点渲染 + 标题栏/编辑区已挂载 + 无异常」。已有两次真机记录：2026-10-13 macOS **18/22**（5 项不通过已全部修复并复验）、2026-11-13 Linux **6 项通过**（§6-4 关闭守卫 / §6-6 脏状态圆点 / §6-11 缩放 / §6-31 标签栏形态 / §6-33 标签切换状态保真 / §6-45 重启恢复标签）。**键盘类仍未验**（斜杠面板、IME 合成期、快捷键实际按键响应——验证环境无输入注入能力），完整 **45 项**见 [`docs/HANDOFF.md`](docs/HANDOFF.md) §6。**现在有可执行副本了**：打开 [`docs/qa/visual-checklist.html`](docs/qa/visual-checklist.html)（单文件、双击即开、零依赖）逐项勾选并导出 Markdown，追加进 [`docs/qa/VERIFICATION-LOG.md`](docs/qa/VERIFICATION-LOG.md) 留痕——清单副本与 §6 真源的编号/标题由门禁 4 第二步机检守着 |
 | 3 | **macOS 透明窗口的代价** | `WebviewIsTransparent` + `WindowIsTranslucent` 在旧款 Intel Mac 上可能掉帧（透明窗口不能被合成器缓存）；本机是 macOS 12，只验到「能编译」，性能未实测 |
-| 4 | **Linux（CachyOS）真机** | 无边框 + 自绘标题栏的 Linux 表现从未在真机跑过；窗口按钮对接的 `WindowMinimise / WindowToggleMaximise / CloseWindow` 在 Linux 后端的行为需目视 |
+| 4 | **Linux（CachyOS）真机：已跑通，窗口按钮待目视** | 2026-11-13 首次在 Linux 真机跑通应用并完成 6 项自动化目视（见 #2），直接回应了本条的「从未在真机跑过」；**仍未验**的是窗口按钮对接的 `WindowMinimise / WindowToggleMaximise / CloseWindow` 在 Linux 后端的实测手感，以及无边框拖拽、毛玻璃观感等人工目视项 |
 | 5 | **「最近打开」功能整体下线** | 它的唯一消费方是原生菜单的子菜单；自绘标题栏未做该入口。若要恢复需**重做**：前端加列表 + Go 侧重写持久化（原 `GetRecents` / `recents.json` 逻辑已随原生菜单整体删除，`app.go` 只剩历史注释提及） |
 | 6 | **文件树外部变更监听已接线，待真机确认** | 2026-10-13 落地：前端 `useFileOps` 订阅 `fs:changed`（payload 为根目录路径，仅当与当前 `folderPath` 严格相等才自增 `treeSignal`，`FileTree` 收信号后重拉目录）；Go 侧 `watcher.go` 另修一个真实缺陷——切换/停止文件夹时，旧监听残留的去抖定时器会把已失效目录的 `fs:changed` 推给前端（代际校验修复）。沙箱内无法验证真实 fsnotify 事件，需 `wails dev` 真机确认三场景：① 监听目录内新建/删除文件后树即时刷新；② 切到另一文件夹后旧目录的迟到事件不再触发；③ 关闭文件夹（空串）后无事件推送。另有两项已知未修：~~去抖边界双发（同 root 多刷一次，无正确性影响）~~ **（2026-10-17 撤销：实测不成立——该条目从未被真机验证过，同批连续到达的变更只推 1 次，跨窗口的两次独立变更推 2 次是正确行为）**；`w.Errors` 现已记日志（2026-10-15 落地，仍不打扰用户——fsnotify 内部错误时监听可能失效，日志是唯一排查线索）。**2026-10-17 另**：Go 侧去抖改为串行状态机（行为不再取决于调度顺序），语义由 `watcher_test.go` 的 5 条 Go 测试钉死 |
 | 7 | **表格真渲染待真机验收** | 2026-10-14 落地：编辑器内 StateField block 装饰渲染真表格（`src/editor/tableRender.js`），单元格可直接编辑并同步回 Markdown 源码；单元测试（`tests/table-render.test.mjs`）已过，光标进出切换渲染/源码、Tab 换格、IME 输入等真机路径仍需目视。原「阅读态跳转未目视」项随阅读态移除而消失 |
-| 8 | ✅ **`release.yml` 已跑通（2026-10-21 / 2026-10-27 各一次）** | `v0.1.0` 与 `v0.2.0` 两个 tag 各触发一次三平台原生构建，五个 job 全 success，产物自动上传为 Release 附件。三平台构建的坑（Linux 的 `webkit2_41` tag、macOS ditto 打包、Windows exe）已被真 runner 验过。**剩余仅签名/公证**（见 #10） |
-| 9 | ✅ **检查更新已可用（2026-10-21 起）** | 已有 Release（当前 `v0.2.0`），`releases/latest` 返回 200，`CheckUpdate` 走真实 semver 比对路径，不再落到「暂无已发布的版本」 |
+| 8 | ✅ **`release.yml` 已跑通三次（2026-10-21 / 2026-10-27 / 2026-11-10）** | `v0.1.0`、`v0.2.0`、`v0.3.0` 三个 tag 各触发一次三平台原生构建，五个 job 全 success，产物自动上传为 Release 附件。三平台构建的坑（Linux 的 `webkit2_41` tag、macOS ditto 打包、Windows exe）已被真 runner 验过。**剩余仅签名/公证**（见 #10） |
+| 9 | ✅ **检查更新已可用（2026-10-21 起）** | 已有 Release（当前 `v0.3.0`，2026-11-10 发布），`releases/latest` 返回 200，`CheckUpdate` 走真实 semver 比对路径，不再落到「暂无已发布的版本」 |
 | 10 | **macOS 未签名分发** | Gatekeeper 会拦，需 Apple 开发者账号（$99/年）签名 + 公证。⚠️ `release.yml` 目前**没有** codesign / notarize 步骤，产物是未签名 zip —— 用户下载后需右键「打开」或 `xattr -d com.apple.quarantine` |
 | 11 | ✅ **退出快捷键已接入（待真机按键确认）** | 2026-11-10 命令表新增 `window.quit`（⌘Q），处理器走 `App.CloseWindow()` 同一套「未保存更改」确认流程，不直连 `runtime.Quit`。macOS 系统层是否会在 WebView 之前截获 ⌘Q 仍待真机确认；Linux/Windows 归一为 Ctrl+Q |
 | 12 | **导出产物不跟随正文字体偏好（已裁决）** | 2026-10-13 裁决**不跟随**：导出物是分发格式，把作者本地偏好写死进 HTML/PDF 会让排版随机器漂移；保持主题级 `--font-body` 保证任何机器导出一致。用户偏好是本地阅读体验，不是文档内容。重开条件见 [`docs/decisions/OPEN-DECISIONS.md`](docs/decisions/OPEN-DECISIONS.md) |
-| 13 | **多标签页已落地（P0–P6 代码），真机未验收** | 2026-11-04 落地：会话注册表 + 按标签换 `EditorState`（撤销栈各自隔离）+ per-session 持久化 + Go 侧 `dirtyByDoc` 逐文档映射 + 标签状态持久化（含未落盘草稿）+ 拖拽 / 右键菜单 / Tab Switcher / 5 条命令。**目视清单已补齐**：`docs/HANDOFF.md` §6 第 30~45 项（与 `docs/qa/visual-checklist.html` 严格同步，门禁守着）。**剩余只有真机目视**——16 条一条都没验过，第 30 项（IME 合成期切标签，MD-11 P0 级）风险最高。决策见 `docs/decisions/MD-2026-10-28-multi-tab.md` |
+| 13 | **多标签页已落地（P0–P6 代码），真机部分验收** | 2026-11-04 落地：会话注册表 + 按标签换 `EditorState`（撤销栈各自隔离）+ per-session 持久化 + Go 侧 `dirtyByDoc` 逐文档映射 + 标签状态持久化（含未落盘草稿）+ 拖拽 / 右键菜单 / Tab Switcher / 5 条命令。**目视清单已补齐**：`docs/HANDOFF.md` §6 第 30~45 项（与 `docs/qa/visual-checklist.html` 严格同步，门禁守着）。**已验 3 项**（§6-31 标签栏形态、§6-33 标签切换状态保真、§6-45 重启恢复标签，2026-11-13 Linux 真机，含未落盘草稿恢复与磁盘文件未被写穿的最强证据）。**剩余为键盘类未验**：五条标签快捷键的实际按键响应（⌘T / ⌘⌥W / ⌘⇧T / ⌘⌥← / ⌘⌥→）与第 30 项（IME 合成期切标签，MD-11 P0 级）——根因是验证环境无输入注入能力。决策见 `docs/decisions/MD-2026-10-28-multi-tab.md` |
 | 14 | **无拼写检查（刻意不做）** | CodeMirror 的 lint 对 CJK 基本无效，中文写作场景是**伪需求**，故不引入。英文拼写需自行接第三方 lint 扩展 |
 | 15 | ✅ **导出模板已国际化** | 2026-11-10：`buildHtmlDocument()` 的 `<html lang>` 改为跟随界面语言（zh-CN / en-US / ja-JP），模板内已无其它用户可见文案；新增单测覆盖 |
 | 16 | **`App.vue` 行数余量 0（已压线）** | 装配层硬上限 **总行数** 150 行、当前 150 行（契约 5 实测；2026-10-28 P0 腾 6 行、P1 标签栏 4 行、P2 确认弹层 2 行，**余量已用尽**）。任何新增装配行都必须先腾行（下沉到 composables/），门禁口径是**总行数**（含注释与空行，比有效行更严） |

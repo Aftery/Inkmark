@@ -272,7 +272,7 @@
   --dialog-width-sm: min(360px, 86vw);  /* 输入类：单行问答（跳转到行 / 重命名） */
   --dialog-width-md: min(480px, 92vw);  /* 表格类：快捷键速查 */
   --dialog-width-lg: min(560px, 92vw);  /* 多栏类：设置面板 */
-  /* 稳定高度：条目少的面板（编辑器 2 项）与条目多的（外观 5 项）不再跳变。
+  /* 稳定高度：条目少的（编辑器 4 项）与条目多的（外观 6 项）不再跳变。
    * 用 min-height 而非 height：条目多时内容区自身滚动，面板不再继续变高。 */
   --dialog-min-height: min(420px, 62vh);
 
