@@ -134,6 +134,25 @@ jobs:
             libwebkit2gtk-4.1-dev \
             libsoup-3.0-dev
 
+      # wails.json 的 info.productVersion 是 macOS Info.plist / Windows 版本资源的来源，
+      # 它【不走 -ldflags】—— 仓库里那份只是「下次发布的版本号」，必须按本次 tag 改写。
+      # 否则运行时（main.version）与系统「关于 / 版本信息」显示两个版本号：
+      # v0.3.0 发布时就实测到这种分叉（运行时 0.3.0、Info.plist 仍 0.2.0，见 HANDOFF §7）。
+      # 用 node 改 JSON 而不是 sed：macOS BSD sed 与 GNU sed 语义不一致，matrix 里跨 runner 不可靠。
+      - name: 同步 wails.json 的 productVersion 到本次版本
+        shell: bash
+        env:
+          APP_VERSION: ${{ needs.version.outputs.value }}
+        run: |
+          node -e '
+            const fs = require("fs");
+            const p = "wails.json";
+            const cfg = JSON.parse(fs.readFileSync(p, "utf8"));
+            cfg.info.productVersion = process.env.APP_VERSION;
+            fs.writeFileSync(p, JSON.stringify(cfg, null, 2) + "\n");
+          '
+          node -e 'console.log("wails.json productVersion →", require("./wails.json").info.productVersion)'
+
       - name: 编译（注入 -ldflags 版本号）
         shell: bash
         env:
@@ -167,7 +186,7 @@ jobs:
                 '1) 本包用 webkit2gtk-4.1 构建，运行需系统已装 libwebkit2gtk-4.1-0 与 libgtk-3-0。' \
                 '   Debian/Ubuntu: sudo apt install libwebkit2gtk-4.1-0 libgtk-3-0' \
                 '2) 解包并运行：tar -xzf inkmark-linux-amd64.tar.gz && chmod +x inkmark && ./inkmark' \
-                '3) 导出 PDF 在本平台走系统打印（一键直出依赖 macOS WebKit/PDFKit）。' \
+                '3) 导出 PDF 本平台已一键直出（GTK 打印到文件，不弹打印对话框）。' \
                 > dist/inkmark-linux-amd64.txt
               ;;
           esac

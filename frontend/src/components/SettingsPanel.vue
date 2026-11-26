@@ -211,7 +211,7 @@ onMounted(() => {
 }
 .settings-panel {
   width: var(--dialog-width-lg);
-  /* 稳定高度：切换「外观」（6 项）/「编辑器」（2 项）时面板不再整体跳变。
+  /* 稳定高度：切换「外观」（6 项）/「编辑器」（4 项）时面板不再整体跳变。
    * 用 min-height 而非 height —— 条目多时内容区（.settings-content）自身滚动，
    * 面板不会被内容撑得更高，两种分类下外框尺寸完全一致。 */
   min-height: var(--dialog-min-height);

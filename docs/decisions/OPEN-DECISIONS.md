@@ -7,7 +7,7 @@
 | Date | Source | Open Item | Related Constraints | Current Leaning | Blocked By | Resolves When | Status |
 |------|--------|-----------|---------------------|-----------------|------------|---------------|--------|
 | 2026-10-28 | 评估报告 §3.2 | macOS 产物未签名 / 未公证（`release.yml` 无 `codesign` / `notarize` 步骤，实测 grep 命中 0） | Gatekeeper 会拦，用户需右键打开或 `xattr -d com.apple.quarantine`；正经分发需 Apple 开发者账号（$99/年） | 倾向「先补 codesign 再谈 notarize」——签名可自助，公证需账号 | 需 Apple 开发者账号与真实证书（外部条件） | 取得开发者账号后补齐 workflow 的签名与公证步骤 | OPEN |
-| 2026-10-28 | 评估报告 §3.1 | 29 项目视清单大部分未过（`HANDOFF §6`，`verify-visual-checklist.mjs` 实测 29 项 / 漂移 0） | 自动化只验到「根节点渲染 + 标题栏/编辑区已挂载 + 零异常」；窗口拖拽 / 红绿灯留白 / 毛玻璃 / 斜杠面板等交互必须人眼 | 已有可执行产物 `docs/qa/visual-checklist.html`（单文件、双击即开），纯执行工作 | 需人工在真实窗口逐项操作并导出记录 | 29 项全部在 `docs/qa/VERIFICATION-LOG.md` 留下「通过 / 不通过 / 不适用」结论 | OPEN |
+| 2026-10-28 | 评估报告 §3.1 | 45 项目视清单大部分未过（`HANDOFF §6`，`verify-visual-checklist.mjs` 实测 45 项 / 漂移 0） | 自动化只验到「根节点渲染 + 标题栏/编辑区已挂载 + 零异常」；窗口拖拽 / 红绿灯留白 / 毛玻璃 / 斜杠面板等交互必须人眼 | 已有可执行产物 `docs/qa/visual-checklist.html`（单文件、双击即开），纯执行工作。2026-11-26 更新：清单已随多标签扩到 45 项；2026-11-13 Linux 真机已过 6 项（§6-4/6/11/31/33/45），剩余主要卡在键盘类项（验证环境无输入注入） | 需人工在真实窗口逐项操作并导出记录 | 45 项全部在 `docs/qa/VERIFICATION-LOG.md` 留下「通过 / 不通过 / 不适用」结论 | OPEN |
 
 ## 已关闭
 

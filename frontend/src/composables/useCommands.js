@@ -271,8 +271,9 @@ export function useCommands(deps) {
       // 打印：Wails v2.16 的 WKWebView **没有实现 window.print()**（调用是静默
       // 空操作，不抛异常也不出任何界面 —— 真机验收 #13「快捷键没反应、菜单里
       // 点击打印也没反应」的根因）。桌面端唯一可用的「打印」= 导出 PDF：
-      // Go 侧离屏 WKWebView 分页渲染 + 系统保存对话框，与 ⌘⇧P 同一条链路。
-      // 非 darwin / 浏览器预览的降级链在 docState.exportPdf 内部（window.print）。
+      // Go 侧离屏渲染 + 系统保存对话框（macOS 走 WKWebView 分页、Linux 走 GTK
+      // 打印到文件），与 ⌘⇧P 同一条链路。
+      // 仅 Windows / 浏览器预览的降级链在 docState.exportPdf 内部（window.print）。
       'file.print': () => { session.flushPreview(); docState.exportPdf() },
       'file.exportHtml': () => { session.flushPreview(); docState.exportHtml() },
       'file.exportPdf': () => { session.flushPreview(); docState.exportPdf() },
